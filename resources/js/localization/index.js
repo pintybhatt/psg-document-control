@@ -17,8 +17,10 @@ export function createLocalization() {
 
     const language = ref(Object.hasOwn(dictionaries, savedLanguage) ? savedLanguage : 'en');
 
-    function translate(key) {
-        return dictionaries[language.value][key] ?? en[key] ?? key;
+    function translate(key, parameters = {}) {
+        const message = dictionaries[language.value][key] ?? en[key] ?? key;
+
+        return message.replace(/\{(\w+)\}/g, (placeholder, name) => parameters[name] ?? placeholder);
     }
 
     function setLanguage(value) {
