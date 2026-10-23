@@ -3,9 +3,10 @@ import App from './App.vue';
 import { createLocalization } from './localization/index.js';
 
 export function mountApplication(element) {
-    const application = createApp(App, JSON.parse(element.dataset.props));
+    const props = JSON.parse(element.dataset.props);
+    const application = createApp(App, props);
 
-    application.use(createLocalization());
+    application.use(createLocalization(props.initialLanguage));
     application.mount(element);
 
     return application;

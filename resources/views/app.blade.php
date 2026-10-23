@@ -19,6 +19,14 @@
             'page' => $page,
             'navigation' => $navigation,
             'context' => ['company' => ['id' => null, 'name' => 'Phonesack Group'], 'site' => null],
+            'initialLanguage' => session('language', auth()->user()?->preferred_language ?? 'en'),
+            'auth' => [
+                'loginUrl' => route('login.store', [], false),
+                'logoutUrl' => route('logout', [], false),
+                'csrfToken' => csrf_token(),
+                'email' => old('email', ''),
+                'errors' => collect($errors->messages())->map(fn (array $messages): string => $messages[0]),
+            ],
         ]) }}"></div>
         <noscript>
             <p>Enable JavaScript to open DCMS. / ກະລຸນາເປີດ JavaScript ເພື່ອໃຊ້ DCMS.</p>

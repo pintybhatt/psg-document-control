@@ -2,13 +2,19 @@
 
 namespace Tests\Feature;
 
+use App\Models\User;
+use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Tests\TestCase;
 
 class ApplicationShellTest extends TestCase
 {
+    use LazilyRefreshDatabase;
+
     public function test_all_workspace_sections_render_the_vue_shell(): void
     {
         $this->withoutVite();
+        $user = User::factory()->create();
+        $this->actingAs($user)->withSession(['auth.session_version' => $user->session_version]);
 
         $pages = [
             'dashboard',

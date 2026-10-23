@@ -6,7 +6,7 @@ const localizationKey = Symbol('localization');
 const dictionaries = { en, lo };
 const storageKey = 'dcms.language';
 
-export function createLocalization() {
+export function createLocalization(initialLanguage = 'en') {
     let savedLanguage;
 
     try {
@@ -15,7 +15,7 @@ export function createLocalization() {
         // Storage can be unavailable in restricted browser sessions.
     }
 
-    const language = ref(Object.hasOwn(dictionaries, savedLanguage) ? savedLanguage : 'en');
+    const language = ref(Object.hasOwn(dictionaries, savedLanguage) ? savedLanguage : (Object.hasOwn(dictionaries, initialLanguage) ? initialLanguage : 'en'));
 
     function translate(key, parameters = {}) {
         const message = dictionaries[language.value][key] ?? en[key] ?? key;

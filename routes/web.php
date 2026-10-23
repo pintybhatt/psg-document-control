@@ -1,10 +1,19 @@
 <?php
 
+use App\Http\Controllers\AuthenticatedSessionController;
+use App\Http\Controllers\CurrentUserController;
+use App\Http\Middleware\EnsureActiveUserSession;
+use App\Http\Middleware\EnsureDevelopmentEnvironment;
 use Illuminate\Contracts\View\View;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
     return view('welcome');
+});
+
+Route::middleware('guest:web')->group(function (): void {
+    Route::get('/login', [AuthenticatedSessionController::class, 'create'])->name('login');
+    Route::post('/login', [AuthenticatedSessionController::class, 'store'])->name('login.store');
 });
 
 $pages = [
@@ -18,11 +27,15 @@ $pages = [
 ];
 
 foreach ($pages as $page => $path) {
-    Route::view($path, 'app', ['page' => $page, 'pages' => $pages])->name('dcms.'.$page);
+    Route::view($path, 'app', ['page' => $page, 'pages' => $pages])
+        ->middleware(['auth:web', EnsureActiveUserSession::class])->name('dcms.'.$page);
 }
 
 Route::get('/dev/ui-components', function () use ($pages): View {
-    abort_unless(app()->environment(['local', 'testing']), 404);
-
     return view('app', ['page' => 'ui-preview', 'pages' => $pages]);
-})->name('dcms.ui-preview');
+})->middleware([EnsureDevelopmentEnvironment::class, 'auth:web', EnsureActiveUserSession::class])->name('dcms.ui-preview');
+
+Route::middleware(['auth:web', EnsureActiveUserSession::class])->group(function (): void {
+    Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
+    Route::get('/api/v1/user', CurrentUserController::class)->name('api.v1.user');
+});

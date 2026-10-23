@@ -2,12 +2,14 @@
 import { ref } from 'vue';
 import AppIcon from '../components/AppIcon.vue';
 import LanguageSwitcher from '../components/LanguageSwitcher.vue';
+import LogoutButton from '../components/LogoutButton.vue';
 import { useLocalization } from '../localization/index.js';
 
 defineProps({
     page: { type: String, required: true },
     navigation: { type: Array, required: true },
     context: { type: Object, required: true },
+    auth: { type: Object, default: null },
 });
 
 const { t } = useLocalization();
@@ -54,7 +56,10 @@ function closeNavigation() {
                             <p class="truncate text-xs text-slate-500">{{ context.site?.name ?? t('noSite') }}</p>
                         </div>
                     </div>
-                    <LanguageSwitcher />
+                    <div class="flex shrink-0 items-center gap-2 sm:gap-4">
+                        <LanguageSwitcher />
+                        <LogoutButton v-if="auth" :auth="auth" />
+                    </div>
                 </div>
                 <nav id="mobile-navigation" v-show="navigationOpen" :aria-label="t('navigation')" class="grid gap-1 border-t border-slate-200 p-3 sm:grid-cols-2 lg:hidden" @keydown.esc="closeNavigation">
                     <a v-for="item in navigation" :key="item.key" :href="item.href" :aria-current="page === item.key ? 'page' : undefined" class="flex items-center gap-3 rounded-lg p-3 text-sm hover:bg-slate-100" :class="page === item.key ? 'bg-teal-50 font-semibold text-teal-800' : 'text-slate-700'">

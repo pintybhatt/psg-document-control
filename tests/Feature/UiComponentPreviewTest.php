@@ -2,13 +2,19 @@
 
 namespace Tests\Feature;
 
+use App\Models\User;
+use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Tests\TestCase;
 
 class UiComponentPreviewTest extends TestCase
 {
+    use LazilyRefreshDatabase;
+
     public function test_preview_renders_in_local_and_testing_environments(): void
     {
         $this->withoutVite();
+        $user = User::factory()->create();
+        $this->actingAs($user)->withSession(['auth.session_version' => $user->session_version]);
 
         foreach (['local', 'testing'] as $environment) {
             $this->app['env'] = $environment;
