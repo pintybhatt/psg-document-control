@@ -49,7 +49,7 @@ class AssignSecurityAdministrator extends Command
                 $role = Role::query()->where('code', 'SECURITY_ADMINISTRATOR')->where('active', true)->first();
                 if (! $user || ! $role || ! $scope->isActive() || ! $role->scope->covers($scope)
                     || array_diff(PermissionCatalog::ADMINISTRATOR_KEYS, $role->permissions()->where('active', true)->pluck('key')->all()) !== []
-                    || array_diff($role->permissions()->pluck('key')->all(), PermissionCatalog::ADMINISTRATOR_KEYS) !== []) {
+                    || array_diff($role->permissions()->pluck('key')->all(), [...PermissionCatalog::ADMINISTRATOR_KEYS, ...PermissionCatalog::MEMBERSHIP_ADMINISTRATOR_KEYS]) !== []) {
                     throw ValidationException::withMessages(['bootstrap' => 'Initialize definitions and verify the active account, role permissions and scope first.']);
                 }
                 $scope->persist();

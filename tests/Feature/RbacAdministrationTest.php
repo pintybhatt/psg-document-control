@@ -241,4 +241,17 @@ class RbacAdministrationTest extends TestCase
         $this->assertDatabaseMissing('user_role_assignments', ['user_id' => $target->id]);
         $this->assertDatabaseCount('rbac_audits', 0);
     }
+
+    public function test_role_resource_edit_controls_use_the_validated_administration_scope(): void
+    {
+        $this->definitions();
+        $scope = AuthorizationScope::context('global')->persist();
+        $actor = User::factory()->create();
+        $this->grant($actor, $scope, PermissionCatalog::ADMINISTRATOR_KEYS);
+        $this->signIn($actor);
+
+        $roleId = $this->postJson('/api/v1/roles', $this->roleData($scope))->assertCreated()->assertJsonPath('data.editable', true)->json('data.id');
+        $this->getJson($this->scopedUrl('roles/'.$roleId, $scope))->assertOk()->assertJsonPath('data.editable', true);
+        $this->getJson($this->scopedUrl('roles', $scope))->assertOk()->assertJsonFragment(['code' => 'EXAMPLE_ROLE', 'editable' => true]);
+    }
 }

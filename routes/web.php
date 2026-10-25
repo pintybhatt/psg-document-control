@@ -3,6 +3,7 @@
 use App\Http\Controllers\AuthenticatedSessionController;
 use App\Http\Controllers\AuthorizationContextController;
 use App\Http\Controllers\CurrentUserController;
+use App\Http\Controllers\MembershipController;
 use App\Http\Controllers\RoleAssignmentController;
 use App\Http\Controllers\RoleController;
 use App\Http\Middleware\EnsureActiveUserSession;
@@ -42,6 +43,13 @@ Route::middleware(['auth:web', EnsureActiveUserSession::class])->group(function 
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
     Route::get('/api/v1/user', CurrentUserController::class)->name('api.v1.user');
     Route::prefix('api/v1')->name('api.v1.')->group(function (): void {
+        Route::get('organization-contexts', [MembershipController::class, 'operationalContexts'])->name('organization-contexts');
+        Route::get('membership-units', [MembershipController::class, 'units'])->name('membership-units');
+        Route::get('membership-users', [MembershipController::class, 'users'])->name('membership-users');
+        Route::get('memberships', [MembershipController::class, 'index'])->name('memberships.index');
+        Route::post('memberships', [MembershipController::class, 'store'])->name('memberships.store');
+        Route::patch('memberships/{membership}', [MembershipController::class, 'update'])->name('memberships.update');
+        Route::delete('memberships/{membership}', [MembershipController::class, 'destroy'])->name('memberships.destroy');
         Route::get('authorization/contexts', [AuthorizationContextController::class, 'index'])->name('authorization.contexts');
         Route::get('role-assignment-users', [AuthorizationContextController::class, 'users'])->name('assignment-users');
         Route::get('permissions', [RoleController::class, 'permissions'])->name('permissions');

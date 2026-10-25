@@ -26,7 +26,7 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         foreach (PermissionCatalog::definitions() as $key => $definition) {
-            Gate::define($key, fn (User $user, ?AuthorizationScope $scope = null): bool => $scope !== null && app(AccessControl::class)->allows($user, $key, $scope));
+            Gate::define($key, fn (User $user, ?AuthorizationScope $scope = null, ?int $departmentId = null): bool => $scope !== null && app(AccessControl::class)->allows($user, $key, $scope, $departmentId));
         }
     }
 }

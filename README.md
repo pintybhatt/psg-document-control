@@ -129,7 +129,7 @@ php artisan rbac:bootstrap-admin --email='VERIFIED EXISTING EMAIL' --scope=site 
 
 Company scope requires `--scope=company --company=VERIFIED_COMPANY_ID` and no site. Global scope requires **both** `--scope=global --confirm-global`, no company/site IDs, and the operator label. There is no implicit global default. Replace all placeholders with reviewed values; do not copy organization IDs from another application.
 
-The command requires the active Security Administrator template to contain exactly the initial administrative capabilities and refuses unknown/inactive users, mismatched scopes, unconfirmed global access and restoration of a revoked assignment. The same active assignment is a non-destructive no-op; once an effective administrator exists for the requested context, another initial grant must use authorized Administration instead. Transactions and the RBAC mutation lock protect initialization. The append-only audit records the CLI source, operator label, assignment, scope and timestamp; operators must retain their normal host-level execution audit as well. No credentials are created or changed, and no confidential/document capability is granted.
+The command requires the active Security Administrator template to contain all five initial administrative capabilities and only those capabilities plus the optional membership-administration pair and refuses unknown/inactive users, mismatched scopes, unconfirmed global access and restoration of a revoked assignment. The same active assignment is a non-destructive no-op; once an effective administrator exists for the requested context, another initial grant must use authorized Administration instead. Transactions and the RBAC mutation lock protect initialization. The append-only audit records the CLI source, operator label, assignment, scope and timestamp; operators must retain their normal host-level execution audit as well. No credentials are created or changed, and no confidential/document capability is granted.
 
 No real role-definition initialization, account bootstrap or role-assignment command was run against the development database during Phase 2.2C. All privilege fixtures used for verification were restricted to isolated test databases.
 
@@ -150,7 +150,7 @@ All endpoints use the existing active/revocable browser session and Laravel CSRF
 
 Every scoped request supplies `scope_type` and the applicable `company_id`/`site_id`; irrelevant, missing or mismatched organization identifiers are rejected. The server resolves scope independently of Vue. User/role IDs must exist, and an active account/role is required for assignment. Self-assignment/revocation and changes to the security settings of one's own assigned roles are forbidden; display metadata can be edited when otherwise authorized.
 
-Identity lookup has a deliberate Phase 2.2D boundary: global `users.view` can find active accounts group-wide; company authority can find existing active scoped identities within that company; site-only authority can find identities already assigned at that exact site. Local administrators cannot discover or onboard unrelated/unassigned accounts. Central administration can establish the first scoped assignment. Role assignments express authority, not verified employment/department membership; formal user/site/department membership is deferred to Phase 2.2D.
+Identity lookup has a deliberate Phase 2.2D boundary: global `users.view` can find active accounts group-wide; company authority can find existing active scoped identities within that company; site-only authority can find identities already assigned at that exact site. Local administrators cannot discover or onboard unrelated/unassigned accounts. Central administration can establish the first scoped assignment. Role assignments express authority, not verified employment/department membership. Phase 2.2D-1 below adds explicit organizational membership and extends eligible-account lookup to effective members within the same authorized boundary; the legacy scoped identity lookup remains available for reviewed onboarding.
 
 Administration uses the existing shell, language switcher, bilingual database labels, reusable tables/forms/dialogs/toasts, pagination, bounded identity/role lookup, and explicit confirmation displaying the target account, role and selected scope. UI capability hints hide unavailable controls; inherited definitions and one's own role security settings are read-only. Stale authority is denied by the API and mutation controls are removed after authorization failures. Neither navigation visibility nor client capabilities authorize an operation.
 
@@ -166,4 +166,80 @@ The invariant protects controlled role/permission edits, assignment revocation/d
 
 The schema and integrity/security suites were executed using isolated SQLite and a disposable MySQL 8.4.11 server initialized in `storage/framework/testing/rbac-mysql`, with a dedicated Unix socket and networking disabled. The existing company databases and system MySQL data directory were not used. SQLite uses equivalent scope-shape triggers because it cannot add a table CHECK after creation; MySQL 8.4 uses a native CHECK. Both retain the composite site/company foreign key and strict unique scope/assignment keys. The disposable instance is stopped and removed after testing.
 
-Dashboard and document placeholder pages intentionally remain authenticated-only. They expose no document operations. Actual operations must add explicit permission and resource-level company/site/department/confidentiality guards when implemented. Phase 2.2D must introduce verified user/site/department membership, department scope and resource authorization, review identity onboarding and inactive-parent maintenance, and load-test the final-administrator checks for the intended organization/user volume. Full user/company maintenance, document workflows and confidential-document policies remain unimplemented. Manual browser/screen-reader and Lao editorial review remain review tasks; automated UI tests use jsdom.
+Dashboard and document placeholder pages intentionally remain authenticated-only. They expose no document operations. Actual operations must add explicit permission and resource-level company/site/department/confidentiality guards when implemented. Phase 2.2D-1 implements explicit company/site/department memberships below. Resource authorization and confidentiality remain Phase 2.2D-2 work; production-scale testing of final-administrator checks remains an operational review task. Full user/company maintenance, document workflows and confidential-document policies remain unimplemented. Manual browser/screen-reader and Lao editorial review remain review tasks; automated UI tests use jsdom.
+
+
+## Organization membership — Phase 2.2D-1
+
+### Storage and lifecycle
+
+`organization_memberships` records an existing user, membership level (`company`, `site`, `department`), the company/site/department IDs, an active flag, trusted creator/updater/revoker IDs, revocation timestamp and normal timestamps. No global membership level exists. Company foreign keys and composite site/company and department/site/company foreign keys use restrictive actions. The additive migration gives departments a unique `(id, site_id, company_id)` parent key without changing existing organization records.
+
+The database generates `unit_key` from the membership level and unit ID. A second generated `current_key` equals that key while the row is not revoked and becomes NULL on revocation. Unique `(user_id, current_key)` prevents duplicate current memberships, including inactive memberships. Revoked versions retain independent IDs and history. MySQL CHECK constraints and equivalent SQLite triggers enforce valid level/ID shape and complete revocation metadata with inactive status.
+
+Identity and creator fields are immutable through normal model writes. Revoked records cannot be restored, edited or deleted through models/APIs. An authorized administrator can make a new grant for the same user/unit only with explicit `confirm_regrant=true`; the old row remains revoked. Updating `active` temporarily suspends/reactivates a non-revoked row without changing affiliation. Inactive users or organizational parents make membership ineffective without altering its historical flags. Reactivation requires an active account and all applicable units.
+
+`membership_audits` appends assignment, modification and revocation snapshots with the acting user, target user, membership and timestamps. Changes and audit writes share the existing serialized RBAC transaction; audit failure rolls back the affiliation change. Audit fields are rejected from client input. Audit models reject updates/deletes and have no mutation API. Trusted maintenance must use `ManageMemberships`; raw SQL can bypass model immutability and application auditing, although database ownership/uniqueness/shape constraints remain enforced.
+
+### RBAC plus membership
+
+`MembershipAccess` evaluates fresh database state, and `AccessControl` combines it with current role grants. Membership never creates a role or permission, and role assignment never creates membership. There is no membership or permission cache that can preserve revoked access. Changes take effect on the next evaluation/request in an existing session; in-flight work is not retroactively cancelled.
+
+| Operational context | Required membership | Role authorization |
+| --- | --- | --- |
+| Company | Exact company-level membership | Permission effective at that company through an explicit company/global assignment |
+| Site | Exact site-level membership | Permission effective at that site under existing RBAC inheritance |
+| Department | Exact department membership, with matching company/site | Permission effective at the owning site; the caller supplies the department ID |
+| Global | Never an operational membership context | Always denied for operational access |
+
+Membership levels do not substitute for one another: company membership does not replace site/department membership, site membership does not replace company/department membership, and department membership does not widen to its site or a sibling department. Multiple explicit memberships are supported. Existing global → company → site **role** inheritance is unchanged.
+
+`permissions()` and `allows()` return effective capabilities. `allowsOperational()` additionally rejects administrative keys. Laravel Gates accept `[scope, departmentId]` where department scoping is required. `grantedPermissions()` reports only underlying role configuration, for permission-delegation checks; it is not an operational authorization decision. Administrative configuration/delegation still requires explicit administrative permissions and may configure only catalog permissions already granted to the actor. Future resource handlers must derive company/site/department context from the resource, rather than trusting client IDs or a prior context selection.
+
+A fixed allowlist of the five existing identity/role-administration keys plus `memberships.view` and `memberships.manage` is evaluated without ordinary membership. This preserves explicitly scoped central and local security administration, including first-member onboarding by central identity administrators. It does not grant any key, expand an assignment's scope, or exempt an operational/document permission. The existing final-administrator invariant continues to use the original five capabilities, so membership revocation cannot lock out that workflow.
+
+### Controlled capability rollout
+
+The catalog adds `memberships.view`, `memberships.manage` and `organization.access`. The latter permits use of an assigned organization context only; it grants no document or business-operation capability. No existing role gains any of these keys on ordinary `rbac:initialize` reruns. Migrations and normal seeding create no memberships, assignments or organization data. Existing roles are deliberately not treated as verified memberships.
+
+After reviewing the Security Administrator definition and every affected assignment, an authorized host operator can explicitly enable the administrative pair:
+
+```sh
+php artisan rbac:initialize --enable-membership-administration --operator='VERIFIED OPERATOR LABEL' --confirm-global --no-interaction
+```
+
+This adds only the two membership-administration keys to the active global Security Administrator definition. Its existing five administrative capabilities must be active. The global confirmation acknowledges that changing a shared definition affects all existing assignments at their existing scopes. It creates no accounts/assignments/memberships, does not widen scopes, and is idempotently audited in `rbac_audits`.
+
+Operational context permission has a separate reviewed rollout. To add only the fixed `organization.access` catalog key to a verified existing active role:
+
+```sh
+php artisan rbac:initialize --organization-context-role=VERIFIED_EXISTING_ROLE_CODE --operator='VERIFIED OPERATOR LABEL' --confirm-global --no-interaction
+```
+
+This is a separate, audited opt-in, never combined with the administrative rollout. Review all affected users and role scope before use. No membership is created; a holder still has no operational context access without exact matching membership. Use a reviewed operational or delegation role as appropriate. The initial administrator bootstrap continues to reject templates augmented with operational keys. Normal web delegation retains its permission-subset checks. Neither command accepts arbitrary permission keys or confers document access.
+
+These commands were exercised only inside isolated test databases. No real capability-rollout, administrator bootstrap, membership assignment or organization initialization was executed against the development database.
+
+### APIs and Administration UI
+
+All endpoints retain active/revocable session authentication and CSRF enforcement. Guests receive 401 and actors lacking the applicable permission receive 403. Every administrative request supplies a selected `scope_type` and applicable `company_id`/`site_id`. Assignment targets use separate `unit_type`, `unit_company_id`, `unit_site_id` and `unit_department_id` fields, preventing confusion between administration scope and target affiliation.
+
+| Endpoint | Required authority / behavior |
+| --- | --- |
+| `GET /api/v1/memberships` | `memberships.view`; paginated current and historical memberships within selected scope, including effective status |
+| `GET /api/v1/membership-units` | `memberships.view`; bounded, searchable active units in scope; site administrators cannot select company membership |
+| `GET /api/v1/membership-users` | `memberships.manage` plus `users.view`; eligible active identities, excluding the actor |
+| `POST /api/v1/memberships` | `memberships.manage` plus `users.view`; valid active target and units, scope containment, non-self target and explicit regrant confirmation when applicable |
+| `PATCH /api/v1/memberships/{membership}` | `memberships.manage`; update active status only, within scope, non-self and non-revoked |
+| `DELETE /api/v1/memberships/{membership}` | `memberships.manage`; terminal revocation within scope, non-self; preserves history |
+| `GET /api/v1/organization-contexts` | Authenticated; returns only the caller's effective memberships that also pass `organization.access`; no content or document operations |
+
+Company administrators can manage company memberships and site/department memberships inside that company; site administrators can manage only their site's site/department memberships. Selected scopes never override role authority. Global identity visibility can find unassigned active users for onboarding; local lookup uses effective memberships or the existing scoped identity anchors, never an unrestricted account directory. A legacy role anchor is discoverability only, not evidence of effective operational membership. Global administrators can revoke historical memberships under inactive parents by selecting global scope; reactivation remains forbidden until the account and units are active.
+
+Administration adds a distinct User Organization Membership section with English/Lao names, company/site/department columns, membership level, effective/inactive/revoked badges, pagination, bounded account/unit search, active-status updates, terminal revocation, explicit regrant choice and target-specific confirmation. Read-only actors do not load account directories. Scope changes clear candidates and dialogs; stale/unauthorized responses remove mutation controls. Backend checks remain authoritative. Validated administration scope is passed directly to role/membership resources so their UI control hints survive Form Request serialization.
+
+### Verification and Phase 2.2D-2 boundary
+
+Verification uses isolated SQLite and disposable MySQL 8.4.11 with a repository-local data directory, private Unix socket and networking disabled. It covers the full PHP suite, fresh migrations, membership ownership/shape/uniqueness constraints, audit rollback and security regressions. The new migration's rollback and reapplication are also tested on that disposable instance; no existing MySQL database or development data is used. Frontend tests use jsdom; browser/accessibility and Lao editorial review remain manual review tasks.
+
+Dashboard and placeholder document pages remain authenticated-only and contain no document operations. Document confidentiality, document-content policies, registration/control workflows, resource-specific policies and department-based document rules remain Phase 2.2D-2 work. That phase must derive context from actual resources, use the central effective checks, and separately define confidentiality and broader company/department operation rules. No blanket administrator or membership bypass is provided here. Production-scale query/lock performance and multi-process concurrency remain deployment review work.

@@ -13,7 +13,7 @@ use Illuminate\Support\Collection;
 class AccessControl
 {
     /** @return list<string> */
-    public function permissions(User $user, AuthorizationScope $scope): array
+    public function grantedPermissions(User $user, AuthorizationScope $scope): array
     {
         if (! User::query()->whereKey($user->id)->where('active', true)->exists() || ! $scope->isActive()) {
             return [];
@@ -35,9 +35,24 @@ class AccessControl
         return array_values(array_unique($keys));
     }
 
-    public function allows(User $user, string $permission, AuthorizationScope $scope): bool
+    /** @return list<string> */
+    public function permissions(User $user, AuthorizationScope $scope, ?int $departmentId = null): array
     {
-        return PermissionCatalog::available($permission) && in_array($permission, $this->permissions($user, $scope), true);
+        $membership = app(MembershipAccess::class);
+
+        return array_values(array_filter($this->grantedPermissions($user, $scope),
+            fn (string $key): bool => PermissionCatalog::administrative($key)
+                ? $departmentId === null : $membership->matches($user, $scope, $departmentId)));
+    }
+
+    public function allows(User $user, string $permission, AuthorizationScope $scope, ?int $departmentId = null): bool
+    {
+        return PermissionCatalog::available($permission) && in_array($permission, $this->permissions($user, $scope, $departmentId), true);
+    }
+
+    public function allowsOperational(User $user, string $permission, AuthorizationScope $scope, ?int $departmentId = null): bool
+    {
+        return ! PermissionCatalog::administrative($permission) && $this->allows($user, $permission, $scope, $departmentId);
     }
 
     public function authorize(User $user, string $permission, AuthorizationScope $scope): void
@@ -66,7 +81,7 @@ class AccessControl
         }
         $companyAccess = $scope->company_id !== null && $this->allows($actor, 'users.view', AuthorizationScope::context('company', $scope->company_id));
 
-        return $query->whereHas('roleAssignments', function (Builder $query) use ($companyAccess, $scope): void {
+        $legacyIdentities = User::query()->whereHas('roleAssignments', function (Builder $query) use ($companyAccess, $scope): void {
             $query->where('active', true)->whereHas('role', fn (Builder $role): Builder => $role->where('active', true))
                 ->whereHas('scope', function (Builder $assignmentScope) use ($companyAccess, $scope): void {
                     if ($companyAccess) {
@@ -75,7 +90,11 @@ class AccessControl
                         $assignmentScope->where('scope_key', $scope->scope_key);
                     }
                 });
-        });
+        })->select('users.id');
+        $members = app(MembershipAccess::class)->effectiveQuery()->where('company_id', $scope->company_id)
+            ->when(! $companyAccess, fn (Builder $query): Builder => $query->where('site_id', $scope->site_id))->select('user_id');
+
+        return $query->where(fn (Builder $query): Builder => $query->whereIn('id', $legacyIdentities)->orWhereIn('id', $members));
     }
 
     /** @return Collection<int, AuthorizationScope> */

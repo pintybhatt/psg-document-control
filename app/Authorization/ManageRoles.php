@@ -45,7 +45,7 @@ class ManageRoles
     /** @param list<string> $keys */
     private function validateDelegation(User $actor, AuthorizationScope $scope, array $keys): void
     {
-        $held = $this->access->permissions($actor, $scope);
+        $held = $this->access->grantedPermissions($actor, $scope);
         foreach ($keys as $key) {
             if (! PermissionCatalog::available($key) || ! Permission::query()->where('key', $key)->where('active', true)->exists()) {
                 throw ValidationException::withMessages(['permission_keys' => 'rbacInvalidPermission']);

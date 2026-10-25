@@ -6,10 +6,20 @@ class PermissionCatalog
 {
     public const ADMINISTRATOR_KEYS = ['users.view', 'roles.view', 'roles.manage', 'assignments.view', 'assignments.manage'];
 
+    public const MEMBERSHIP_ADMINISTRATOR_KEYS = ['memberships.view', 'memberships.manage'];
+
+    public static function administrative(string $key): bool
+    {
+        return in_array($key, [...self::ADMINISTRATOR_KEYS, ...self::MEMBERSHIP_ADMINISTRATOR_KEYS], true);
+    }
+
     /** @return array<string, array{area: string, name_en: string, name_lo: string, available: bool}> */
     public static function definitions(): array
     {
         return [
+            'memberships.view' => ['area' => 'memberships', 'name_en' => 'View organization memberships', 'name_lo' => 'ເບິ່ງສະມາຊິກອົງກອນ', 'available' => true],
+            'memberships.manage' => ['area' => 'memberships', 'name_en' => 'Manage organization memberships', 'name_lo' => 'ຈັດການສະມາຊິກອົງກອນ', 'available' => true],
+            'organization.access' => ['area' => 'organization', 'name_en' => 'Use an assigned organization context', 'name_lo' => 'ໃຊ້ຂອບເຂດອົງກອນທີ່ໄດ້ຮັບມອບໝາຍ', 'available' => true],
             'users.view' => ['area' => 'users', 'name_en' => 'View eligible account identities', 'name_lo' => 'ເບິ່ງບັນຊີທີ່ມີສິດ', 'available' => true],
             'users.manage' => ['area' => 'users', 'name_en' => 'Manage accounts (planned)', 'name_lo' => 'ຈັດການບັນຊີ (ຢູ່ໃນແຜນ)', 'available' => false],
             'roles.view' => ['area' => 'roles', 'name_en' => 'View roles and permissions', 'name_lo' => 'ເບິ່ງບົດບາດ ແລະ ສິດ', 'available' => true],

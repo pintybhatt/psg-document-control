@@ -19,7 +19,6 @@ class RoleController extends Controller
     {
         $scope = $request->scopeContext();
         $access->authorize($request->user(), 'roles.view', $scope);
-        $request->attributes->set('rbac_scope_key', $scope->scope_key);
 
         $query = $access->visibleRoles($scope)->with(['permissions', 'scope']);
         if ($request->filled('q')) {
@@ -27,7 +26,10 @@ class RoleController extends Controller
             $query->where(fn ($query) => $query->where('code', 'like', $term)->orWhere('name_en', 'like', $term)->orWhere('name_lo', 'like', $term));
         }
 
-        return RoleResource::collection($query->orderBy('code')->paginate($request->integer('per_page', 10)));
+        $resources = RoleResource::collection($query->orderBy('code')->paginate($request->integer('per_page', 10)));
+        $resources->collection->each(fn (RoleResource $resource): RoleResource => $resource->forScope($scope));
+
+        return $resources;
     }
 
     public function show(RbacScopeRequest $request, Role $role, AccessControl $access): RoleResource
@@ -35,34 +37,31 @@ class RoleController extends Controller
         $scope = $request->scopeContext();
         $access->authorize($request->user(), 'roles.view', $scope);
         abort_unless($role->scope->covers($scope), 403, 'rbacForbidden');
-        $request->attributes->set('rbac_scope_key', $scope->scope_key);
 
-        return new RoleResource($role->load(['permissions', 'scope']));
+        return (new RoleResource($role->load(['permissions', 'scope'])))->forScope($scope);
     }
 
     public function store(StoreRoleRequest $request, ManageRoles $manager): RoleResource
     {
         $scope = $request->scopeContext();
         $role = $manager->saveRole($request->user(), $scope, $request->validated());
-        $request->attributes->set('rbac_scope_key', $scope->scope_key);
 
-        return new RoleResource($role);
+        return (new RoleResource($role))->forScope($scope);
     }
 
     public function update(StoreRoleRequest $request, Role $role, ManageRoles $manager): RoleResource
     {
         $scope = $request->scopeContext();
         $role = $manager->saveRole($request->user(), $scope, $request->validated(), $role);
-        $request->attributes->set('rbac_scope_key', $scope->scope_key);
 
-        return new RoleResource($role);
+        return (new RoleResource($role))->forScope($scope);
     }
 
     public function permissions(RbacScopeRequest $request, AccessControl $access): JsonResponse
     {
         $scope = $request->scopeContext();
         $access->authorize($request->user(), 'roles.view', $scope);
-        $held = $access->permissions($request->user(), $scope);
+        $held = $access->grantedPermissions($request->user(), $scope);
         $permissions = Permission::query()->whereIn('key', array_keys(PermissionCatalog::definitions()))->orderBy('area')->orderBy('key')->get()
             ->map(fn (Permission $permission): array => [
                 'key' => $permission->key, 'area' => $permission->area, 'name_en' => $permission->name_en, 'name_lo' => $permission->name_lo,

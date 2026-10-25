@@ -17,7 +17,7 @@ class RoleAssignmentResource extends JsonResource
             'scope_key' => $this->scope->scope_key, 'active' => $this->active,
             'revocable' => $this->user_id !== $request->user()->id
                 && app(AccessControl::class)->allows($request->user(), 'assignments.manage', $this->scope)
-                && array_diff($this->role->permissions()->pluck('key')->all(), app(AccessControl::class)->permissions($request->user(), $this->scope)) === [],
+                && array_diff($this->role->permissions()->pluck('key')->all(), app(AccessControl::class)->grantedPermissions($request->user(), $this->scope)) === [],
         ];
     }
 }

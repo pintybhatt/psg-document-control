@@ -33,6 +33,9 @@
                 'permissions' => route('api.v1.permissions', [], false),
                 'assignments' => route('api.v1.assignments.index', [], false),
                 'users' => route('api.v1.assignment-users', [], false),
+                'memberships' => route('api.v1.memberships.index', [], false),
+                'membershipUnits' => route('api.v1.membership-units', [], false),
+                'membershipUsers' => route('api.v1.membership-users', [], false),
             ],
         ]) }}"></div>
         <noscript>

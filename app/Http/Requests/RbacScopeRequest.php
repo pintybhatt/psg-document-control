@@ -18,6 +18,8 @@ class RbacScopeRequest extends FormRequest
             'api.v1.assignments.index' => 'assignments.view',
             'api.v1.assignments.store', 'api.v1.assignments.destroy' => 'assignments.manage',
             'api.v1.assignment-users' => 'users.view',
+            'api.v1.memberships.index', 'api.v1.membership-units' => 'memberships.view',
+            'api.v1.memberships.store', 'api.v1.memberships.update', 'api.v1.memberships.destroy', 'api.v1.membership-users' => 'memberships.manage',
             default => null,
         };
         if (! $permission || ! $this->user()) {
