@@ -67,6 +67,18 @@ class User extends Authenticatable
         return $this->hasMany(OrganizationMembership::class);
     }
 
+    /** @return HasMany<ConfidentialityClearance, $this> */
+    public function clearances(): HasMany
+    {
+        return $this->hasMany(ConfidentialityClearance::class);
+    }
+
+    /** @return HasMany<DocumentAccessGrant, $this> */
+    public function documentAccessGrants(): HasMany
+    {
+        return $this->hasMany(DocumentAccessGrant::class);
+    }
+
     /**
      * Get the attributes that should be cast.
      *

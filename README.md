@@ -243,3 +243,67 @@ Administration adds a distinct User Organization Membership section with English
 Verification uses isolated SQLite and disposable MySQL 8.4.11 with a repository-local data directory, private Unix socket and networking disabled. It covers the full PHP suite, fresh migrations, membership ownership/shape/uniqueness constraints, audit rollback and security regressions. The new migration's rollback and reapplication are also tested on that disposable instance; no existing MySQL database or development data is used. Frontend tests use jsdom; browser/accessibility and Lao editorial review remain manual review tasks.
 
 Dashboard and placeholder document pages remain authenticated-only and contain no document operations. Document confidentiality, document-content policies, registration/control workflows, resource-specific policies and department-based document rules remain Phase 2.2D-2 work. That phase must derive context from actual resources, use the central effective checks, and separately define confidentiality and broader company/department operation rules. No blanket administrator or membership bypass is provided here. Production-scale query/lock performance and multi-process concurrency remain deployment review work.
+
+## Confidentiality and document access policies — Phase 2.2D-2
+
+This phase adds security infrastructure only. There are no document registration workflows, numbering rules, document-content tables, uploads, file storage, preview/download implementations, or new routes. Existing placeholder pages remain authenticated-only and expose no document data. Permission initialization adds controlled catalog definitions but gives no existing role new grants; Security Administrator retains no automatic document or clearance authority.
+
+### Classification and resource contract
+
+`Confidentiality` defines stable values `normal`, `confidential` and `highly_confidential`, with English/Lao localization keys for labels and descriptions. Classification is independent of role names and cannot be edited through a browser API. A security profile must specify classification explicitly; unknown classifications never fall back to Normal.
+
+`document_security_profiles` is a security sidecar, not a document/workflow table. It stores an opaque resource family/reference (`incoming`, `outgoing`, `controlled`), company/site/optional owning department, classification, allowlist requirement, active flag and trusted creator/updater IDs. It contains no document title, number, text, filename, attachment locator or contents. Unique family/reference prevents duplicate profiles. Restrictive company/site and department/site/company foreign keys enforce valid ownership. All resource profiles require a site; there is no global document security scope.
+
+`DocumentSecurityDescriptor::fromProfile()` accepts only an existing persisted profile bound to the resource loaded by server code. It discards loaded model attributes, re-reads persisted identity and validates organization ownership. Its private constructor retains only profile ID and stable resource identity. `DocumentAccess` resolves that reference from the database again on every decision, so descriptor reuse cannot preserve stale ownership, classification, restriction or active state. Raw browser arrays and raw model objects are unsupported policy inputs and deny access.
+
+`ManageDocumentSecurity::registerProfile()` is for trusted future module integration only. Resource family/reference and ownership must come from the server-loaded persisted document, not request security fields. Phase 2.2E must atomically bind each actual document to its correct profile and verify that both describe the same resource/ownership. This phase cannot verify a foreign key to document tables that do not yet exist. A profile reference supplied by a browser must never select security for an independently loaded document. Descriptors must not be serialized as a substitute for authorized metadata.
+
+### Independent operation policies
+
+| Operation | Controlled permission | Behavior |
+| --- | --- | --- |
+| Metadata discovery/view | `documents.metadata.view` | Authorize before returning metadata, identifiers, search results, counts or suggestions |
+| Content preview | `documents.content.preview` | Independent content permission; does not imply metadata or download rights |
+| Attachment download | `documents.attachments.download` | Independent download permission; never inferred from preview |
+
+`DocumentAccess::allows()` returns a decision and records an audit; `authorize()` throws the same generic `Document access denied.` message for every denial. Laravel Gates for the three permission keys require a `DocumentSecurityDescriptor`. Scope-only `AccessControl::allows()`, `allowsOperational()` and capability lists deliberately exclude these resource-only abilities. Underlying `grantedPermissions()` remains available for controlled role configuration, not as proof of document access. Legacy planned `documents.view/register/control` keys remain unavailable.
+
+Every operation requires a currently active account/profile/organization, an active RBAC grant effective at the resource's owning site under existing scope inheritance, and exact effective site membership or owning-department membership when a department is present. Company membership alone does not replace site/department affiliation. Confidentiality and document restrictions then apply:
+
+| Classification | Additional requirements |
+| --- | --- |
+| Normal | No clearance; any explicit document allowlist still applies |
+| Confidential | Exact Confidential clearance for that site/department, plus any explicit allowlist |
+| Highly Confidential | Exact Highly Confidential clearance **and** an operation-specific allowlist grant for that exact document |
+
+Confidential and Highly Confidential clearances are separate entitlements; neither silently includes the other. Clearance, membership and allowlist grants never create an RBAC permission. Technical/global administration does not imply any clearance or document permission. The existing administrative exception remains restricted to identity/role/membership administration; it does not exempt these policies.
+
+### Clearances, restrictions and lifecycle
+
+`confidentiality_clearances` stores the target user, exact company/site/optional department, one protected classification, active/expiry/revocation state, trusted actor IDs and timestamps. No Normal or global clearance exists. `document_access_grants` stores the target user, exact profile, one operation and the same lifecycle information. Generated current keys prevent duplicate non-revoked grants, including inactive or expired rows. Revocation releases the current key while preserving the old row, so an explicitly authorized new grant has separate history.
+
+Only `ManageDocumentSecurity` is a supported management path. There are no clearance management APIs or CLI grant commands in this phase. Services require both management permission and exact effective manager membership at the affected resource scope:
+
+- `clearances.confidential.manage` may manage Confidential clearances only.
+- `clearances.highly-confidential.manage` may manage Highly Confidential clearances only.
+- `document-access.manage` may create security profiles, tighten allowlist requirements and manage operation-specific allowlist grants; it grants no read access.
+
+Targets must have matching effective membership when a grant is issued or reactivated. Self-grant, self-reactivation/extension and self-revocation are refused. Managers do not need read clearance to perform explicitly authorized administration and gain no read permission by doing so. Role or scope revocation is rechecked inside the serialized RBAC transaction. Actual policy-role provisioning remains a separately reviewed integration/operator action; the default initializer and existing bootstrap do not grant these capabilities.
+
+An inactive, expired (`expires_at <= now()`) or revoked grant never satisfies the policy. NULL expiry means no scheduled expiration. Inactive users/units make otherwise current grants ineffective; reactivating those parents can restore still-active, unexpired, non-revoked grants, so use explicit revocation for permanent removal. Revoked records cannot be edited, restored or deleted through models/services. Profile identity, ownership and classification are immutable through normal writes; allowlist requirements may only be tightened. Declassification, ownership transfer and loosening restrictions require a future dedicated reviewed workflow and are not exposed here.
+
+Every evaluation queries current state; no authorization/clearance cache preserves revoked access across an existing session. Revocation affects the next evaluation, including with a previously created descriptor or stale loaded user relationships. It does not retroactively cancel an already authorized in-flight response. Future delivery code must authorize immediately before returning metadata or bytes and must not rely on an earlier navigation check or an unchecked long-lived file URL.
+
+### Security audit and integration boundaries
+
+`document_security_audits` distinguishes allowed access, denied access, profile registration/restriction changes, clearance changes and allowlist changes. Access records contain actor/profile IDs, operation, bounded internal reason and timestamps, without titles, resource references, content, filenames, passwords, tokens or attachment data. Caller-facing denials disclose no classification, organization name or denial reason. Administrative records contain target/subject IDs and before/after security snapshots only. Audit failures prevent an allowed result; mutation and audit writes are atomic.
+
+Models reject audit updates/deletes, and SQLite/MySQL triggers reject UPDATE/DELETE even when model events are bypassed. Restrictive foreign keys retain referenced identities and security history. The migration requires permission to create triggers. Database operators able to alter schema remain outside application-level protection. There is no public audit browsing API; reporting and retention access need separate authorization in Phase 2.2E.
+
+Access audits use the current database connection. Future controllers should authorize outside any surrounding transaction that will roll back on an authorization exception; an outer rollback also rolls back its audit insert. If module workflows need denial evidence independent of their transactions, provide and verify a separate durable audit sink during integration. Do not catch an audit-write failure and continue delivery.
+
+### Verification and Phase 2.2E work
+
+Verification covers SQLite and an isolated MySQL 8.4.11 instance with repository-local data, a private Unix socket and networking disabled. It exercises the full PHP suite, fresh migrations, native ownership foreign keys, generated uniqueness, clearance/allowlist lifecycle, classification rules, append-only audit triggers and rollback/reapplication of the new migration. All account, role, membership, resource-profile and clearance fixtures are fictional and confined to test databases. No development/production database, real grant, account bootstrap or organization initialization was changed. The disposable instance is stopped and removed after testing.
+
+Phase 2.2E must implement the real document/profile linkage, resource-specific policies/controllers and authorized discovery queries, enforce these policies before serialization or file delivery, prevent metadata leaks through counts/headers, define attachment-to-document ownership, and retain the existing active/revocable authentication middleware. Policy-role provisioning, protected clearance administration UI/APIs if needed, reviewed reclassification/transfer workflows, audit reporting/retention and transaction-independent denial logging remain integration work. Production-scale query/lock performance and concurrency require deployment testing. English/Lao terminology is tested through the existing localization system; Lao editorial review remains a manual review task.

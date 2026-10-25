@@ -13,10 +13,21 @@ class PermissionCatalog
         return in_array($key, [...self::ADMINISTRATOR_KEYS, ...self::MEMBERSHIP_ADMINISTRATOR_KEYS], true);
     }
 
+    public static function requiresDocument(string $key): bool
+    {
+        return in_array($key, array_map(fn (DocumentOperation $operation): string => $operation->permission(), DocumentOperation::cases()), true);
+    }
+
     /** @return array<string, array{area: string, name_en: string, name_lo: string, available: bool}> */
     public static function definitions(): array
     {
         return [
+            'documents.metadata.view' => ['area' => 'document-security', 'name_en' => 'Discover and view document metadata', 'name_lo' => 'ຄົ້ນຫາ ແລະ ເບິ່ງຂໍ້ມູນເອກະສານ', 'available' => true],
+            'documents.content.preview' => ['area' => 'document-security', 'name_en' => 'Preview document content', 'name_lo' => 'ເບິ່ງເນື້ອຫາເອກະສານລ່ວງໜ້າ', 'available' => true],
+            'documents.attachments.download' => ['area' => 'document-security', 'name_en' => 'Download document attachments', 'name_lo' => 'ດາວໂຫຼດໄຟລ໌ແນບເອກະສານ', 'available' => true],
+            'document-access.manage' => ['area' => 'document-security', 'name_en' => 'Manage document security profiles and allowlists', 'name_lo' => 'ຈັດການຂໍ້ກຳນົດຄວາມປອດໄພ ແລະ ລາຍຊື່ສິດເອກະສານ', 'available' => true],
+            'clearances.confidential.manage' => ['area' => 'clearances', 'name_en' => 'Manage Confidential clearances', 'name_lo' => 'ຈັດການອະນຸຍາດເຂົ້າເຖິງຂໍ້ມູນລັບ', 'available' => true],
+            'clearances.highly-confidential.manage' => ['area' => 'clearances', 'name_en' => 'Manage Highly Confidential clearances', 'name_lo' => 'ຈັດການອະນຸຍາດເຂົ້າເຖິງຂໍ້ມູນລັບສູງ', 'available' => true],
             'memberships.view' => ['area' => 'memberships', 'name_en' => 'View organization memberships', 'name_lo' => 'ເບິ່ງສະມາຊິກອົງກອນ', 'available' => true],
             'memberships.manage' => ['area' => 'memberships', 'name_en' => 'Manage organization memberships', 'name_lo' => 'ຈັດການສະມາຊິກອົງກອນ', 'available' => true],
             'organization.access' => ['area' => 'organization', 'name_en' => 'Use an assigned organization context', 'name_lo' => 'ໃຊ້ຂອບເຂດອົງກອນທີ່ໄດ້ຮັບມອບໝາຍ', 'available' => true],

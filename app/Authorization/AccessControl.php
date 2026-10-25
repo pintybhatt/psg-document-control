@@ -41,8 +41,8 @@ class AccessControl
         $membership = app(MembershipAccess::class);
 
         return array_values(array_filter($this->grantedPermissions($user, $scope),
-            fn (string $key): bool => PermissionCatalog::administrative($key)
-                ? $departmentId === null : $membership->matches($user, $scope, $departmentId)));
+            fn (string $key): bool => ! PermissionCatalog::requiresDocument($key) && (PermissionCatalog::administrative($key)
+                ? $departmentId === null : $membership->matches($user, $scope, $departmentId))));
     }
 
     public function allows(User $user, string $permission, AuthorizationScope $scope, ?int $departmentId = null): bool
