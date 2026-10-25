@@ -22,6 +22,9 @@ class PermissionCatalog
     public static function definitions(): array
     {
         return [
+            'numbering.view' => ['area' => 'numbering', 'name_en' => 'View numbering configuration', 'name_lo' => 'ເບິ່ງການຕັ້ງຄ່າເລກເອກະສານ', 'available' => true],
+            'numbering.manage' => ['area' => 'numbering', 'name_en' => 'Manage numbering configuration', 'name_lo' => 'ຈັດການການຕັ້ງຄ່າເລກເອກະສານ', 'available' => true],
+            'numbering.issue' => ['area' => 'numbering', 'name_en' => 'Issue numbers during formal registration', 'name_lo' => 'ອອກເລກໃນການລົງທະບຽນຢ່າງເປັນທາງການ', 'available' => true],
             'master-data.view' => ['area' => 'master-data', 'name_en' => 'View document master data', 'name_lo' => 'ເບິ່ງຂໍ້ມູນຫຼັກເອກະສານ', 'available' => true],
             'master-data.manage' => ['area' => 'master-data', 'name_en' => 'Manage document master data', 'name_lo' => 'ຈັດການຂໍ້ມູນຫຼັກເອກະສານ', 'available' => true],
             'documents.metadata.view' => ['area' => 'document-security', 'name_en' => 'Discover and view document metadata', 'name_lo' => 'ຄົ້ນຫາ ແລະ ເບິ່ງຂໍ້ມູນເອກະສານ', 'available' => true],

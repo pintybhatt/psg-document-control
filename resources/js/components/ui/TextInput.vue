@@ -4,7 +4,7 @@ import { formFieldProps } from './formFieldProps.js';
 
 defineOptions({ inheritAttrs: false });
 defineProps({ ...formFieldProps, type: { type: String, default: 'text' } });
-const model = defineModel({ type: String, default: '' });
+const model = defineModel({ type: [String, Number], default: '' });
 </script>
 
 <template>

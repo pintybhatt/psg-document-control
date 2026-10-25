@@ -10,6 +10,7 @@ import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
 import ToastNotifications from '../components/ui/ToastNotifications.vue';
 import MembershipManagement from '../components/MembershipManagement.vue';
 import DocumentMasterDataManagement from '../components/DocumentMasterDataManagement.vue';
+import NumberingManagement from '../components/NumberingManagement.vue';
 import { useNotifications } from '../components/ui/useNotifications.js';
 import { useLocalization } from '../localization/index.js';
 import { createJsonClient } from '../utilities/jsonClient.js';
@@ -251,6 +252,7 @@ onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
 
             <MembershipManagement v-if="selected && can('memberships.view')" :scope="selected" :endpoints="endpoints" :csrf-token="csrfToken" @unauthorized="handleError" />
             <DocumentMasterDataManagement v-if="selected && can('master-data.view')" :scope="selected" :endpoints="endpoints.masterData" :csrf-token="csrfToken" @unauthorized="handleError" />
+            <NumberingManagement v-if="selected && can('numbering.view')" :scope="selected" :endpoint="endpoints.numbering" :csrf-token="csrfToken" @unauthorized="handleError" />
 
             <section v-if="can('roles.view')" class="flex flex-col gap-4" aria-labelledby="roles-heading">
                 <div class="flex flex-wrap items-center justify-between gap-3"><h3 id="roles-heading" class="font-semibold">{{ t('rbacRoles') }}</h3><UiButton v-if="can('roles.manage')" :disabled="loading || saving" @click="showRole()">{{ t('rbacCreateRole') }}</UiButton></div>

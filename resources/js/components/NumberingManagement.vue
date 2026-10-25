@@ -1,0 +1,161 @@
+<script setup>
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue';
+import UiButton from './ui/UiButton.vue';
+import TextInput from './ui/TextInput.vue';
+import SelectInput from './ui/SelectInput.vue';
+import CheckboxInput from './ui/CheckboxInput.vue';
+import DataTable from './ui/DataTable.vue';
+import ConfirmDialog from './ui/ConfirmDialog.vue';
+import ToastNotifications from './ui/ToastNotifications.vue';
+import { useNotifications } from './ui/useNotifications.js';
+import { useLocalization } from '../localization/index.js';
+import { createJsonClient } from '../utilities/jsonClient.js';
+
+const props = defineProps({ scope: { type: Object, required: true }, endpoint: { type: String, required: true }, csrfToken: { type: String, required: true } });
+const emit = defineEmits(['unauthorized']);
+const { t } = useLocalization();
+const request = createJsonClient(props.csrfToken);
+const { items, notify, dismiss } = useNotifications();
+const rows = ref([]);
+const registers = ref([]);
+const page = ref(1);
+const total = ref(0);
+const loading = ref(false);
+const saving = ref(false);
+const previewLoading = ref(false);
+const preview = ref('');
+const editor = ref(null);
+const editorElement = ref(null);
+const revoked = ref(false);
+const errorKey = ref('');
+const fields = ref({});
+const confirmationOpen = ref(false);
+const historySeries = ref(null);
+const history = ref([]);
+const historyPage = ref(1);
+const historyTotal = ref(0);
+const historyLoading = ref(false);
+const form = reactive({ register_id: '', purpose: 'internal_register', reset_policy: 'annual', prefix: '', padding: '6', active: true, change_reason: '', year: String(new Date().getFullYear()) });
+let controller;
+let previewController;
+let historyController;
+const canManage = computed(() => !revoked.value && props.scope.permissions.includes('numbering.manage'));
+const options = computed(() => [{ value: '', label: t('uiChoose') }, ...registers.value.map(row => ({ value: row.id, label: t(`masterRegister-${row.register_key}`), disabled: !row.active }))]);
+const purposes = computed(() => ['internal_register', 'official_outgoing'].map(value => ({ value, label: t(`numberingPurpose-${value}`), disabled: value === 'official_outgoing' && registers.value.find(row => row.id === Number(form.register_id))?.register_key !== 'outgoing' })));
+const policies = computed(() => ['annual', 'continuous'].map(value => ({ value, label: t(`numberingPolicy-${value}`) })));
+const columns = computed(() => [{ key: 'register_label', label: t('masterRegister') }, { key: 'purpose_label', label: t('numberingPurpose') }, { key: 'prefix', label: t('numberingPrefix') }, { key: 'policy_label', label: t('numberingPolicy') }, { key: 'status', label: t('uiStatus') }, { key: 'actions', label: t('rbacActions') }]);
+const displayRows = computed(() => rows.value.map(row => ({ ...row, register_label: t(`masterRegister-${row.register_key}`), purpose_label: t(`numberingPurpose-${row.purpose}`), prefix: row.configuration?.prefix ?? '—', policy_label: t(`numberingPolicy-${row.reset_policy}`), status: t(!row.configuration?.active ? 'rbacInactive' : row.effective ? 'rbacActive' : 'masterBlocked') })));
+const historyColumns = computed(() => [{ key: 'version', label: t('numberingVersion') }, { key: 'prefix', label: t('numberingPrefix') }, { key: 'padding', label: t('numberingPadding') }, { key: 'status', label: t('uiStatus') }, { key: 'effective_at', label: t('numberingEffective') }, { key: 'created_by', label: t('numberingActor') }, { key: 'change_reason', label: t('numberingReason') }]);
+const historyRows = computed(() => history.value.map(row => ({ ...row, status: t(row.active ? 'rbacActive' : 'rbacInactive') })));
+function scopeData() { return { scope_type: props.scope.scope_type, company_id: props.scope.company_id, site_id: props.scope.site_id }; }
+function url(path = '', requestedPage = 1) { return `${props.endpoint}${path}?${new URLSearchParams(Object.entries({ ...scopeData(), page: requestedPage, per_page: 10 }).filter(([, value]) => value !== null))}`; }
+function fail(error) {
+    if (error.name === 'AbortError') { return; }
+    fields.value = error.fields ?? {};
+    errorKey.value = Object.values(fields.value).flat().find(value => /^(rbac|numbering)/.test(value)) ?? error.message;
+    if (!/^(rbac|numbering)/.test(errorKey.value)) { errorKey.value = 'rbacRequestFailed'; }
+    if ([401, 403, 419].includes(error.status)) {
+        revoked.value = true; controller?.abort(); previewController?.abort(); historyController?.abort();
+        rows.value = []; registers.value = []; history.value = []; editor.value = null; historySeries.value = null; preview.value = ''; confirmationOpen.value = false;
+        loading.value = false; previewLoading.value = false; historyLoading.value = false;
+        emit('unauthorized', error);
+    }
+}
+async function load() {
+    const signal = controller.signal;
+    loading.value = true;
+    try {
+        const result = await request(url('', page.value), { signal });
+        if (!signal.aborted) { rows.value = result.data; total.value = result.meta.total; }
+    } catch (error) { if (!signal.aborted) { fail(error); } }
+    finally { if (!signal.aborted) { loading.value = false; } }
+}
+async function reset() {
+    controller?.abort(); previewController?.abort(); historyController?.abort(); controller = new AbortController();
+    const signal = controller.signal;
+    revoked.value = false; rows.value = []; registers.value = []; editor.value = null; historySeries.value = null; history.value = []; preview.value = ''; fields.value = {}; errorKey.value = ''; confirmationOpen.value = false; page.value = 1; total.value = 0; previewLoading.value = false; historyLoading.value = false;
+    await load();
+    if (signal.aborted) { return; }
+    try { const result = await request(url('/registers'), { signal }); if (!signal.aborted) { registers.value = result.data; } }
+    catch (error) { if (!signal.aborted) { fail(error); } }
+}
+async function edit(row = null) {
+    editor.value = { id: row?.id ?? null };
+    fields.value = {}; errorKey.value = ''; preview.value = '';
+    Object.assign(form, { register_id: row?.register_id ?? '', purpose: row?.purpose ?? 'internal_register', reset_policy: row?.reset_policy ?? 'annual', prefix: row?.configuration?.prefix ?? '', padding: String(row?.configuration?.padding ?? 6), active: row?.configuration?.active ?? true, change_reason: '', year: String(new Date().getFullYear()) });
+    await nextTick();
+    editorElement.value?.querySelector('h4')?.focus();
+}
+async function showPreview() {
+    previewController?.abort(); previewController = new AbortController();
+    const signal = previewController.signal;
+    previewLoading.value = true; preview.value = ''; errorKey.value = ''; fields.value = {};
+    try {
+        const result = await request(`${props.endpoint}/preview`, { method: 'POST', signal, body: { ...scopeData(), prefix: form.prefix, padding: Number(form.padding), year: Number(form.year) } });
+        if (!signal.aborted) { preview.value = result.number; }
+    } catch (error) { if (!signal.aborted) { fail(error); } }
+    finally { if (!signal.aborted) { previewLoading.value = false; } }
+}
+async function save() {
+    if (!canManage.value || !editor.value || saving.value) { return; }
+    const originalScope = props.scope.scope_key;
+    const id = editor.value.id;
+    const body = { ...scopeData(), prefix: form.prefix, padding: Number(form.padding), active: form.active, change_reason: form.change_reason };
+    if (!id) { Object.assign(body, { register_id: form.register_id, purpose: form.purpose, reset_policy: form.reset_policy }); }
+    saving.value = true; errorKey.value = ''; fields.value = {};
+    try {
+        await request(`${props.endpoint}${id ? `/${id}` : ''}`, { method: id ? 'PATCH' : 'POST', body });
+        if (originalScope !== props.scope.scope_key) { return; }
+        editor.value = null; preview.value = ''; confirmationOpen.value = false; historySeries.value = null; history.value = [];
+        notify({ type: 'success', messageKey: 'numberingSaved' }); await load();
+    } catch (error) {
+        if (originalScope === props.scope.scope_key) { confirmationOpen.value = false; fail(error); await nextTick(); editorElement.value?.querySelector('[aria-invalid="true"]')?.focus(); }
+    } finally { saving.value = false; }
+}
+async function loadHistory(row = historySeries.value) {
+    historyController?.abort(); historyController = new AbortController();
+    const signal = historyController.signal;
+    if (!row) { return; }
+    if (historySeries.value?.id !== row.id) { historyPage.value = 1; }
+    historySeries.value = row; history.value = []; historyLoading.value = true;
+    try {
+        const result = await request(url(`/${row.id}/history`, historyPage.value), { signal });
+        if (!signal.aborted) { history.value = result.data; historyTotal.value = result.total; }
+    } catch (error) { if (!signal.aborted) { fail(error); } }
+    finally { if (!signal.aborted) { historyLoading.value = false; } }
+}
+watch([() => form.prefix, () => form.padding, () => form.year], () => { previewController?.abort(); previewLoading.value = false; preview.value = ''; });
+watch(() => form.register_id, () => { if (!editor.value?.id && registers.value.find(row => row.id === Number(form.register_id))?.register_key !== 'outgoing') { form.purpose = 'internal_register'; } });
+watch(() => props.scope.scope_key, reset, { immediate: true });
+onBeforeUnmount(() => { controller?.abort(); previewController?.abort(); historyController?.abort(); });
+</script>
+
+<template>
+    <section aria-labelledby="numbering-heading" class="flex flex-col gap-5">
+        <div class="flex flex-wrap items-center justify-between gap-3"><h3 id="numbering-heading" class="text-lg font-semibold">{{ t('numberingTitle') }}</h3><UiButton v-if="canManage" :disabled="loading || saving" @click="edit()">{{ t('numberingCreate') }}</UiButton></div>
+        <p class="text-sm leading-7 text-slate-600">{{ t('numberingBoundary') }}</p>
+        <p v-if="errorKey" role="alert" class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">{{ t(errorKey) }}</p>
+        <DataTable v-model:page="page" :rows="displayRows" :columns="columns" :caption="t('numberingTitle')" :loading="loading" server-side :total="total" :per-page="10" @change="load">
+            <template #cell-actions="{ row }"><div class="flex flex-wrap gap-2"><UiButton variant="secondary" :disabled="saving" @click="edit(row)">{{ t(canManage ? 'rbacEdit' : 'rbacDetails') }}</UiButton><UiButton variant="secondary" :disabled="saving" @click="loadHistory(row)">{{ t('numberingHistory') }}</UiButton></div></template>
+        </DataTable>
+        <form v-if="editor" ref="editorElement" novalidate class="flex flex-col gap-5 rounded-xl border border-slate-200 bg-white p-6" @submit.prevent="confirmationOpen = canManage">
+            <h4 tabindex="-1" class="font-semibold">{{ t(editor.id ? 'numberingEdit' : 'numberingCreate') }}</h4>
+            <p class="text-xs leading-6 text-slate-500">{{ t('numberingIdentityHelp') }}</p>
+            <div class="grid gap-5 sm:grid-cols-2">
+                <SelectInput v-model="form.register_id" :label="t('masterRegister')" :options="options" :disabled="!!editor.id || !canManage || saving" :error-key="fields.register_id?.[0]" required />
+                <SelectInput v-model="form.purpose" :label="t('numberingPurpose')" :options="purposes" :disabled="!!editor.id || !canManage || saving" :error-key="fields.purpose?.[0]" required />
+                <SelectInput v-model="form.reset_policy" :label="t('numberingPolicy')" :options="policies" :disabled="!!editor.id || !canManage || saving" :error-key="fields.reset_policy?.[0]" required />
+                <TextInput v-model="form.prefix" :label="t('numberingPrefix')" :helper="t('numberingPrefixHelp')" :readonly="!canManage || saving" :error-key="fields.prefix?.[0]" maxlength="80" required />
+                <TextInput v-model="form.padding" type="number" :label="t('numberingPadding')" :readonly="!canManage || saving" :error-key="fields.padding?.[0]" min="1" max="12" required />
+                <CheckboxInput v-model="form.active" :label="t('rbacActive')" :disabled="!canManage || saving" />
+                <TextInput v-model="form.change_reason" :label="t('numberingReason')" :readonly="!canManage || saving" :error-key="fields.change_reason?.[0]" maxlength="500" />
+            </div>
+            <div class="flex flex-wrap items-end gap-3"><TextInput v-model="form.year" type="number" :label="t('numberingPreviewYear')" :error-key="fields.year?.[0]" min="2000" max="9999" /><UiButton variant="secondary" :loading="previewLoading" :disabled="saving" @click="showPreview">{{ t('numberingPreview') }}</UiButton></div>
+            <p v-if="preview" role="status" class="wrap-anywhere font-mono text-sm">{{ preview }}</p>
+            <div class="flex flex-wrap gap-3"><UiButton v-if="canManage" type="submit" :disabled="saving">{{ t('numberingSave') }}</UiButton><UiButton variant="secondary" :disabled="saving" @click="editor = null">{{ t('uiCancel') }}</UiButton></div>
+        </form>
+        <section v-if="historySeries" class="flex flex-col gap-3" aria-labelledby="numbering-history"><h4 id="numbering-history" class="font-semibold">{{ t('numberingHistory') }} · {{ historySeries.configuration?.prefix }}</h4><DataTable v-model:page="historyPage" :rows="historyRows" :columns="historyColumns" :caption="t('numberingHistory')" :loading="historyLoading" server-side :total="historyTotal" :per-page="10" @change="loadHistory()" /></section>
+        <ConfirmDialog v-model="confirmationOpen" :title="t('numberingSave')" :message="t('numberingSaveConfirm')" :loading="saving" @confirm="save" />
+        <ToastNotifications :items="items" @dismiss="dismiss" />
+    </section>
+</template>

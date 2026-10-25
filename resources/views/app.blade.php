@@ -28,6 +28,7 @@
                 'errors' => collect($errors->messages())->map(fn (array $messages): string => $messages[0]),
             ],
             'administration' => [
+                'numbering' => route('api.v1.numbering.index', [], false),
                 'contexts' => route('api.v1.authorization.contexts', [], false),
                 'roles' => route('api.v1.roles.index', [], false),
                 'permissions' => route('api.v1.permissions', [], false),

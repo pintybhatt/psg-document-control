@@ -5,6 +5,7 @@ use App\Http\Controllers\AuthorizationContextController;
 use App\Http\Controllers\CurrentUserController;
 use App\Http\Controllers\DocumentMasterDataController;
 use App\Http\Controllers\MembershipController;
+use App\Http\Controllers\NumberingController;
 use App\Http\Controllers\RoleAssignmentController;
 use App\Http\Controllers\RoleController;
 use App\Http\Middleware\EnsureActiveUserSession;
@@ -44,6 +45,12 @@ Route::middleware(['auth:web', EnsureActiveUserSession::class])->group(function 
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
     Route::get('/api/v1/user', CurrentUserController::class)->name('api.v1.user');
     Route::prefix('api/v1')->name('api.v1.')->group(function (): void {
+        Route::get('numbering-series', [NumberingController::class, 'index'])->name('numbering.index');
+        Route::get('numbering-series/registers', [NumberingController::class, 'registers'])->name('numbering.registers');
+        Route::post('numbering-series/preview', [NumberingController::class, 'preview'])->name('numbering.preview');
+        Route::post('numbering-series', [NumberingController::class, 'store'])->name('numbering.store');
+        Route::patch('numbering-series/{series}', [NumberingController::class, 'update'])->name('numbering.update');
+        Route::get('numbering-series/{series}/history', [NumberingController::class, 'history'])->name('numbering.history');
         Route::get('document-master-data/classifications', [DocumentMasterDataController::class, 'classifications'])->name('master-data.classifications');
         Route::get('document-master-data/{kind}', [DocumentMasterDataController::class, 'index'])->whereIn('kind', ['categories', 'types', 'registers'])->name('master-data.index');
         Route::post('document-master-data/{kind}', [DocumentMasterDataController::class, 'store'])->whereIn('kind', ['categories', 'types', 'registers'])->name('master-data.store');
