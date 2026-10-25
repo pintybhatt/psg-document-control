@@ -68,7 +68,7 @@ onBeforeUnmount(() => {
 <template>
     <dialog ref="dialog" :aria-labelledby="`${dialogId}-title`" :aria-describedby="`${dialogId}-message`" :aria-busy="loading" aria-modal="true" class="m-auto w-[calc(100%_-_2rem)] max-w-lg rounded-2xl border border-slate-200 bg-white p-6 text-slate-800 shadow-xl backdrop:bg-slate-950/50" @cancel.prevent="cancel" @close="handleClose">
         <h2 :id="`${dialogId}-title`" class="text-lg font-semibold">{{ title }}</h2>
-        <p :id="`${dialogId}-message`" class="mt-3 text-sm leading-7 text-slate-600">{{ message }}</p>
+        <p :id="`${dialogId}-message`" class="mt-3 text-sm leading-7 wrap-anywhere text-slate-600">{{ message }}</p>
         <div class="mt-6 flex flex-wrap justify-end gap-3">
             <UiButton data-cancel variant="secondary" :disabled="loading" @click="cancel">{{ t('uiCancel') }}</UiButton>
             <UiButton :variant="danger ? 'danger' : 'primary'" :loading="loading" @click="confirm">{{ confirmLabel || t('uiConfirm') }}</UiButton>

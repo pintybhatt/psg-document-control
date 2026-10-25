@@ -172,11 +172,53 @@ describe('scoped role administration', () => {
         expect(wrapper.text()).toContain('New Role');
     });
 
+    it('focuses the role editor and directs keyboard users to the first invalid field without submitting', async () => {
+        const fetch = server();
+        const wrapper = await render();
+        await button(wrapper, 'Create role').trigger('click');
+        await flushPromises();
+        const code = wrapper.get('input[name="role-code"]');
+        expect(document.activeElement).toBe(code.element);
+
+        button(wrapper, 'Save role').element.focus();
+        await wrapper.get('form').trigger('submit');
+        await flushPromises();
+
+        expect(document.activeElement).toBe(code.element);
+        expect(code.attributes('aria-invalid')).toBe('true');
+        expect(document.getElementById(code.attributes('aria-describedby').split(' ').at(-1)).textContent).toBe('This field is required.');
+        expect(fetch.mock.calls.some(([, options]) => options.method === 'POST')).toBe(false);
+
+        await code.setValue('EXAMPLE_NEW_ROLE');
+        await wrapper.get('form').trigger('submit');
+        await flushPromises();
+        expect(document.activeElement).toBe(wrapper.get('input[name="role-name-en"]').element);
+    });
+
+    it('focuses a server-rejected role field and keeps its associated error bilingual', async () => {
+        server({ mutationError: { status: 422, body: { errors: { name_lo: ['rbacValidation'] } } } });
+        const wrapper = await render();
+        await newRole(wrapper);
+        button(wrapper, 'Save role').element.focus();
+        await wrapper.get('form').trigger('submit');
+        await flushPromises();
+        const field = wrapper.get('input[name="role-name-lo"]');
+
+        expect(document.activeElement).toBe(field.element);
+        expect(field.attributes('aria-invalid')).toBe('true');
+        const errorId = field.attributes('aria-describedby');
+        expect(document.getElementById(errorId).textContent).toBe('Check the supplied value and try again.');
+        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        expect(document.getElementById(errorId).textContent).toBe('ກະລຸນາກວດສອບຄ່າທີ່ປ້ອນ ແລະ ລອງໃໝ່.');
+    });
+
     it('opens inherited definitions read-only and locks security settings for the current users own role', async () => {
         server({ roles: [{ ...sampleRole, editable: false }] });
         const wrapper = await render();
         await button(wrapper, 'Details').trigger('click');
+        await flushPromises();
 
+        expect(document.activeElement).toBe(wrapper.get('form h3').element);
         expect(wrapper.get('input[name="role-name-en"]').element.readOnly).toBe(true);
         expect(wrapper.get('input[value="roles.view"]').element.disabled).toBe(true);
         expect(wrapper.text()).not.toContain('Save role');
@@ -187,7 +229,9 @@ describe('scoped role administration', () => {
         const fetch = server({ roles: [{ ...sampleRole, security_editable: false }] });
         const wrapper = await render();
         await button(wrapper, 'Edit').trigger('click');
+        await flushPromises();
 
+        expect(document.activeElement).toBe(wrapper.get('input[name="role-name-en"]').element);
         expect(wrapper.get('input[value="roles.view"]').element.disabled).toBe(true);
         expect(wrapper.findAll('input[type="checkbox"]').every(input => input.element.disabled)).toBe(true);
         expect(wrapper.text()).toContain('You may edit display information');

@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import UiButton from '../components/ui/UiButton.vue';
 import TextInput from '../components/ui/TextInput.vue';
 import TextareaInput from '../components/ui/TextareaInput.vue';
@@ -39,6 +39,7 @@ const roleOptions = ref([]);
 const targetUser = ref('');
 const targetRole = ref('');
 const editorOpen = ref(false);
+const roleEditor = ref(null);
 const editingRole = ref(null);
 const readOnly = computed(() => editingRole.value !== null && !editingRole.value.editable);
 const securityReadOnly = computed(() => readOnly.value || editingRole.value?.security_editable === false);
@@ -142,13 +143,21 @@ async function loadContexts() {
     } catch (error) { handleError(error); loading.value = false; }
 }
 
-function showRole(role = null) {
+async function showRole(role = null) {
     editingRole.value = role;
     Object.assign(roleForm, { code: role?.code ?? '', name_en: role?.name_en ?? '', name_lo: role?.name_lo ?? '', description: role?.description ?? '', active: role?.active ?? true, permission_keys: [...(role?.permission_keys ?? [])] });
     fields.value = {}; errorKey.value = ''; editorOpen.value = true;
+    await nextTick();
+    const target = roleEditor.value?.querySelector('input:not([readonly]):not(:disabled)') ?? roleEditor.value?.querySelector('h3');
+    target?.focus();
 }
 
 function fieldError(name) { return fields.value[name]?.[0] ?? ''; }
+
+async function focusInvalidRoleField() {
+    await nextTick();
+    roleEditor.value?.querySelector('[aria-invalid="true"]')?.focus();
+}
 
 async function saveRole() {
     if (!can('roles.manage') || readOnly.value || saving.value) { return; }
@@ -156,7 +165,7 @@ async function saveRole() {
     for (const name of ['code', 'name_en', 'name_lo']) {
         if (!roleForm[name].trim()) { fields.value[name] = ['rbacRequired']; }
     }
-    if (Object.keys(fields.value).length) { return; }
+    if (Object.keys(fields.value).length) { await focusInvalidRoleField(); return; }
     saving.value = true; errorKey.value = '';
     try {
         const data = { ...scopeData(), ...roleForm, permission_keys: [...roleForm.permission_keys] };
@@ -164,7 +173,7 @@ async function saveRole() {
         await request(editingRole.value ? `${props.endpoints.roles}/${editingRole.value.id}` : props.endpoints.roles, { method: editingRole.value ? 'PATCH' : 'POST', body: data });
         notify({ type: 'success', messageKey: 'rbacRoleSaved' });
         await loadScope();
-    } catch (error) { handleError(error); }
+    } catch (error) { handleError(error); await focusInvalidRoleField(); }
     finally { saving.value = false; }
 }
 
@@ -248,8 +257,8 @@ onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
                 </DataTable>
             </section>
 
-            <form v-if="editorOpen" novalidate class="flex flex-col gap-5 rounded-xl border border-slate-200 bg-white p-6" @submit.prevent="saveRole">
-                <h3 class="font-semibold">{{ t(editingRole ? 'rbacRoleDetails' : 'rbacCreateRole') }}</h3>
+            <form v-if="editorOpen" ref="roleEditor" novalidate class="flex flex-col gap-5 rounded-xl border border-slate-200 bg-white p-6" @submit.prevent="saveRole">
+                <h3 tabindex="-1" class="font-semibold">{{ t(editingRole ? 'rbacRoleDetails' : 'rbacCreateRole') }}</h3>
                 <p v-if="readOnly || securityReadOnly" class="text-sm text-slate-500">{{ t(readOnly ? 'rbacInheritedReadOnly' : 'rbacSelfRoleReadOnly') }}</p>
                 <div class="grid gap-5 sm:grid-cols-2">
                     <TextInput v-model="roleForm.code" name="role-code" :label="t('rbacCode')" :helper="t('rbacCodeHelp')" :readonly="!!editingRole || readOnly" :error-key="fieldError('code')" required maxlength="64" />
@@ -263,7 +272,7 @@ onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
                     <div class="grid gap-4 sm:grid-cols-2">
                         <label v-for="permission in group" :key="permission.key" class="flex items-start gap-3 text-sm">
                             <input v-model="roleForm.permission_keys" type="checkbox" :value="permission.key" :disabled="securityReadOnly || !permission.available || !permission.delegatable" class="mt-1 size-4 shrink-0 accent-teal-700" />
-                            <span>{{ label(permission) }}<span class="block text-xs text-slate-500">{{ permission.key }} {{ !permission.available ? `· ${t('planned')}` : '' }}</span></span>
+                            <span class="wrap-anywhere">{{ label(permission) }}<span class="block text-xs text-slate-500">{{ permission.key }} {{ !permission.available ? `· ${t('planned')}` : '' }}</span></span>
                         </label>
                     </div>
                 </fieldset>
