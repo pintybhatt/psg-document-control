@@ -1,7 +1,10 @@
 <?php
 
 use App\Http\Controllers\AuthenticatedSessionController;
+use App\Http\Controllers\AuthorizationContextController;
 use App\Http\Controllers\CurrentUserController;
+use App\Http\Controllers\RoleAssignmentController;
+use App\Http\Controllers\RoleController;
 use App\Http\Middleware\EnsureActiveUserSession;
 use App\Http\Middleware\EnsureDevelopmentEnvironment;
 use Illuminate\Contracts\View\View;
@@ -38,4 +41,16 @@ Route::get('/dev/ui-components', function () use ($pages): View {
 Route::middleware(['auth:web', EnsureActiveUserSession::class])->group(function (): void {
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
     Route::get('/api/v1/user', CurrentUserController::class)->name('api.v1.user');
+    Route::prefix('api/v1')->name('api.v1.')->group(function (): void {
+        Route::get('authorization/contexts', [AuthorizationContextController::class, 'index'])->name('authorization.contexts');
+        Route::get('role-assignment-users', [AuthorizationContextController::class, 'users'])->name('assignment-users');
+        Route::get('permissions', [RoleController::class, 'permissions'])->name('permissions');
+        Route::get('roles', [RoleController::class, 'index'])->name('roles.index');
+        Route::get('roles/{role}', [RoleController::class, 'show'])->name('roles.show');
+        Route::post('roles', [RoleController::class, 'store'])->name('roles.store');
+        Route::patch('roles/{role}', [RoleController::class, 'update'])->name('roles.update');
+        Route::get('role-assignments', [RoleAssignmentController::class, 'index'])->name('assignments.index');
+        Route::post('role-assignments', [RoleAssignmentController::class, 'store'])->name('assignments.store');
+        Route::delete('role-assignments/{assignment}', [RoleAssignmentController::class, 'destroy'])->name('assignments.destroy');
+    });
 });

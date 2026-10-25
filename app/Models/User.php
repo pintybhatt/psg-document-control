@@ -3,11 +3,13 @@
 namespace App\Models;
 
 // use Illuminate\Contracts\Auth\MustVerifyEmail;
+use App\Authorization\RbacMutation;
 use Database\Factories\UserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Str;
@@ -42,6 +44,21 @@ class User extends Authenticatable
     public function deactivate(): void
     {
         $this->forceFill(['active' => false])->save();
+    }
+
+    public function save(array $options = []): bool
+    {
+        if ($this->exists && $this->isDirty('active') && ! $this->active) {
+            return app(RbacMutation::class)->run(fn (): bool => parent::save($options));
+        }
+
+        return parent::save($options);
+    }
+
+    /** @return HasMany<UserRoleAssignment, $this> */
+    public function roleAssignments(): HasMany
+    {
+        return $this->hasMany(UserRoleAssignment::class);
     }
 
     /**

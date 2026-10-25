@@ -27,6 +27,13 @@
                 'email' => old('email', ''),
                 'errors' => collect($errors->messages())->map(fn (array $messages): string => $messages[0]),
             ],
+            'administration' => [
+                'contexts' => route('api.v1.authorization.contexts', [], false),
+                'roles' => route('api.v1.roles.index', [], false),
+                'permissions' => route('api.v1.permissions', [], false),
+                'assignments' => route('api.v1.assignments.index', [], false),
+                'users' => route('api.v1.assignment-users', [], false),
+            ],
         ]) }}"></div>
         <noscript>
             <p>Enable JavaScript to open DCMS. / ກະລຸນາເປີດ JavaScript ເພື່ອໃຊ້ DCMS.</p>

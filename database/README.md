@@ -12,7 +12,7 @@
 
 Deactivate historical master records with `active = false`. The explicit `active()` scopes filter only the record's own flag. Ordinary queries and relationships retain inactive records. Parent deactivation does not change child flags or remove history. These flags and scopes are not authorization or site-access enforcement.
 
-No organization mutation endpoints or management screens are supplied in this phase. The existing Administration page remains a placeholder. Future document and user references must add their own restrictive foreign keys.
+No organization mutation endpoints or management screens are supplied in this phase. Phase 2.2C adds scoped role/permission administration, but organization maintenance remains unavailable; see the main README. Future document and user references must add their own restrictive foreign keys.
 
 ## Controlled XPPL initialization
 
@@ -41,6 +41,6 @@ The command is not called by migrations or the default seeder. The default seede
 - SQLite ignores declared VARCHAR lengths and uses dynamic typing; MySQL in strict mode enforces VARCHAR lengths and typed integer storage for Laravel's boolean columns. Neither migration adds a CHECK limiting `active` to only 0/1. Initialization validates name lengths before writing; future input boundaries must validate code length (32), name length (255) and boolean values. The required ownership and uniqueness constraints are enforced by both databases.
 - MySQL DDL is not transactional in the same way as SQLite DDL. Migrations are separate, ordered creates (companies, sites, departments); rollbacks drop them in reverse order. Rolling back populated tables destroys their records and is not a substitute for deactivation.
 
-Automated persistence/integrity tests use the isolated in-memory SQLite database configured in `phpunit.xml`. MySQL 8.4 execution requires a dedicated disposable DCMS test database and has not been performed locally. Do not point migration or test commands at LVC Inventory or XPPL Toll databases.
+Automated persistence/integrity tests use the isolated in-memory SQLite database configured in `phpunit.xml`. Phase 2.2C also ran the complete PHP suite, including these organizational integrity regressions, against a disposable MySQL 8.4.11 instance with repository-local data and networking disabled. No existing company database was used. See the main README for the RBAC constraints and verification boundaries. Do not point migration or test commands at LVC Inventory or XPPL Toll databases.
 
 Database references: [MySQL 8.4 foreign-key requirements](https://dev.mysql.com/doc/refman/8.4/en/create-table-foreign-keys.html), [SQLite foreign-key enforcement](https://www.sqlite.org/foreignkeys.html), and [SQLite types and collations](https://www.sqlite.org/datatype3.html).
