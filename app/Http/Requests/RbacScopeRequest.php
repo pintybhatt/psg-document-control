@@ -5,6 +5,7 @@ namespace App\Http\Requests;
 use App\Authorization\AccessControl;
 use App\Models\AuthorizationScope;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
@@ -25,13 +26,24 @@ class RbacScopeRequest extends FormRequest
         if (! $permission || ! $this->user()) {
             return false;
         }
-        if (! is_string($this->input('scope_type')) || ($this->filled('company_id') && ! is_numeric($this->input('company_id')))
-            || ($this->filled('site_id') && ! is_numeric($this->input('site_id')))) {
+        if (Validator::make($this->only(['scope_type', 'company_id', 'site_id']), [
+            'scope_type' => ['required', Rule::in(['global', 'company', 'site'])],
+            'company_id' => ['nullable', 'integer', 'min:1'],
+            'site_id' => ['nullable', 'integer', 'min:1'],
+        ])->fails()) {
             throw ValidationException::withMessages(['scope_type' => 'rbacInvalidScope']);
         }
-        try {
-            $scope = AuthorizationScope::context($this->input('scope_type'), $this->filled('company_id') ? (int) $this->input('company_id') : null, $this->filled('site_id') ? (int) $this->input('site_id') : null);
-        } catch (ValidationException) {
+        $scope = new AuthorizationScope([
+            'scope_type' => $this->input('scope_type'),
+            'company_id' => $this->filled('company_id') ? $this->integer('company_id') : null,
+            'site_id' => $this->filled('site_id') ? $this->integer('site_id') : null,
+        ]);
+        $validShape = match ($scope->scope_type) {
+            'global' => $scope->company_id === null && $scope->site_id === null,
+            'company' => $scope->company_id !== null && $scope->site_id === null,
+            'site' => $scope->company_id !== null && $scope->site_id !== null,
+        };
+        if (! $validShape) {
             throw ValidationException::withMessages(['scope_type' => 'rbacInvalidScope']);
         }
 
@@ -57,6 +69,12 @@ class RbacScopeRequest extends FormRequest
     public function scopeContext(): AuthorizationScope
     {
         return AuthorizationScope::context($this->validated('scope_type'), $this->filled('company_id') ? (int) $this->validated('company_id') : null, $this->filled('site_id') ? (int) $this->validated('site_id') : null);
+    }
+
+    protected function scopeForValidation(): AuthorizationScope
+    {
+        return AuthorizationScope::context($this->input('scope_type'), $this->filled('company_id') ? $this->integer('company_id') : null,
+            $this->filled('site_id') ? $this->integer('site_id') : null);
     }
 
     /** @return array<string, string> */

@@ -4,7 +4,9 @@ namespace App\Http\Requests;
 
 use App\Authorization\AccessControl;
 use App\Models\AuthorizationScope;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\Rules\Exists;
 
 class MembershipRequest extends RbacScopeRequest
 {
@@ -31,12 +33,12 @@ class MembershipRequest extends RbacScopeRequest
         $route = $this->route()->getName();
         if ($route === 'api.v1.memberships.store' || $route === 'api.v1.membership-units') {
             $rules += ['unit_type' => ['required', Rule::in(['company', 'site', 'department'])],
-                'unit_company_id' => [$route === 'api.v1.memberships.store' ? 'required' : 'nullable', 'integer', 'min:1', 'exists:companies,id'],
-                'unit_site_id' => ['nullable', 'integer', 'min:1', 'exists:sites,id'],
-                'unit_department_id' => ['nullable', 'integer', 'min:1', 'exists:departments,id']];
+                'unit_company_id' => [$route === 'api.v1.memberships.store' ? 'required' : 'nullable', 'integer', 'min:1', $this->unitExists('company')],
+                'unit_site_id' => ['nullable', 'integer', 'min:1', $this->unitExists('site')],
+                'unit_department_id' => ['nullable', 'integer', 'min:1', $this->unitExists('department')]];
         }
         if ($route === 'api.v1.memberships.store') {
-            $rules += ['user_id' => ['required', 'integer', 'exists:users,id'], 'confirm_regrant' => ['sometimes', 'boolean']];
+            $rules += ['user_id' => ['required', 'integer', Rule::exists('users', 'id')->where(fn (Builder $query): Builder => $query->whereIn('id', app(AccessControl::class)->eligibleUsers($this->user(), $this->scopeForValidation())->select('users.id')))], 'confirm_regrant' => ['sometimes', 'boolean']];
         }
         if ($route === 'api.v1.memberships.update') {
             $rules += ['active' => ['required', 'boolean']];
@@ -51,5 +53,28 @@ class MembershipRequest extends RbacScopeRequest
         }
 
         return $rules;
+    }
+
+    private function unitExists(string $type): Exists
+    {
+        $scope = $this->scopeForValidation();
+
+        return Rule::exists(match ($type) {
+            'company' => 'companies', 'site' => 'sites', 'department' => 'departments'
+        }, 'id')
+            ->where(function (Builder $query) use ($type, $scope): void {
+                if ($scope->company_id !== null) {
+                    $query->where($type === 'company' ? 'id' : 'company_id', $scope->company_id);
+                }
+                if ($scope->site_id !== null && $type !== 'company') {
+                    $query->where($type === 'site' ? 'id' : 'site_id', $scope->site_id);
+                }
+                if ($type !== 'company' && $this->filled('unit_company_id')) {
+                    $query->where('company_id', $this->integer('unit_company_id'));
+                }
+                if ($type === 'department' && $this->filled('unit_site_id')) {
+                    $query->where('site_id', $this->integer('unit_site_id'));
+                }
+            });
     }
 }

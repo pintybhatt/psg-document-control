@@ -37,16 +37,21 @@ class MembershipController extends Controller
         return (new MembershipResource($manager->assign($request->user(), $scope, $request->validated())))->forScope($scope);
     }
 
-    public function update(MembershipRequest $request, OrganizationMembership $membership, ManageMemberships $manager): MembershipResource
+    public function update(MembershipRequest $request, string $membership, ManageMemberships $manager, MembershipAccess $memberships): MembershipResource
     {
         $scope = $request->scopeContext();
+        $membership = $memberships->visible($scope)->whereKey($membership)->first();
+        abort_if($membership === null, 404);
 
         return (new MembershipResource($manager->update($request->user(), $scope, $membership, $request->boolean('active'))))->forScope($scope);
     }
 
-    public function destroy(MembershipRequest $request, OrganizationMembership $membership, ManageMemberships $manager): Response
+    public function destroy(MembershipRequest $request, string $membership, ManageMemberships $manager, MembershipAccess $memberships): Response
     {
-        $manager->revoke($request->user(), $request->scopeContext(), $membership);
+        $scope = $request->scopeContext();
+        $membership = $memberships->visible($scope)->whereKey($membership)->first();
+        abort_if($membership === null, 404);
+        $manager->revoke($request->user(), $scope, $membership);
 
         return response()->noContent();
     }

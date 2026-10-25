@@ -103,7 +103,7 @@ class RbacAdministrationTest extends TestCase
         $this->signIn($actor);
 
         $this->getJson($this->scopedUrl('roles', $otherScope))->assertForbidden();
-        $this->postJson('/api/v1/roles', array_replace($this->roleData($scope), ['company_id' => $other->company_id]))->assertUnprocessable();
+        $this->postJson('/api/v1/roles', array_replace($this->roleData($scope), ['company_id' => $other->company_id]))->assertForbidden();
         $this->getJson($this->scopedUrl('roles', $scope))->assertOk()->assertJsonFragment(['code' => 'SECURITY_ADMINISTRATOR', 'editable' => false]);
         $template = Role::query()->where('code', 'SECURITY_ADMINISTRATOR')->firstOrFail();
         $payload = $this->roleData($scope);
@@ -126,7 +126,7 @@ class RbacAdministrationTest extends TestCase
         $this->signIn($actor);
         $template = Role::query()->where('code', 'VIEWER')->firstOrFail();
 
-        $this->postJson('/api/v1/role-assignments', $this->scopeData($scope) + ['user_id' => $target->id, 'role_id' => $template->id])->assertForbidden();
+        $this->postJson('/api/v1/role-assignments', $this->scopeData($scope) + ['user_id' => $target->id, 'role_id' => $template->id])->assertUnprocessable()->assertJsonValidationErrors('user_id');
         $this->postJson('/api/v1/role-assignments', ['scope_type' => 'global', 'user_id' => $target->id, 'role_id' => $template->id, 'confirm_global' => true])->assertForbidden();
     }
 
@@ -154,7 +154,7 @@ class RbacAdministrationTest extends TestCase
         $role = Role::query()->where('code', 'VIEWER')->firstOrFail();
 
         $this->postJson('/api/v1/role-assignments', $this->scopeData($scope) + ['user_id' => $target->id + 1, 'role_id' => $role->id, 'confirm_global' => true])->assertUnprocessable()->assertJsonValidationErrors('user_id');
-        $this->postJson('/api/v1/role-assignments', $this->scopeData($scope) + ['user_id' => $target->id, 'role_id' => $role->id, 'confirm_global' => true])->assertForbidden();
+        $this->postJson('/api/v1/role-assignments', $this->scopeData($scope) + ['user_id' => $target->id, 'role_id' => $role->id, 'confirm_global' => true])->assertUnprocessable()->assertJsonValidationErrors('user_id');
         $this->assertDatabaseCount('user_role_assignments', 1);
     }
 
@@ -217,7 +217,7 @@ class RbacAdministrationTest extends TestCase
         $this->signIn($actor);
 
         $this->getJson($this->scopedUrl('role-assignments', $scope))->assertOk()->assertJsonMissing(['email' => $target->email]);
-        $this->deleteJson('/api/v1/role-assignments/'.$assignment->id, $this->scopeData($scope))->assertForbidden();
+        $this->deleteJson('/api/v1/role-assignments/'.$assignment->id, $this->scopeData($scope))->assertNotFound();
 
         $this->assertTrue($assignment->refresh()->active);
         $this->assertDatabaseCount('rbac_audits', 0);

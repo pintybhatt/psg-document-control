@@ -31,9 +31,12 @@ class RoleAssignmentController extends Controller
         return new RoleAssignmentResource($assignment);
     }
 
-    public function destroy(RbacScopeRequest $request, UserRoleAssignment $assignment, ManageRoles $manager): Response
+    public function destroy(RbacScopeRequest $request, string $assignment, ManageRoles $manager): Response
     {
-        $manager->revoke($request->user(), $request->scopeContext(), $assignment);
+        $scope = $request->scopeContext();
+        $assignment = UserRoleAssignment::query()->where('scope_id', $scope->id)->whereKey($assignment)->first();
+        abort_if($assignment === null, 404);
+        $manager->revoke($request->user(), $scope, $assignment);
 
         return response()->noContent();
     }

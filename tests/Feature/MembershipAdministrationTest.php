@@ -102,11 +102,11 @@ class MembershipAdministrationTest extends TestCase
         $this->grant($target, $scope, []);
         $otherMembership = OrganizationMembership::factory()->atSite($foreign)->create();
 
-        $this->postJson('/api/v1/memberships', $this->payload($scope, $target, $sibling))->assertForbidden();
-        $this->postJson('/api/v1/memberships', $this->payload($scope, $target, $foreign))->assertForbidden();
+        $this->postJson('/api/v1/memberships', $this->payload($scope, $target, $sibling))->assertUnprocessable()->assertJsonValidationErrors('unit_site_id');
+        $this->postJson('/api/v1/memberships', $this->payload($scope, $target, $foreign))->assertUnprocessable()->assertJsonValidationErrors('unit_company_id');
         $this->postJson('/api/v1/memberships', $this->payload(AuthorizationScope::context('global'), $target, $site))->assertForbidden();
-        $this->patchJson('/api/v1/memberships/'.$otherMembership->id, $this->scopeData($scope) + ['active' => false])->assertForbidden();
-        $this->deleteJson('/api/v1/memberships/'.$otherMembership->id, $this->scopeData($scope))->assertForbidden();
+        $this->patchJson('/api/v1/memberships/'.$otherMembership->id, $this->scopeData($scope) + ['active' => false])->assertNotFound();
+        $this->deleteJson('/api/v1/memberships/'.$otherMembership->id, $this->scopeData($scope))->assertNotFound();
         $this->getJson($this->scopedUrl('memberships', $scope))->assertOk()->assertJsonCount(0, 'data');
         $this->assertTrue($otherMembership->refresh()->active);
         $this->assertDatabaseCount('membership_audits', 0);
@@ -142,7 +142,7 @@ class MembershipAdministrationTest extends TestCase
         $this->getJson($this->scopedUrl('membership-users', $scope))->assertOk()->assertJsonCount(1, 'data')
             ->assertJsonFragment(['email' => $member->user->email])->assertJsonMissing(['email' => $unrelated->email])->assertJsonMissing(['email' => $sibling->user->email]);
         $this->getJson($this->scopedUrl('role-assignment-users', $scope))->assertOk()->assertJsonFragment(['email' => $member->user->email]);
-        $this->postJson('/api/v1/memberships', $this->payload($scope, $unrelated, $site))->assertForbidden();
+        $this->postJson('/api/v1/memberships', $this->payload($scope, $unrelated, $site))->assertUnprocessable()->assertJsonValidationErrors('user_id');
     }
 
     public function test_self_assignment_updates_and_revocation_are_forbidden(): void

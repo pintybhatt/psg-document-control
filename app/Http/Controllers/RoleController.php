@@ -9,7 +9,6 @@ use App\Http\Requests\RbacScopeRequest;
 use App\Http\Requests\StoreRoleRequest;
 use App\Http\Resources\RoleResource;
 use App\Models\Permission;
-use App\Models\Role;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
@@ -32,11 +31,12 @@ class RoleController extends Controller
         return $resources;
     }
 
-    public function show(RbacScopeRequest $request, Role $role, AccessControl $access): RoleResource
+    public function show(RbacScopeRequest $request, string $role, AccessControl $access): RoleResource
     {
         $scope = $request->scopeContext();
         $access->authorize($request->user(), 'roles.view', $scope);
-        abort_unless($role->scope->covers($scope), 403, 'rbacForbidden');
+        $role = $access->visibleRoles($scope)->whereKey($role)->first();
+        abort_if($role === null, 404);
 
         return (new RoleResource($role->load(['permissions', 'scope'])))->forScope($scope);
     }
@@ -49,9 +49,11 @@ class RoleController extends Controller
         return (new RoleResource($role))->forScope($scope);
     }
 
-    public function update(StoreRoleRequest $request, Role $role, ManageRoles $manager): RoleResource
+    public function update(StoreRoleRequest $request, string $role, ManageRoles $manager, AccessControl $access): RoleResource
     {
         $scope = $request->scopeContext();
+        $role = $access->visibleRoles($scope)->whereKey($role)->first();
+        abort_if($role === null, 404);
         $role = $manager->saveRole($request->user(), $scope, $request->validated(), $role);
 
         return (new RoleResource($role))->forScope($scope);
