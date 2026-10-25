@@ -36,6 +36,12 @@
                 'memberships' => route('api.v1.memberships.index', [], false),
                 'membershipUnits' => route('api.v1.membership-units', [], false),
                 'membershipUsers' => route('api.v1.membership-users', [], false),
+                'masterData' => [
+                    'categories' => route('api.v1.master-data.index', ['kind' => 'categories'], false),
+                    'types' => route('api.v1.master-data.index', ['kind' => 'types'], false),
+                    'registers' => route('api.v1.master-data.index', ['kind' => 'registers'], false),
+                    'classifications' => route('api.v1.master-data.classifications', [], false),
+                ],
             ],
         ]) }}"></div>
         <noscript>

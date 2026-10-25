@@ -3,6 +3,7 @@
 use App\Http\Controllers\AuthenticatedSessionController;
 use App\Http\Controllers\AuthorizationContextController;
 use App\Http\Controllers\CurrentUserController;
+use App\Http\Controllers\DocumentMasterDataController;
 use App\Http\Controllers\MembershipController;
 use App\Http\Controllers\RoleAssignmentController;
 use App\Http\Controllers\RoleController;
@@ -43,6 +44,10 @@ Route::middleware(['auth:web', EnsureActiveUserSession::class])->group(function 
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
     Route::get('/api/v1/user', CurrentUserController::class)->name('api.v1.user');
     Route::prefix('api/v1')->name('api.v1.')->group(function (): void {
+        Route::get('document-master-data/classifications', [DocumentMasterDataController::class, 'classifications'])->name('master-data.classifications');
+        Route::get('document-master-data/{kind}', [DocumentMasterDataController::class, 'index'])->whereIn('kind', ['categories', 'types', 'registers'])->name('master-data.index');
+        Route::post('document-master-data/{kind}', [DocumentMasterDataController::class, 'store'])->whereIn('kind', ['categories', 'types', 'registers'])->name('master-data.store');
+        Route::patch('document-master-data/{kind}/{record}', [DocumentMasterDataController::class, 'update'])->whereIn('kind', ['categories', 'types', 'registers'])->name('master-data.update');
         Route::get('organization-contexts', [MembershipController::class, 'operationalContexts'])->name('organization-contexts');
         Route::get('membership-units', [MembershipController::class, 'units'])->name('membership-units');
         Route::get('membership-users', [MembershipController::class, 'users'])->name('membership-users');

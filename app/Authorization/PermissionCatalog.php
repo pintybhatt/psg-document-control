@@ -22,6 +22,8 @@ class PermissionCatalog
     public static function definitions(): array
     {
         return [
+            'master-data.view' => ['area' => 'master-data', 'name_en' => 'View document master data', 'name_lo' => 'ເບິ່ງຂໍ້ມູນຫຼັກເອກະສານ', 'available' => true],
+            'master-data.manage' => ['area' => 'master-data', 'name_en' => 'Manage document master data', 'name_lo' => 'ຈັດການຂໍ້ມູນຫຼັກເອກະສານ', 'available' => true],
             'documents.metadata.view' => ['area' => 'document-security', 'name_en' => 'Discover and view document metadata', 'name_lo' => 'ຄົ້ນຫາ ແລະ ເບິ່ງຂໍ້ມູນເອກະສານ', 'available' => true],
             'documents.content.preview' => ['area' => 'document-security', 'name_en' => 'Preview document content', 'name_lo' => 'ເບິ່ງເນື້ອຫາເອກະສານລ່ວງໜ້າ', 'available' => true],
             'documents.attachments.download' => ['area' => 'document-security', 'name_en' => 'Download document attachments', 'name_lo' => 'ດາວໂຫຼດໄຟລ໌ແນບເອກະສານ', 'available' => true],
