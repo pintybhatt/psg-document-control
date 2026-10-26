@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Authorization\CorrespondenceContexts;
 use App\Authorization\ManageOutgoingCorrespondence;
+use App\Authorization\ManageOutgoingOperations;
 use App\Http\Requests\OutgoingCorrespondenceRequest;
 use App\Http\Resources\OutgoingCorrespondenceResource;
 use App\Models\DocumentType;
@@ -24,7 +25,7 @@ class OutgoingCorrespondenceController extends Controller
         $perPage = $request->integer('per_page', 10);
         $rows = [];
         $total = 0;
-        foreach ($outgoing->query($request->documentScope())->with(['profile', 'type.category', 'recipients'])->orderByDesc('id')->lazy() as $record) {
+        foreach ($outgoing->query($request->documentScope())->with(['profile', 'type.category', 'recipients.delivery', 'operation'])->orderByDesc('id')->lazy() as $record) {
             if ($outgoing->canRead($request->user(), $record)) {
                 if ($total >= ($page - 1) * $perPage && count($rows) < $perPage) {
                     $rows[] = $record;
@@ -47,11 +48,11 @@ class OutgoingCorrespondenceController extends Controller
         return response()->json(['data' => $types]);
     }
 
-    public function show(OutgoingCorrespondenceRequest $request, string $record, ManageOutgoingCorrespondence $outgoing): JsonResponse
+    public function show(OutgoingCorrespondenceRequest $request, string $record, ManageOutgoingCorrespondence $outgoing, ManageOutgoingOperations $operations): JsonResponse
     {
         $model = $outgoing->find($request->user(), $request->documentScope(), $record);
 
-        return response()->json(['data' => new OutgoingCorrespondenceResource($model), 'audits' => $model->audits()->get(['id', 'actor_id', 'action', 'changed_fields', 'created_at'])]);
+        return response()->json(['data' => new OutgoingCorrespondenceResource($model), 'audits' => $model->audits()->get(['id', 'actor_id', 'action', 'changed_fields', 'created_at'])] + $operations->details($request->user(), $model));
     }
 
     public function store(OutgoingCorrespondenceRequest $request, ManageOutgoingCorrespondence $outgoing): OutgoingCorrespondenceResource

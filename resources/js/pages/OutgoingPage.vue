@@ -32,6 +32,6 @@ onBeforeUnmount(() => controller.abort());
         <p v-if="error" role="alert">{{ t(error) }}</p>
         <SelectInput id="outgoing-context" v-model="selectedKey" :label="t('outgoingSendingUnit')" :options="options" :disabled="loading" />
         <p v-if="!loading && !contexts.length && !error">{{ t('outgoingNoContexts') }}</p>
-        <OutgoingCorrespondence v-if="selected" :scope="selected" :endpoint="endpoints.endpoint" :csrf-token="csrfToken" @unauthorized="revoke" />
+        <OutgoingCorrespondence v-if="selected" :scope="selected" :endpoint="endpoints.endpoint" :incoming-endpoint="endpoints.incoming" :csrf-token="csrfToken" @unauthorized="revoke" />
     </section>
 </template>

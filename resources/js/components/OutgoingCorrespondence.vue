@@ -1,6 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import UiButton from './ui/UiButton.vue';
+import OutgoingDispatch from './OutgoingDispatch.vue';
 import TextInput from './ui/TextInput.vue';
 import TextareaInput from './ui/TextareaInput.vue';
 import SelectInput from './ui/SelectInput.vue';
@@ -11,7 +12,7 @@ import { useNotifications } from './ui/useNotifications.js';
 import { useLocalization } from '../localization/index.js';
 import { createJsonClient } from '../utilities/jsonClient.js';
 
-const props = defineProps({ scope: { type: Object, required: true }, endpoint: { type: String, required: true }, csrfToken: { type: String, required: true } });
+const props = defineProps({ scope: { type: Object, required: true }, endpoint: { type: String, required: true }, csrfToken: { type: String, required: true }, incomingEndpoint: { type: String, default: '' } });
 const emit = defineEmits(['unauthorized']);
 const { t, language } = useLocalization();
 const request = createJsonClient(props.csrfToken);
@@ -26,6 +27,7 @@ const error = ref('');
 const fields = ref({});
 const detail = ref(null);
 const audits = ref([]);
+const handling = ref(null);
 const editing = ref(false);
 const confirmation = ref(false);
 const editorElement = ref(null);
@@ -43,7 +45,7 @@ const typeOptions = computed(() => [{ value: '', label: t('uiChoose') }, ...type
 const classificationOptions = computed(() => ['normal', 'confidential', 'highly_confidential'].map(value => ({ value, label: t(`confidentiality-${value}`) })));
 const priorityOptions = computed(() => ['normal', 'urgent'].map(value => ({ value, label: t(`outgoingPriority-${value}`) })));
 const columns = computed(() => [{ key: 'internal_number', label: t('outgoingNumber'), type: 'reference' }, { key: 'official_number', label: t('outgoingOfficialNumber'), type: 'reference' }, { key: 'subject', label: t('outgoing-subject') }, { key: 'document_date', label: t('outgoing-document_date') }, { key: 'status_label', label: t('uiStatus') }, { key: 'actions', label: t('rbacActions') }]);
-const displayRows = computed(() => rows.value.map(item => ({ ...item, internal_number: item.internal_number ?? '—', official_number: item.official_number ?? '—', status_label: t(`outgoingStatus-${item.status}`) })));
+const displayRows = computed(() => rows.value.map(item => ({ ...item, internal_number: item.internal_number ?? '—', official_number: item.official_number ?? '—', status_label: t(`outgoingStatus-${item.operations?.status ?? item.status}`) })));
 function scopeData() { return { company_id: props.scope.company_id, site_id: props.scope.site_id, department_id: props.scope.department_id }; }
 function url(path = '') { return `${props.endpoint}${path}?${new URLSearchParams(Object.entries({ ...scopeData(), page: page.value }).filter(([, value]) => value != null))}`; }
 function fail(failure) {
@@ -52,7 +54,7 @@ function fail(failure) {
     error.value = Object.values(fields.value).flat().find(value => /^(outgoing|rbac|numbering)/.test(value)) ?? failure.message;
     if (!/^(outgoing|rbac|numbering)/.test(error.value)) { error.value = 'rbacRequestFailed'; }
     if ([401, 403, 404, 419].includes(failure.status)) {
-        rows.value = []; detail.value = null; audits.value = []; editing.value = false; confirmation.value = false; types.value = []; total.value = 0;
+        rows.value = []; detail.value = null; audits.value = []; handling.value = null; editing.value = false; confirmation.value = false; types.value = []; total.value = 0;
         if (failure.status !== 404) { controller?.abort(); emit('unauthorized', failure); }
     }
 }
@@ -64,7 +66,7 @@ async function load(signal = controller.signal) {
 }
 async function reset() {
     controller?.abort(); controller = new AbortController(); const signal = controller.signal;
-    rows.value = []; types.value = []; detail.value = null; audits.value = []; editing.value = false; confirmation.value = false; error.value = ''; fields.value = {}; page.value = 1; total.value = 0; saving.value = false;
+    rows.value = []; types.value = []; detail.value = null; audits.value = []; handling.value = null; editing.value = false; confirmation.value = false; error.value = ''; fields.value = {}; page.value = 1; total.value = 0; saving.value = false;
     await load(signal);
     if (signal.aborted) { return; }
     try { const result = await request(url('/lookups'), { signal }); if (!signal.aborted) { types.value = result.data; } }
@@ -72,17 +74,17 @@ async function reset() {
 }
 async function show(row) {
     const signal = controller.signal;
-    detail.value = null; audits.value = []; editing.value = false; error.value = ''; fields.value = {};
+    detail.value = null; audits.value = []; handling.value = null; editing.value = false; error.value = ''; fields.value = {};
     loading.value = true;
-    try { const result = await request(url(`/${row.id}`), { signal }); if (!signal.aborted) { detail.value = result.data; audits.value = result.audits; } }
+    try { const result = await request(url(`/${row.id}`), { signal }); if (!signal.aborted) { detail.value = result.data; audits.value = result.audits; handling.value = result; } }
     catch (failure) { if (!signal.aborted) { fail(failure); } }
     finally { if (!signal.aborted) { loading.value = false; } }
 }
 async function edit(create = false) {
-    if (create) { detail.value = null; audits.value = []; }
+    if (create) { detail.value = null; audits.value = []; handling.value = null; }
     const record = detail.value;
     for (const field of [...textFields, ...descriptionFields]) { form[field] = record?.[field] ?? ''; }
-    Object.assign(form, { type_id: record?.type_id ?? '', priority: record?.priority ?? 'normal', classification: record?.classification ?? 'normal', recipients: record?.recipients?.map(item => ({ ...emptyRecipient(item.kind), ...item })) ?? [emptyRecipient()] });
+    Object.assign(form, { type_id: record?.type_id ?? '', priority: record?.priority ?? 'normal', classification: record?.classification ?? 'normal', recipients: record?.recipients?.map(item => Object.fromEntries(['kind', ...recipientFields].map(field => [field, item[field] ?? '']))) ?? [emptyRecipient()] });
     fields.value = {}; error.value = ''; editing.value = true;
     await nextTick(); editorElement.value?.querySelector('h2')?.focus();
 }
@@ -108,6 +110,7 @@ async function register() {
     } catch (failure) { if (!signal.aborted) { confirmation.value = false; fail(failure); } }
     finally { if (!signal.aborted) { saving.value = false; } }
 }
+async function operationSaved(record) { await show(record); await load(); }
 watch(() => props.scope.key, reset, { immediate: true });
 onBeforeUnmount(() => controller?.abort());
 </script>
@@ -147,7 +150,7 @@ onBeforeUnmount(() => controller?.abort());
             <dl class="grid gap-4 md:grid-cols-2">
                 <div><dt class="text-sm text-slate-600">{{ t('outgoingNumber') }}</dt><dd class="font-mono">{{ detail.internal_number ?? '—' }}</dd></div>
                 <div><dt class="text-sm text-slate-600">{{ t('outgoingOfficialNumber') }}</dt><dd class="font-mono">{{ detail.official_number ?? '—' }}</dd></div>
-                <div><dt class="text-sm text-slate-600">{{ t('uiStatus') }}</dt><dd>{{ t(`outgoingStatus-${detail.status}`) }}</dd></div>
+                <div><dt class="text-sm text-slate-600">{{ t('uiStatus') }}</dt><dd>{{ t(`outgoingStatus-${detail.operations?.status ?? detail.status}`) }}</dd></div>
                 <div><dt class="text-sm text-slate-600">{{ t('outgoingType') }}</dt><dd>{{ label(detail.category) }} / {{ label(detail.type) }}</dd></div>
                 <div><dt class="text-sm text-slate-600">{{ t('outgoingClassification') }}</dt><dd>{{ t(`confidentiality-${detail.classification}`) }}</dd></div>
                 <div><dt class="text-sm text-slate-600">{{ t('outgoingPriority') }}</dt><dd>{{ t(`outgoingPriority-${detail.priority}`) }}</dd></div>
@@ -158,6 +161,7 @@ onBeforeUnmount(() => controller?.abort());
             <h3 class="font-semibold">{{ t('outgoingRecipients') }}</h3>
             <ul class="flex flex-col gap-3"><li v-for="(recipient, index) in detail.recipients" :key="index" class="rounded-xl border border-slate-200 p-3"><p class="font-medium">{{ t(`outgoingRecipient-${recipient.kind}`) }} · {{ recipient.organization }}</p><p v-for="field in recipientFields.filter(field => field !== 'organization' && recipient[field])" :key="field" class="whitespace-pre-wrap wrap-anywhere">{{ t(`outgoingRecipient-${field}`) }}: {{ recipient[field] }}</p></li></ul>
             <p v-if="detail.status === 'registered'" class="text-sm text-slate-600">{{ t('outgoingImmutable') }}</p>
+            <OutgoingDispatch v-if="detail.status === 'registered'" :key="detail.id" :record="detail" :scope="scope" :endpoint="endpoint" :incoming-endpoint="incomingEndpoint" :csrf-token="csrfToken" :history="handling?.history ?? []" :related-incoming="handling?.related_incoming ?? []" @failure="fail" @saved="operationSaved" />
             <h3 class="font-semibold">{{ t('outgoingHistory') }}</h3>
             <ul class="flex flex-col gap-2"><li v-for="audit in audits" :key="audit.id">{{ t(`outgoingAudit-${audit.action}`) }} · {{ audit.created_at }} · {{ t('outgoingActor') }} {{ audit.actor_id }}</li></ul>
         </section>

@@ -9,7 +9,7 @@ import lo from '../../resources/js/localization/lo.js';
 
 const scope = { key: '7:site', company_id: 4, site_id: 7, department_id: null, permissions: ['outgoing.drafts.manage', 'outgoing.register', 'numbering.issue'] };
 const type = { id: 9, name_en: 'Letter', name_lo: 'ຈົດໝາຍ', category: { id: 8, name_en: 'Correspondence', name_lo: 'ເອກະສານ' } };
-const draft = { id: 1, type_id: 9, type, category: type.category, subject: '<script>Example subject</script>', signatory_name: 'Example signatory', signatory_title: 'Example title', document_date: '2026-10-26', priority: 'normal', classification: 'normal', status: 'draft', internal_number: null, official_number: null, recipients: [{ kind: 'primary', organization: 'Example recipient', email: 'recipient@example.test' }, { kind: 'copy', organization: 'Copy recipient' }] };
+const draft = { id: 1, type_id: 9, type, category: type.category, subject: '<script>Example subject</script>', signatory_name: 'Example signatory', signatory_title: 'Example title', document_date: '2026-10-26', priority: 'normal', classification: 'normal', status: 'draft', internal_number: null, official_number: null, recipients: [{ id: 11, delivery: null, kind: 'primary', organization: 'Example recipient', email: 'recipient@example.test' }, { id: 12, delivery: null, kind: 'copy', organization: 'Copy recipient' }] };
 const descriptors = Object.getOwnPropertyDescriptors(HTMLDialogElement.prototype);
 enableAutoUnmount(afterEach);
 beforeEach(() => localStorage.clear());
@@ -25,8 +25,8 @@ afterAll(() => {
     }
 });
 function response(data, status = 200) { return { ok: status < 400, status, json: async () => structuredClone(data) }; }
-function server({ mutationError = null, detailError = null } = {}) {
-    let record = structuredClone(draft);
+function server({ mutationError = null, detailError = null, registered = false } = {}) {
+    let record = { ...structuredClone(draft), ...(registered ? { status: 'registered', operations: { status: 'dispatched', revision: 1 } } : {}) };
     const fetch = vi.fn(async (url, options = {}) => {
         const path = new URL(url, 'http://localhost').pathname;
         const method = options.method ?? 'GET';
@@ -49,6 +49,14 @@ function button(wrapper, text) { const found = wrapper.findAll('button').find(it
 async function show(wrapper) { await button(wrapper, 'Details').trigger('click'); await flushPromises(); }
 
 describe('outgoing correspondence', () => {
+    it('uses the operational status in the register and opens dispatch handling from details', async () => {
+        server({ registered: true });
+        const wrapper = await render({ ...scope, permissions: [...scope.permissions, 'outgoing.operations.manage'] });
+        expect(wrapper.text()).toContain('Dispatched');
+        await show(wrapper);
+        expect(wrapper.text()).toContain('Dispatch and delivery');
+        expect(wrapper.findAll('button').some(item => item.text() === 'Delivery / acknowledgment')).toBe(true);
+    });
     it('creates a draft with multiple primary and copy recipients, CSRF and no numbers', async () => {
         const fetch = server(); const wrapper = await render();
         await button(wrapper, 'Create outgoing draft').trigger('click');
@@ -80,6 +88,7 @@ describe('outgoing correspondence', () => {
         const body = JSON.parse(fetch.mock.calls.find(([, options]) => options.method === 'PATCH')[1].body);
         expect(body.recipients).toHaveLength(1); expect(body.recipients[0].organization).toBe('Changed recipient');
         expect(body).not.toHaveProperty('classification');
+        expect(body.recipients[0]).not.toHaveProperty('id'); expect(body.recipients[0]).not.toHaveProperty('delivery');
     });
     it('confirms formal registration before sending and displays the two distinct numbers read-only', async () => {
         const fetch = server(); const wrapper = await render(); await show(wrapper);
