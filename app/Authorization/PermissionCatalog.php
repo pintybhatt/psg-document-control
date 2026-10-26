@@ -22,6 +22,9 @@ class PermissionCatalog
     public static function definitions(): array
     {
         return [
+            'documents.attachments.manage' => ['area' => 'documents', 'name_en' => 'Upload and replace document attachments', 'name_lo' => 'ອັບໂຫຼດ ແລະ ທົດແທນໄຟລ໌ແນບ', 'available' => true],
+            'documents.custody.manage' => ['area' => 'documents', 'name_en' => 'Manage physical document custody', 'name_lo' => 'ຈັດການການຄອບຄອງເອກະສານ', 'available' => true],
+            'storage-locations.manage' => ['area' => 'master-data', 'name_en' => 'Manage physical storage locations', 'name_lo' => 'ຈັດການສະຖານທີ່ເກັບເອກະສານ', 'available' => true],
             'controlled.drafts.manage' => ['area' => 'documents', 'name_en' => 'Manage controlled document drafts', 'name_lo' => 'ຈັດການຮ່າງເອກະສານຄວບຄຸມ', 'available' => true],
             'controlled.register' => ['area' => 'documents', 'name_en' => 'Register controlled documents', 'name_lo' => 'ລົງທະບຽນເອກະສານຄວບຄຸມ', 'available' => true],
             'controlled.release' => ['area' => 'documents', 'name_en' => 'Release controlled revisions', 'name_lo' => 'ປະກາດໃຊ້ສະບັບເອກະສານຄວບຄຸມ', 'available' => true],

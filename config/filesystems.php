@@ -30,6 +30,14 @@ return [
 
     'disks' => [
 
+        'documents' => [
+            'driver' => 'local',
+            'root' => storage_path('app/document-vault'),
+            'visibility' => 'private',
+            'serve' => false,
+            'throw' => true,
+        ],
+
         'local' => [
             'driver' => 'local',
             'root' => storage_path('app/private'),

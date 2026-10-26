@@ -6,6 +6,7 @@ use App\Http\Controllers\ControlledDocumentController;
 use App\Http\Controllers\CurrentUserController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DocumentMasterDataController;
+use App\Http\Controllers\DocumentStorageController;
 use App\Http\Controllers\IncomingCorrespondenceController;
 use App\Http\Controllers\IncomingOperationController;
 use App\Http\Controllers\MembershipController;
@@ -14,6 +15,7 @@ use App\Http\Controllers\OutgoingCorrespondenceController;
 use App\Http\Controllers\OutgoingOperationController;
 use App\Http\Controllers\RoleAssignmentController;
 use App\Http\Controllers\RoleController;
+use App\Http\Middleware\AuditDocumentStorageRequests;
 use App\Http\Middleware\EnsureActiveUserSession;
 use App\Http\Middleware\EnsureDevelopmentEnvironment;
 use Illuminate\Contracts\View\View;
@@ -113,3 +115,9 @@ Route::middleware(['auth:web', EnsureActiveUserSession::class])->group(function 
         Route::delete('role-assignments/{assignment}', [RoleAssignmentController::class, 'destroy'])->name('assignments.destroy');
     });
 });
+
+Route::prefix('api/v1/document-storage/{type}/{record}')->whereIn('type', ['incoming', 'outgoing', 'controlled'])
+    ->middleware([AuditDocumentStorageRequests::class, 'auth:web', EnsureActiveUserSession::class])->name('api.v1.storage.')->group(function (): void {
+        Route::get('attachments', [DocumentStorageController::class, 'index'])->name('attachments.index');
+        Route::post('attachments', [DocumentStorageController::class, 'store'])->name('attachments.store');
+    });
