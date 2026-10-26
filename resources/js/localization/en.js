@@ -1,4 +1,13 @@
 export default {
+    "searchAny": "Any",
+    "searchFilters": "Filters",
+    "searchCategory": "Category",
+    "searchFrom": "From date",
+    "searchTo": "To date",
+    "searchRevisionState": "Revision status",
+    "searchOwner": "Revision owner or custodian",
+    "searchDateHelp": "Dates: incoming received; outgoing document; controlled current released effective date, or initial draft effective date.",
+
     "searchAllRegisters": "All registers",
     "searchRegister": "Register",
     "searchIdentity": "Document number / code",

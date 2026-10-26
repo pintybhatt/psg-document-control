@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Authorization\DocumentScope;
 use App\Authorization\ManageControlledDocuments;
+use App\Authorization\ManageNumbering;
 use App\Authorization\ManageOutgoingCorrespondence;
 use App\Models\AuthorizationScope;
 use App\Models\DocumentType;
@@ -58,7 +59,7 @@ class DocumentSearchTest extends TestCase
         $reader = User::factory()->create();
         $site = Site::findOrFail($record->profile->site_id);
         OrganizationMembership::factory()->for($reader)->atSite($site)->create();
-        $this->grant($reader, $site->authorizationScope ?? AuthorizationScope::findOrFail($record->scope_id), ['documents.metadata.view']);
+        $this->grant($reader, AuthorizationScope::findOrFail($record->scope_id), ['documents.metadata.view']);
         $this->signIn($reader);
 
         $hidden = $this->getJson($this->searchUrl($record, ['search' => $record->subject]))->assertOk()->assertJsonPath('meta.total', 0)->assertJsonCount(0, 'data')->json();
@@ -66,5 +67,34 @@ class DocumentSearchTest extends TestCase
         $this->assertSame($hidden, $absent);
         $this->signIn($actor);
         $this->getJson($this->searchUrl($record))->assertOk()->assertJsonPath('meta.total', 1);
+    }
+
+    public function test_combines_category_type_dates_status_and_classification_filters(): void
+    {
+        [$record] = $this->fixture();
+        $filters = ['category_id' => $record->type->category_id, 'type_id' => $record->type_id, 'date_from' => '2026-10-26', 'date_to' => '2026-10-26', 'status' => 'draft', 'classification' => 'normal'];
+
+        $this->getJson($this->searchUrl($record, $filters))->assertOk()->assertJsonPath('meta.total', 1);
+        $this->getJson($this->searchUrl($record, array_replace($filters, ['date_from' => '2026-10-27', 'date_to' => '2026-10-28'])))->assertOk()->assertJsonPath('meta.total', 0);
+        $this->getJson($this->searchUrl($record, ['date_to' => '2026-10-26']))->assertOk()->assertJsonPath('meta.total', 1);
+        $this->getJson($this->searchUrl($record, ['date_from' => '2026-10-27', 'date_to' => '2026-10-26']))->assertUnprocessable()->assertJsonValidationErrors('date_to');
+    }
+
+    public function test_historical_revisions_and_drafts_never_replace_authoritative_revision(): void
+    {
+        [$record, $actor] = $this->fixture('controlled');
+        $scope = new DocumentScope($record->profile->company_id, $record->profile->site_id);
+        $manager = app(ManageControlledDocuments::class);
+        app(ManageNumbering::class)->save($actor, $scope->authorizationScope(), ['register_id' => $record->register_id, 'purpose' => 'internal_register', 'reset_policy' => 'annual', 'prefix' => 'DEMO/CD', 'padding' => 6, 'active' => true]);
+        $record = $manager->register($actor, $scope, (string) $record->id, ['lock_version' => $record->lock_version]);
+        $record = $manager->release($actor, $scope, (string) $record->id, ['lock_version' => $record->lock_version, 'revision_id' => $record->revisions->first()->id, 'reason' => 'Initial release']);
+        $record = $manager->revise($actor, $scope, (string) $record->id, ['lock_version' => $record->lock_version, 'revision_reason' => 'Historical search beacon', 'change_description' => 'Changed synthetic procedure']);
+        $draft = $record->revisions->last();
+        $this->getJson($this->searchUrl($record, ['search' => 'Historical search beacon']))->assertOk()->assertJsonPath('meta.total', 1)->assertJsonPath('data.0.authoritative_revision', 0)->assertJsonPath('data.0.draft_revision', 1);
+        $record = $manager->release($actor, $scope, (string) $record->id, ['lock_version' => $record->lock_version, 'revision_id' => $draft->id, 'reason' => 'Second release']);
+
+        $this->getJson($this->searchUrl($record, ['revision' => '00', 'revision_state' => 'superseded']))->assertOk()->assertJsonPath('meta.total', 1)->assertJsonPath('data.0.authoritative_revision', 1)->assertJsonPath('data.0.draft_revision', null);
+        $this->getJson($this->searchUrl($record, ['revision' => '00', 'revision_state' => 'current']))->assertOk()->assertJsonPath('meta.total', 0);
+        $this->getJson($this->searchUrl($record, ['owner' => $actor->name, 'revision' => 1]))->assertOk()->assertJsonPath('meta.total', 1);
     }
 }

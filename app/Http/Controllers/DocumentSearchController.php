@@ -9,6 +9,17 @@ use Illuminate\Http\JsonResponse;
 
 class DocumentSearchController extends Controller
 {
+    public function lookups(DocumentSearchRequest $request): JsonResponse
+    {
+        $scope = $request->documentScope();
+        $types = DocumentType::query()->where('scope_id', $scope->authorizationScope()->id)->with(['category', 'registers'])->orderBy('name_en')->orderBy('id')->get();
+
+        return response()->json(['data' => $types->map(fn (DocumentType $type): array => $type->only(['id', 'name_en', 'name_lo', 'category_id']) + [
+            'category' => $type->category->only(['id', 'name_en', 'name_lo']),
+            'registers' => $type->registers->pluck('register_key'),
+        ])])->header('Cache-Control', 'private, no-store');
+    }
+
     public function index(DocumentSearchRequest $request, SearchDocuments $search): JsonResponse
     {
         $scope = $request->documentScope();

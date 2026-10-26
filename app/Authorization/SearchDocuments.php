@@ -7,6 +7,7 @@ use App\Models\DocumentSecurityProfile;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Database\Query\Builder;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 class SearchDocuments
@@ -42,9 +43,15 @@ class SearchDocuments
     public function query(User $actor, DocumentScope $scope, array $filters): Builder
     {
         $profiles = $this->visibleProfiles($actor, $scope);
+        if (! empty($filters['classification'])) {
+            $profiles->where('classification', $filters['classification']);
+        }
         $union = null;
         foreach (['incoming', 'outgoing', 'controlled'] as $register) {
             if (! empty($filters['register']) && $filters['register'] !== $register) {
+                continue;
+            }
+            if ($register !== 'controlled' && (isset($filters['revision']) || ! empty($filters['revision_state']) || ! empty($filters['owner']))) {
                 continue;
             }
             $table = match ($register) {
@@ -61,12 +68,52 @@ class SearchDocuments
                     $join->on('r.document_id', '=', 'd.id')->whereRaw('r.id = COALESCE(d.current_revision_id, (SELECT MAX(latest.id) FROM controlled_revisions latest WHERE latest.document_id = d.id))');
                 });
             }
-            $query->select(['d.id', 'd.profile_id', 'd.internal_number', 'd.type_id', 'd.status', 'd.created_at'])
+            if ($register !== 'controlled') {
+                $operation = $register === 'incoming' ? 'incoming_correspondence_operations' : 'outgoing_operations';
+                $query->leftJoin($operation.' as op', 'op.correspondence_id', '=', 'd.id');
+            }
+            $status = $register === 'controlled' ? 'd.status' : ($register === 'incoming' ? "CASE WHEN d.status = 'draft' THEN 'draft' ELSE COALESCE(op.status, 'received') END" : 'COALESCE(op.status, d.status)');
+            $query->select(['d.id', 'd.profile_id', 'd.internal_number', 'd.type_id', 'd.created_at'])
+                ->selectRaw($status.' as status')->selectRaw(($register === 'controlled' ? "CASE WHEN d.status = 'current' AND r.released_at IS NOT NULL THEN r.revision_number ELSE NULL END" : 'NULL').' as authoritative_revision')
+                ->selectRaw(($register === 'controlled' ? '(SELECT dr.revision_number FROM controlled_revisions dr WHERE dr.document_id = d.id AND dr.released_at IS NULL LIMIT 1)' : 'NULL').' as draft_revision')
                 ->selectRaw('? as register', [$register])->selectRaw($number.' as number')->selectRaw($date.' as document_date')
                 ->selectRaw(($register === 'controlled' ? 'r.title_en' : 'd.subject').' as title_en')
                 ->selectRaw(($register === 'controlled' ? 'r.title_lo' : 'NULL').' as title_lo')
                 ->selectRaw(($register === 'outgoing' ? 'd.official_number' : 'NULL').' as official_number')
                 ->selectRaw(($register === 'incoming' ? 'd.external_reference' : 'NULL').' as external_reference');
+            if (! empty($filters['type_id'])) {
+                $query->where('d.type_id', $filters['type_id']);
+            }
+            if (! empty($filters['category_id'])) {
+                $query->whereIn('d.type_id', DB::table('document_types')->where('category_id', $filters['category_id'])->select('id'));
+            }
+            if (! empty($filters['status'])) {
+                $query->whereRaw($status.' = ?', [$filters['status']]);
+            }
+            foreach (['date_from' => '>=', 'date_to' => '<='] as $filter => $operator) {
+                if (! empty($filters[$filter])) {
+                    $query->where($date, $filter === 'date_to' ? '<' : '>=', $filter === 'date_to' ? Carbon::parse($filters[$filter])->addDay()->format('Y-m-d') : $filters[$filter]);
+                }
+            }
+            if ($register === 'controlled' && (isset($filters['revision']) || ! empty($filters['revision_state']) || ! empty($filters['owner']))) {
+                $query->whereExists(function (Builder $revision) use ($filters): void {
+                    $revision->selectRaw('1')->from('controlled_revisions as rev')->whereColumn('rev.document_id', 'd.id');
+                    if (isset($filters['revision'])) {
+                        $revision->where('rev.revision_number', (int) $filters['revision']);
+                    }
+                    match ($filters['revision_state'] ?? '') {
+                        'draft' => $revision->whereNull('rev.released_at'),
+                        'current' => $revision->whereNotNull('rev.released_at')->whereColumn('rev.id', 'd.current_revision_id')->where('d.status', 'current'),
+                        'superseded' => $revision->whereNotNull('rev.released_at')->where(fn (Builder $q): Builder => $q->whereColumn('rev.id', '<>', 'd.current_revision_id')->orWhere('d.status', 'superseded')),
+                        default => null,
+                    };
+                    if (! empty($filters['owner'])) {
+                        $value = '%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $filters['owner']).'%';
+                        $revision->where(fn (Builder $q): Builder => $q->whereRaw("rev.owner_name LIKE ? ESCAPE '!'", [$value])->orWhereRaw("rev.custodian_name LIKE ? ESCAPE '!'", [$value])
+                            ->orWhereExists(fn (Builder $person): Builder => $person->selectRaw('1')->from('users')->where(fn (Builder $id): Builder => $id->whereColumn('users.id', 'rev.owner_id')->orWhereColumn('users.id', 'rev.custodian_id'))->whereRaw("users.name LIKE ? ESCAPE '!'", [$value])));
+                    }
+                });
+            }
             if (! empty($filters['search'])) {
                 $term = (string) $filters['search'];
                 $exact = ! empty($filters['exact']);
@@ -83,7 +130,7 @@ class SearchDocuments
                         $query->orWhereExists(function (Builder $revision) use ($value, $exact): void {
                             $revision->selectRaw('1')->from('controlled_revisions as rev')->whereColumn('rev.document_id', 'd.id')
                                 ->where(function (Builder $text) use ($value, $exact): void {
-                                    foreach (['title_en', 'title_lo', 'description_en', 'description_lo'] as $column) {
+                                    foreach (['title_en', 'title_lo', 'description_en', 'description_lo', 'revision_reason', 'change_description'] as $column) {
                                         $text->orWhereRaw('rev.'.$column.($exact ? ' = ?' : " LIKE ? ESCAPE '!'"), [$value]);
                                     }
                                 });
@@ -92,6 +139,9 @@ class SearchDocuments
                 });
             }
             $union = $union ? $union->unionAll($query) : $query;
+        }
+        if ($union === null) {
+            $union = DB::table('controlled_documents as d')->selectRaw('d.id, d.created_at, d.document_code as number, NULL as document_date, ? as register', ['controlled'])->whereRaw('1 = 0');
         }
         $query = DB::query()->fromSub($union, 'results');
         match ($filters['sort'] ?? 'recent') {

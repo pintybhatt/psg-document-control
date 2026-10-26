@@ -1,4 +1,13 @@
 export default {
+    "searchAny": "ທັງໝົດ",
+    "searchFilters": "ຕົວກັ່ນຕອງ",
+    "searchCategory": "ໝວດເອກະສານ",
+    "searchFrom": "ຈາກວັນທີ",
+    "searchTo": "ເຖິງວັນທີ",
+    "searchRevisionState": "ສະຖານະສະບັບປັບປຸງ",
+    "searchOwner": "ຜູ້ຮັບຜິດຊອບ ຫຼື ຜູ້ດູແລສະບັບປັບປຸງ",
+    "searchDateHelp": "ວັນທີ: ວັນຮັບຂາເຂົ້າ; ວັນທີຂາອອກ; ວັນມີຜົນຂອງສະບັບຄວບຄຸມປັດຈຸບັນ ຫຼື ຮ່າງທຳອິດ.",
+
     "searchAllRegisters": "ທຸກທະບຽນ",
     "searchRegister": "ທະບຽນ",
     "searchIdentity": "ເລກທີ / ລະຫັດເອກະສານ",
