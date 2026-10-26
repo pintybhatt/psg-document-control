@@ -22,6 +22,8 @@ class PermissionCatalog
     public static function definitions(): array
     {
         return [
+            'incoming.operations.manage' => ['area' => 'documents', 'name_en' => 'Manage incoming correspondence operations', 'name_lo' => 'ຈັດການດຳເນີນງານເອກະສານຂາເຂົ້າ', 'available' => true],
+            'incoming.operations.reopen' => ['area' => 'documents', 'name_en' => 'Reopen closed incoming correspondence', 'name_lo' => 'ເປີດຄືນເອກະສານຂາເຂົ້າທີ່ປິດແລ້ວ', 'available' => true],
             'incoming.register' => ['area' => 'documents', 'name_en' => 'Register incoming correspondence', 'name_lo' => 'ລົງທະບຽນເອກະສານຂາເຂົ້າ', 'available' => true],
             'incoming.drafts.manage' => ['area' => 'documents', 'name_en' => 'Manage incoming drafts', 'name_lo' => 'ຈັດການຮ່າງເອກະສານຂາເຂົ້າ', 'available' => true],
             'numbering.view' => ['area' => 'numbering', 'name_en' => 'View numbering configuration', 'name_lo' => 'ເບິ່ງການຕັ້ງຄ່າເລກເອກະສານ', 'available' => true],

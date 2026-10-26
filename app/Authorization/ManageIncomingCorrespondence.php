@@ -164,6 +164,7 @@ class ManageIncomingCorrespondence
             'correspondence_date' => ['required', 'date_format:Y-m-d'], 'received_date' => ['required', 'date_format:Y-m-d'],
             'description_en' => ['nullable', 'string', 'max:5000'], 'description_lo' => ['nullable', 'string', 'max:5000'],
             'priority' => ['required', Rule::in(['normal', 'urgent'])],
+            'channel' => [$creating ? 'required' : 'sometimes', Rule::in(['email', 'courier', 'hand_delivery', 'post', 'other'])],
             'classification' => $creating ? ['required', Rule::enum(Confidentiality::class)] : ['prohibited'],
         ];
         foreach (['scope_id', 'profile_id', 'register_id', 'category_id', 'internal_number', 'status', 'registered_by', 'registered_at', 'created_by', 'updated_by', 'issuance_id', 'id'] as $field) {

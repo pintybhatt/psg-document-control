@@ -54,6 +54,19 @@ function button(wrapper, text) { const found = wrapper.findAll('button').find(it
 async function openDetail(wrapper) { await button(wrapper, 'Details').trigger('click'); await flushPromises(); }
 
 describe('incoming correspondence', () => {
+    it('filters the register, exports the selected filters and prints the visible page', async () => {
+        const fetch = server(); const wrapper = await render();
+        const print = vi.fn(); vi.stubGlobal('print', print);
+        await wrapper.get('#incoming-filter-search').setValue('Example');
+        await wrapper.get('#incoming-filter-status').setValue('in_progress');
+        await wrapper.get('#incoming-filter-channel').setValue('email');
+        await button(wrapper, 'Apply filters').trigger('submit'); await flushPromises();
+        expect(fetch.mock.calls.at(-1)[0]).toContain('filter_status=in_progress');
+        expect(fetch.mock.calls.at(-1)[0]).toContain('filter_channel=email');
+        expect(wrapper.get('a[href*="/export"]').attributes('href')).toContain('search=Example');
+        await button(wrapper, 'Print visible page / detail').trigger('click');
+        expect(print).toHaveBeenCalledOnce();
+    });
     it('loads exact scope, renders escaped metadata and opens authorized detail', async () => {
         const fetch = server(); const wrapper = await render();
         expect(fetch.mock.calls[0][0]).toContain('company_id=4&site_id=7');
@@ -66,22 +79,23 @@ describe('incoming correspondence', () => {
         const fetch = server(); const wrapper = await render();
         await button(wrapper, 'Create incoming draft').trigger('click');
         await wrapper.get('#incoming-type').setValue('9');
+        await wrapper.get('#incoming-channel').setValue('email');
         await wrapper.get('#incoming-sender_organization').setValue('Example sender');
         await wrapper.get('#incoming-subject').setValue('New subject');
         await wrapper.get('#incoming-correspondence_date').setValue('2026-10-25');
         await wrapper.get('#incoming-received_date').setValue('2026-10-26');
-        await wrapper.get('form').trigger('submit'); await flushPromises();
+        await wrapper.get('#incoming-draft-form').trigger('submit'); await flushPromises();
         const call = fetch.mock.calls.find(([, options]) => options.method === 'POST');
         expect(call[1].headers['X-CSRF-TOKEN']).toBe('sample-csrf');
         expect(JSON.parse(call[1].body)).toMatchObject({ subject: 'New subject', classification: 'normal', site_id: 7 });
         expect(JSON.parse(call[1].body)).not.toHaveProperty('internal_number');
-        expect(wrapper.find('form').exists()).toBe(false); expect(wrapper.text()).toContain('Draft saved.');
+        expect(wrapper.find('#incoming-draft-form').exists()).toBe(false); expect(wrapper.text()).toContain('Draft saved.');
     });
     it('edits a draft without changing its security classification', async () => {
         const fetch = server(); const wrapper = await render(); await openDetail(wrapper);
         await button(wrapper, 'Edit draft').trigger('click');
         expect(wrapper.find('#incoming-classification').exists()).toBe(false);
-        await wrapper.get('#incoming-subject').setValue('Revised'); await wrapper.get('form').trigger('submit'); await flushPromises();
+        await wrapper.get('#incoming-subject').setValue('Revised'); await wrapper.get('#incoming-draft-form').trigger('submit'); await flushPromises();
         const call = fetch.mock.calls.find(([, options]) => options.method === 'PATCH');
         expect(JSON.parse(call[1].body).subject).toBe('Revised'); expect(JSON.parse(call[1].body)).not.toHaveProperty('classification');
     });
@@ -90,14 +104,14 @@ describe('incoming correspondence', () => {
         await button(wrapper, 'Register formally').trigger('click'); await flushPromises();
         expect(fetch.mock.calls.some(([url]) => url.includes('/register?'))).toBe(false);
         await button(wrapper.get('dialog'), 'Confirm').trigger('click'); await flushPromises();
-        expect(wrapper.text()).toContain('TEST/IN/2026/000001'); expect(wrapper.text()).toContain('Registered records are read-only.');
+        expect(wrapper.text()).toContain('TEST/IN/2026/000001'); expect(wrapper.text()).toContain('Registered details are read-only.');
         expect(wrapper.findAll('button').some(item => item.text() === 'Edit draft')).toBe(false);
     });
     it('shows translated validation errors and retains the draft form', async () => {
         server({ mutationError: { status: 422, body: { errors: { subject: ['incomingValidation'] } } } });
         const wrapper = await render(); await button(wrapper, 'Create incoming draft').trigger('click');
-        await wrapper.get('form').trigger('submit'); await flushPromises();
-        expect(wrapper.find('form').exists()).toBe(true); expect(wrapper.get('#incoming-subject').attributes('aria-invalid')).toBe('true');
+        await wrapper.get('#incoming-draft-form').trigger('submit'); await flushPromises();
+        expect(wrapper.find('#incoming-draft-form').exists()).toBe(true); expect(wrapper.get('#incoming-subject').attributes('aria-invalid')).toBe('true');
         expect(wrapper.text()).toContain('Check this field and try again.');
     });
     it.each([403, 404])('clears protected records after detail access fails with %s', async status => {
@@ -128,7 +142,7 @@ describe('incoming correspondence', () => {
         const fetch = server(); const wrapper = await render(); await button(wrapper, 'Create incoming draft').trigger('click');
         let finish;
         fetch.mockImplementationOnce(() => new Promise(resolve => { finish = () => resolve(response({ data: { ...draft, subject: 'Old scope secret' } })); }));
-        await wrapper.get('form').trigger('submit');
+        await wrapper.get('#incoming-draft-form').trigger('submit');
         await wrapper.setProps({ scope: { ...scope, key: '8:site', site_id: 8 } }); await flushPromises();
         finish(); await flushPromises(); expect(wrapper.text()).not.toContain('Old scope secret');
     });

@@ -54,7 +54,7 @@ class IncomingCorrespondenceTest extends TestCase
         return array_replace(['company_id' => $scope->company_id, 'site_id' => $scope->site_id, 'type_id' => $type->id,
             'subject' => 'Synthetic incoming subject', 'sender_organization' => 'Example sender', 'sender_contact' => 'Example contact',
             'external_reference' => 'REPEATABLE/EXTERNAL', 'correspondence_date' => '2026-10-25', 'received_date' => '2026-10-26',
-            'description_lo' => 'ເອກະສານທົດສອບ', 'priority' => 'normal', 'classification' => 'normal'], $extra);
+            'description_lo' => 'ເອກະສານທົດສອບ', 'priority' => 'normal', 'channel' => 'email', 'classification' => 'normal'], $extra);
     }
 
     private function url(AuthorizationScope $scope, string $suffix = '', array $extra = []): string

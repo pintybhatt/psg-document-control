@@ -57,7 +57,7 @@ class IncomingCorrespondenceConcurrencyTest extends TestCase
             for ($i = 0; $i < 3; $i++) {
                 $drafts[] = app(ManageIncomingCorrespondence::class)->save($actor, new DocumentScope($site->company_id, $site->id), [
                     'type_id' => $type->id, 'subject' => 'Synthetic concurrent draft', 'sender_organization' => 'Example sender',
-                    'correspondence_date' => '2026-10-25', 'received_date' => '2026-10-26', 'priority' => 'normal', 'classification' => 'normal',
+                    'correspondence_date' => '2026-10-25', 'received_date' => '2026-10-26', 'priority' => 'normal', 'channel' => 'email', 'classification' => 'normal',
                 ]);
             }
             // Two workers race for one draft, another succeeds, and a fourth rolls back after issuance.

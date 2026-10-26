@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources;
 
+use App\Authorization\ManageIncomingOperations;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -19,6 +20,10 @@ class IncomingCorrespondenceResource extends JsonResource
             'correspondence_date' => $this->correspondence_date->format('Y-m-d'), 'received_date' => $this->received_date->format('Y-m-d'),
             'subject' => $this->subject, 'description_en' => $this->description_en, 'description_lo' => $this->description_lo,
             'priority' => $this->priority, 'status' => $this->status, 'internal_number' => $this->internal_number,
+            'channel' => $this->channel,
+            'operations' => $this->status === 'registered' ? app(ManageIncomingOperations::class)->state($this->resource) : null,
+            'due_indicator' => $this->operation?->due_date && $this->operation->status !== 'closed'
+                ? ($this->operation->due_date->isToday() ? 'today' : ($this->operation->due_date->lt(today()) ? 'overdue' : 'upcoming')) : null,
             'registered_at' => $this->registered_at?->toISOString(), 'registered_by' => $this->registered_by,
         ];
     }

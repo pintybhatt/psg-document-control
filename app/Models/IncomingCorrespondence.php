@@ -7,9 +7,10 @@ use App\Authorization\NumberingPurpose;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Validation\ValidationException;
 
-#[Fillable(['scope_id', 'profile_id', 'register_id', 'type_id', 'sender_organization', 'sender_contact', 'sender_email', 'sender_phone', 'external_reference', 'correspondence_date', 'received_date', 'subject', 'description_en', 'description_lo', 'priority', 'status', 'internal_number', 'registered_at', 'registered_by', 'created_by', 'updated_by'])]
+#[Fillable(['scope_id', 'profile_id', 'register_id', 'type_id', 'channel', 'sender_organization', 'sender_contact', 'sender_email', 'sender_phone', 'external_reference', 'correspondence_date', 'received_date', 'subject', 'description_en', 'description_lo', 'priority', 'status', 'internal_number', 'registered_at', 'registered_by', 'created_by', 'updated_by'])]
 class IncomingCorrespondence extends Model implements FormalNumberedRegistration
 {
     protected static function booted(): void
@@ -27,6 +28,11 @@ class IncomingCorrespondence extends Model implements FormalNumberedRegistration
     public function profile(): BelongsTo
     {
         return $this->belongsTo(DocumentSecurityProfile::class, 'profile_id');
+    }
+
+    public function operation(): HasOne
+    {
+        return $this->hasOne(IncomingCorrespondenceOperation::class, 'correspondence_id');
     }
 
     public function type(): BelongsTo
