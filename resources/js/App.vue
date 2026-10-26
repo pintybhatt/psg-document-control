@@ -7,6 +7,7 @@ import { useLocalization } from './localization/index.js';
 import LoginPage from './pages/LoginPage.vue';
 
 const UiPreviewPage = defineAsyncComponent(() => import('./pages/UiPreviewPage.vue'));
+const OutgoingPage = defineAsyncComponent(() => import('./pages/OutgoingPage.vue'));
 const IncomingPage = defineAsyncComponent(() => import('./pages/IncomingPage.vue'));
 const AdministrationPage = defineAsyncComponent(() => import('./pages/AdministrationPage.vue'));
 
@@ -16,6 +17,7 @@ const props = defineProps({
     context: { type: Object, required: true },
     auth: { type: Object, default: null },
     incoming: { type: Object, default: null },
+    outgoing: { type: Object, default: null },
     administration: { type: Object, default: null },
 });
 
@@ -32,6 +34,7 @@ watchEffect(() => {
         <DashboardPage v-if="page === 'dashboard'" :navigation="navigation" :context="context" />
         <UiPreviewPage v-else-if="page === 'ui-preview'" />
         <AdministrationPage v-else-if="page === 'administration' && administration" :endpoints="administration" :csrf-token="auth.csrfToken" />
+        <OutgoingPage v-else-if="page === 'outgoing' && outgoing" :endpoints="outgoing" :csrf-token="auth.csrfToken" />
         <IncomingPage v-else-if="page === 'incoming' && incoming" :endpoints="incoming" :csrf-token="auth.csrfToken" />
         <PlaceholderPage v-else :page="page" :dashboard-href="navigation.find(item => item.key === 'dashboard').href" />
     </AppShell>

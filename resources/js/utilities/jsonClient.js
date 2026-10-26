@@ -10,7 +10,7 @@ export function createJsonClient(csrfToken) {
         }
         const data = await response.json();
         if (!response.ok) {
-            const message = typeof data.message === 'string' && /^(rbac|membership|master|numbering|incoming)/.test(data.message) ? data.message
+            const message = typeof data.message === 'string' && /^(rbac|membership|master|numbering|incoming|outgoing)/.test(data.message) ? data.message
                 : (response.status === 403 ? 'rbacForbidden' : 'rbacRequestFailed');
             const error = new Error(response.status === 401 || response.status === 419 ? 'rbacSessionExpired' : message);
             error.status = response.status;

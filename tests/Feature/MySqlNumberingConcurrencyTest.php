@@ -256,7 +256,7 @@ class MySqlNumberingConcurrencyTest extends TestCase
         $this->assertSame('REPEATABLE-READ', $settings->isolation_level);
         $this->assertSame(['InnoDB'], array_values(array_unique(array_column(DB::select('SELECT ENGINE FROM information_schema.tables WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = "BASE TABLE"'), 'ENGINE'))));
 
-        $this->artisan('migrate:rollback', ['--step' => 5, '--force' => true, '--no-interaction' => true])->assertExitCode(0);
+        $this->artisan('migrate:rollback', ['--step' => 6, '--force' => true, '--no-interaction' => true])->assertExitCode(0);
         $this->assertFalse(Schema::hasTable('numbering_series'));
         $this->assertFalse(Schema::hasTable('document_types'));
         $this->assertModelExists($actor);

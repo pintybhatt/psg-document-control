@@ -8,6 +8,7 @@ use App\Http\Controllers\IncomingCorrespondenceController;
 use App\Http\Controllers\IncomingOperationController;
 use App\Http\Controllers\MembershipController;
 use App\Http\Controllers\NumberingController;
+use App\Http\Controllers\OutgoingCorrespondenceController;
 use App\Http\Controllers\RoleAssignmentController;
 use App\Http\Controllers\RoleController;
 use App\Http\Middleware\EnsureActiveUserSession;
@@ -47,6 +48,13 @@ Route::middleware(['auth:web', EnsureActiveUserSession::class])->group(function 
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
     Route::get('/api/v1/user', CurrentUserController::class)->name('api.v1.user');
     Route::prefix('api/v1')->name('api.v1.')->group(function (): void {
+        Route::get('outgoing-correspondence/contexts', [OutgoingCorrespondenceController::class, 'contexts'])->name('outgoing.contexts');
+        Route::get('outgoing-correspondence/lookups', [OutgoingCorrespondenceController::class, 'lookups'])->name('outgoing.lookups');
+        Route::get('outgoing-correspondence', [OutgoingCorrespondenceController::class, 'index'])->name('outgoing.index');
+        Route::post('outgoing-correspondence', [OutgoingCorrespondenceController::class, 'store'])->name('outgoing.store');
+        Route::get('outgoing-correspondence/{record}', [OutgoingCorrespondenceController::class, 'show'])->name('outgoing.show');
+        Route::patch('outgoing-correspondence/{record}', [OutgoingCorrespondenceController::class, 'update'])->name('outgoing.update');
+        Route::post('outgoing-correspondence/{record}/register', [OutgoingCorrespondenceController::class, 'register'])->name('outgoing.register');
         Route::get('incoming-correspondence/contexts', [IncomingCorrespondenceController::class, 'contexts'])->name('incoming.contexts');
         Route::get('incoming-correspondence/lookups', [IncomingCorrespondenceController::class, 'lookups'])->name('incoming.lookups');
         Route::get('incoming-correspondence/export', [IncomingCorrespondenceController::class, 'export'])->name('incoming.export');

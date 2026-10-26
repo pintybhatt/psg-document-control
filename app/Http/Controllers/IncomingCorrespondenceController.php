@@ -2,19 +2,15 @@
 
 namespace App\Http\Controllers;
 
-use App\Authorization\AccessControl;
-use App\Authorization\DocumentScope;
+use App\Authorization\CorrespondenceContexts;
 use App\Authorization\ManageIncomingCorrespondence;
 use App\Authorization\ManageIncomingOperations;
-use App\Authorization\MembershipAccess;
 use App\Http\Requests\IncomingCorrespondenceRequest;
 use App\Http\Resources\IncomingCorrespondenceResource;
-use App\Models\Department;
 use App\Models\DocumentType;
 use App\Models\IncomingCorrespondence;
 use App\Models\IncomingCorrespondenceAudit;
 use App\Models\RegisterConfiguration;
-use App\Models\Site;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -22,29 +18,9 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class IncomingCorrespondenceController extends Controller
 {
-    public function contexts(Request $request, AccessControl $roles): JsonResponse
+    public function contexts(Request $request, CorrespondenceContexts $contexts): JsonResponse
     {
-        $contexts = [];
-        foreach (Site::query()->where('active', true)->with('company')->get() as $site) {
-            $departments = Department::query()->where('site_id', $site->id)->where('active', true)->get();
-            foreach ([null, ...$departments->all()] as $department) {
-                $scope = new DocumentScope($site->company_id, $site->id, $department?->id);
-                $permissions = $roles->permissions($request->user(), $scope->authorizationScope(), $department?->id);
-                if (! in_array('documents.metadata.view', $roles->grantedPermissions($request->user(), $scope->authorizationScope()), true)
-                    || (! $roles->isSystemAdministrator($request->user()) && ! app(MembershipAccess::class)->matches($request->user(), $scope->authorizationScope(), $department?->id))) {
-                    continue;
-                }
-                if (! $roles->allows($request->user(), 'numbering.issue', $scope->authorizationScope())) {
-                    $permissions = array_values(array_diff($permissions, ['numbering.issue']));
-                }
-                $contexts[] = ['key' => $site->id.':'.($department?->id ?? 'site'), 'company_id' => $site->company_id, 'site_id' => $site->id,
-                    'department_id' => $department?->id, 'company' => $site->company->only(['id', 'name_en', 'name_lo']),
-                    'site' => $site->only(['id', 'name_en', 'name_lo']), 'department' => $department?->only(['id', 'name_en', 'name_lo']),
-                    'permissions' => $permissions];
-            }
-        }
-
-        return response()->json(['data' => $contexts]);
+        return response()->json(['data' => $contexts->forUser($request->user())]);
     }
 
     public function index(IncomingCorrespondenceRequest $request, ManageIncomingCorrespondence $incoming): JsonResponse
