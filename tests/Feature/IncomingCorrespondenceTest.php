@@ -94,6 +94,7 @@ class IncomingCorrespondenceTest extends TestCase
     #[TestWith([['internal_number' => 'FORGED', 'status' => 'registered', 'profile_id' => 123, 'scope_id' => 123]])]
     #[TestWith([['subject' => '', 'sender_email' => 'invalid', 'received_date' => '2026-02-31', 'priority' => 'unknown', 'classification' => 'unknown']])]
     #[TestWith([['type_id' => 99999]])]
+    #[TestWith([['correspondence_date' => '03/04/2026', 'received_date' => '04/03/2026']])]
     public function test_rejects_invalid_or_server_controlled_draft_fields(array $invalid): void
     {
         [, $scope, , $type] = $this->fixture();

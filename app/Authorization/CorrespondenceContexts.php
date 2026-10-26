@@ -5,6 +5,7 @@ namespace App\Authorization;
 use App\Models\Department;
 use App\Models\Site;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Builder;
 
 class CorrespondenceContexts
 {
@@ -15,7 +16,7 @@ class CorrespondenceContexts
     {
         $roles = $this->roles;
         $contexts = [];
-        foreach (Site::query()->where('active', true)->with('company')->get() as $site) {
+        foreach (Site::query()->where('active', true)->whereHas('company', fn (Builder $query): Builder => $query->where('active', true))->with('company')->get() as $site) {
             $departments = Department::query()->where('site_id', $site->id)->where('active', true)->get();
             foreach ([null, ...$departments->all()] as $department) {
                 $scope = new DocumentScope($site->company_id, $site->id, $department?->id);

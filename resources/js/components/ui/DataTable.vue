@@ -11,7 +11,9 @@ const props = defineProps({
     rowKey: { type: String, default: 'id' },
     perPage: { type: Number, default: 10, validator: value => Number.isInteger(value) && value > 0 },
     loading: Boolean,
+    error: { type: String, default: '' },
     serverSide: Boolean,
+    pagination: { type: Boolean, default: true },
     total: { type: Number, default: null },
 });
 const page = defineModel('page', { type: Number, default: 1 });
@@ -79,9 +81,9 @@ watch([pageCount, () => props.loading, pageSize], () => {
 
 function columnClasses(column) {
     return {
-        'min-w-52 font-mono whitespace-nowrap': column.type === 'reference',
+        'min-w-40 font-mono whitespace-nowrap': column.type === 'reference',
         'min-w-32 whitespace-nowrap tabular-nums': column.type === 'date',
-        'min-w-40': !['reference', 'date'].includes(column.type),
+        'min-w-28': !['reference', 'date'].includes(column.type),
     };
 }
 </script>
@@ -102,10 +104,10 @@ function columnClasses(column) {
                     </tr>
                 </thead>
                 <tbody class="divide-y divide-slate-100">
-                    <tr v-if="loading || !visibleRows.length">
-                        <td :colspan="columns.length" class="px-4 py-12 text-center text-slate-500">{{ t(loading ? 'uiLoading' : 'uiEmpty') }}</td>
+                    <tr v-if="error || loading || !visibleRows.length">
+                        <td :colspan="columns.length" class="px-4 py-8 text-center text-slate-500">{{ error ? t(error) : t(loading ? 'uiLoading' : 'uiEmpty') }}</td>
                     </tr>
-                    <tr v-for="row in loading ? [] : visibleRows" :key="row[rowKey]" class="hover:bg-slate-50">
+                    <tr v-for="row in loading || error ? [] : visibleRows" :key="row[rowKey]" class="hover:bg-slate-50">
                         <td v-for="column in columns" :key="column.key" class="px-4 py-3 leading-6" :class="columnClasses(column)">
                             <slot :name="`cell-${column.key}`" :row="row" :value="row[column.key]">{{ column.type === 'date' ? formatDate(row[column.key]) : (row[column.key] ?? '—') }}</slot>
                         </td>
@@ -113,8 +115,8 @@ function columnClasses(column) {
                 </tbody>
             </table>
         </div>
-        <div class="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-4 py-3">
-            <p role="status" class="text-xs text-slate-600">{{ loading ? t('uiLoading') : t('uiPageSummary', { page: currentPage, pages: pageCount, total: rowCount }) }}</p>
+        <div v-if="pagination" class="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-4 py-3">
+            <p role="status" class="text-xs text-slate-600">{{ error ? t('requestFailureSummary') : loading ? t('uiLoading') : t('uiPageSummary', { page: currentPage, pages: pageCount, total: rowCount }) }}</p>
             <nav :aria-label="t('uiPagination')" class="flex gap-2">
                 <UiButton variant="secondary" :disabled="loading || currentPage <= 1" @click="changePage(currentPage - 1)">{{ t('uiPrevious') }}</UiButton>
                 <UiButton variant="secondary" :disabled="loading || currentPage >= pageCount" @click="changePage(currentPage + 1)">{{ t('uiNext') }}</UiButton>

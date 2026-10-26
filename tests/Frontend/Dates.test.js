@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { formatDate, toIsoDate } from '../../resources/js/utilities/dates.js';
+import { formatDate, toIsoDate, parseDisplayDate, formatDateTime } from '../../resources/js/utilities/dates.js';
 
 describe('date-only business values', () => {
     it.each([
@@ -28,5 +28,18 @@ describe('date-only business values', () => {
         } finally {
             vi.unstubAllEnvs();
         }
+    });
+});
+
+describe('explicit day/month/year entry', () => {
+    it.each([
+        ['03/04/2026', '2026-04-03'], ['12/11/2026', '2026-11-12'], ['29/02/2024', '2024-02-29'],
+        ['29/02/2026', null], ['31/04/2026', null], ['04/13/2026', null], ['1/2/2026', null], ['2026-04-03', null],
+    ])('parses %s without guessing the month: %s', (value, expected) => {
+        expect(parseDisplayDate(value)).toBe(expected);
+    });
+    it('formats audit timestamps consistently with date-only values', () => {
+        expect(formatDateTime('2026-04-03T09:15:00.000000Z')).toBe('03/04/2026 · 09:15 UTC');
+        expect(formatDateTime(null)).toBe('—');
     });
 });

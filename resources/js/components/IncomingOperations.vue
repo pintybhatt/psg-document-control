@@ -1,5 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, reactive, ref } from 'vue';
+import { formatDate, formatDateTime } from '../utilities/dates.js';
 import UiButton from './ui/UiButton.vue';
 import TextInput from './ui/TextInput.vue';
 import SelectInput from './ui/SelectInput.vue';
@@ -70,6 +71,8 @@ function display(field, value) {
     if (typeof value === 'boolean') { return t(value ? 'incomingYes' : 'incomingNo'); }
     if (field === 'status') { return t(`incomingStatus-${value}`); }
     if (typeof value === 'object') { return name(value); }
+    if (field.endsWith('_date')) { return formatDate(value); }
+    if (field.endsWith('_at')) { return formatDateTime(value); }
     return value;
 }
 onBeforeUnmount(() => controller.abort());
@@ -81,9 +84,9 @@ onBeforeUnmount(() => controller.abort());
         <dl class="grid gap-4 md:grid-cols-2">
             <div><dt class="text-sm text-slate-600">{{ t('uiStatus') }}</dt><dd>{{ t(`incomingStatus-${state.status}`) }}</dd></div>
             <div><dt class="text-sm text-slate-600">{{ t('incomingResponsible') }}</dt><dd>{{ responsibleUser?.name || t('incomingUnassigned') }}<span v-if="responsibleDepartment"> · {{ name(responsibleDepartment) }}</span></dd></div>
-            <div><dt class="text-sm text-slate-600">{{ t('incomingDueDate') }}</dt><dd>{{ state.due_date || '—' }}<span v-if="record.due_indicator" class="ml-2 font-semibold" :class="record.due_indicator === 'overdue' ? 'text-red-700' : 'text-slate-700'">{{ t(`incomingDue-${record.due_indicator}`) }}</span></dd></div>
+            <div><dt class="text-sm text-slate-600">{{ t('incomingDueDate') }}</dt><dd>{{ formatDate(state.due_date) }}<span v-if="record.due_indicator" class="ml-2 font-semibold" :class="record.due_indicator === 'overdue' ? 'text-red-700' : 'text-slate-700'">{{ t(`incomingDue-${record.due_indicator}`) }}</span></dd></div>
             <div><dt class="text-sm text-slate-600">{{ t('incomingResponse') }}</dt><dd>{{ t(state.response_completed ? 'incomingResponseCompleted' : state.response_required ? 'incomingResponsePendingLabel' : 'incomingResponseNotRequired') }}</dd></div>
-            <div v-if="state.closed_at"><dt class="text-sm text-slate-600">{{ t('incomingClosedAt') }}</dt><dd>{{ state.closed_at }}</dd></div>
+            <div v-if="state.closed_at"><dt class="text-sm text-slate-600">{{ t('incomingClosedAt') }}</dt><dd>{{ formatDateTime(state.closed_at) }}</dd></div>
             <div v-if="state.closure_remarks"><dt class="text-sm text-slate-600">{{ t('incomingClosureRemarks') }}</dt><dd class="whitespace-pre-wrap">{{ state.closure_remarks }}</dd></div>
         </dl>
         <div v-if="canManage && !mode" class="flex flex-wrap gap-2 print:hidden">
@@ -125,7 +128,7 @@ onBeforeUnmount(() => controller.abort());
         <p v-if="!history.length" class="text-sm text-slate-600">{{ t('incomingNoActions') }}</p>
         <ol class="flex flex-col gap-3">
             <li v-for="item in history" :key="item.id" class="rounded-xl border border-slate-200 p-3">
-                <p class="font-medium">{{ t(`incomingOperation-${item.action}`) }} · {{ item.actor_name }} · {{ item.created_at }}</p>
+                <p class="font-medium">{{ t(`incomingOperation-${item.action}`) }} · {{ item.actor_name }} · {{ formatDateTime(item.created_at) }}</p>
                 <p v-if="item.note" class="whitespace-pre-wrap">{{ item.note }}</p>
                 <dl class="text-sm text-slate-600"><div v-for="field in [...new Set([...Object.keys(item.before), ...Object.keys(item.after)])]" :key="field"><dt class="inline font-medium">{{ t(`incomingField-${field}`) }}: </dt><dd class="inline">{{ display(field, item.before[field] ?? null) }} → {{ display(field, item.after[field] ?? null) }}</dd></div></dl>
             </li>

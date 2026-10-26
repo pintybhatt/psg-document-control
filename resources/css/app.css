@@ -27,6 +27,10 @@
 }
 
 @media print {
+    #dcms-app :focus-visible {
+        outline: none;
+    }
+
     body:has(.incoming-register) * {
         visibility: hidden;
     }
@@ -45,6 +49,14 @@
     .incoming-register :is(button, form, nav, dialog),
     .incoming-register .print\:hidden {
         display: none !important;
+    }
+
+    .incoming-register details::details-content {
+        content-visibility: visible !important;
+    }
+
+    .incoming-register details > summary {
+        display: none;
     }
 
     .incoming-register [role='region'] {

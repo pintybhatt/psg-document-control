@@ -225,6 +225,8 @@ class IncomingOperationsTest extends TestCase
         $csv = $this->get('/api/v1/incoming-correspondence/export?'.$query)->assertOk()->streamedContent();
         $this->assertStringContainsString("'=Synthetic subject", $csv);
         $this->assertStringNotContainsString('Related example', $csv);
+        $this->assertStringContainsString('26/10/2026', $csv);
+        $this->assertStringContainsString('25/10/2026', $csv);
         $this->getJson('/api/v1/incoming-correspondence?company_id='.$scope->company_id.'&site_id='.$scope->site_id.'&filter_status=received')->assertOk()->assertJsonPath('meta.total', 0);
     }
 

@@ -21,8 +21,17 @@ const request = createJsonClient(props.csrfToken);
 const { items, notify, dismiss } = useNotifications();
 const contexts = ref([]);
 const selectedKey = ref('');
+const section = ref('people');
 const selected = computed(() => contexts.value.find(scope => scope.scope_key === selectedKey.value));
 const can = permission => selected.value?.permissions.includes(permission) ?? false;
+const sections = computed(() => [
+    { key: 'people', label: 'adminPeople', available: can('memberships.view') },
+    { key: 'documents', label: 'adminDocuments', available: selected.value?.scope_type !== 'global' && can('master-data.view') },
+    { key: 'numbering', label: 'adminNumbering', available: selected.value?.scope_type !== 'global' && can('numbering.view') },
+    { key: 'roles', label: 'adminRoles', available: can('roles.view') || can('assignments.view') },
+].filter(item => item.available));
+watch(sections, values => { if (!values.some(item => item.key === section.value)) { section.value = values[0]?.key ?? ''; } });
+
 const loading = ref(true);
 const saving = ref(false);
 const errorKey = ref('');
@@ -243,25 +252,27 @@ onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
 
 <template>
     <section class="flex flex-col gap-6" aria-labelledby="rbac-heading">
-        <div><h2 id="rbac-heading" class="text-lg font-semibold">{{ t('rbacTitle') }}</h2><p class="mt-2 text-sm leading-7 text-slate-600">{{ t('rbacInheritance') }}</p></div>
+        <h2 id="rbac-heading" class="sr-only">{{ t('rbacTitle') }}</h2>
+        <details class="text-sm text-slate-600"><summary class="cursor-pointer font-medium">{{ t('rbacTitle') }}</summary><p class="mt-2 leading-7">{{ t('rbacInheritance') }}</p></details>
         <p v-if="errorKey" role="alert" class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">{{ t(errorKey) }}</p>
         <p v-if="loading && !contexts.length" role="status">{{ t('uiLoading') }}</p>
         <p v-else-if="!contexts.length" class="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-600">{{ t('rbacNoAccess') }}</p>
         <template v-if="contexts.length">
             <div class="rounded-xl border border-slate-200 bg-white p-5"><SelectInput v-model="selectedKey" :label="t('rbacScope')" :options="scopeOptions" :disabled="saving || confirmationOpen" /><p class="mt-3 text-xs leading-6 text-slate-500">{{ t(selected?.scope_type === 'global' ? 'rbacGlobalWarning' : 'rbacScopeNotice') }}</p></div>
 
-            <MembershipManagement v-if="selected && can('memberships.view')" :scope="selected" :endpoints="endpoints" :csrf-token="csrfToken" @unauthorized="handleError" />
-            <DocumentMasterDataManagement v-if="selected && selected.scope_type !== 'global' && can('master-data.view')" :scope="selected" :endpoints="endpoints.masterData" :csrf-token="csrfToken" @unauthorized="handleError" />
-            <NumberingManagement v-if="selected && selected.scope_type !== 'global' && can('numbering.view')" :scope="selected" :endpoint="endpoints.numbering" :csrf-token="csrfToken" @unauthorized="handleError" />
+            <nav :aria-label="t('administration')" class="flex flex-wrap gap-2 border-b border-slate-200 pb-3"><UiButton v-for="item in sections" :key="item.key" :variant="section === item.key ? 'primary' : 'secondary'" :aria-pressed="section === item.key" @click="section = item.key">{{ t(item.label) }}</UiButton></nav>
+            <MembershipManagement v-show="section === 'people'" v-if="selected && can('memberships.view')" :scope="selected" :endpoints="endpoints" :csrf-token="csrfToken" @unauthorized="handleError" />
+            <DocumentMasterDataManagement v-show="section === 'documents'" v-if="selected && selected.scope_type !== 'global' && can('master-data.view')" :scope="selected" :endpoints="endpoints.masterData" :csrf-token="csrfToken" @unauthorized="handleError" />
+            <NumberingManagement v-show="section === 'numbering'" v-if="selected && selected.scope_type !== 'global' && can('numbering.view')" :scope="selected" :endpoint="endpoints.numbering" :csrf-token="csrfToken" @unauthorized="handleError" />
 
-            <section v-if="can('roles.view')" class="flex flex-col gap-4" aria-labelledby="roles-heading">
+            <section v-show="section === 'roles'" v-if="can('roles.view')" class="flex flex-col gap-4" aria-labelledby="roles-heading">
                 <div class="flex flex-wrap items-center justify-between gap-3"><h3 id="roles-heading" class="font-semibold">{{ t('rbacRoles') }}</h3><UiButton v-if="can('roles.manage')" :disabled="loading || saving" @click="showRole()">{{ t('rbacCreateRole') }}</UiButton></div>
                 <DataTable v-model:page="rolePage" :rows="roleRows" :columns="roleColumns" :caption="t('rbacRoles')" :loading="loading" server-side :total="roleTotal" :per-page="10" @change="changeRolePage">
                     <template #cell-actions="{ row }"><UiButton variant="secondary" :disabled="saving" @click="showRole(row)">{{ t(row.editable ? 'rbacEdit' : 'rbacDetails') }}</UiButton></template>
                 </DataTable>
             </section>
 
-            <form v-if="editorOpen" ref="roleEditor" novalidate class="flex flex-col gap-5 rounded-xl border border-slate-200 bg-white p-6" @submit.prevent="saveRole">
+            <form v-show="section === 'roles'" v-if="editorOpen" ref="roleEditor" novalidate class="flex flex-col gap-5 rounded-xl border border-slate-200 bg-white p-6" @submit.prevent="saveRole">
                 <h3 tabindex="-1" class="font-semibold">{{ t(editingRole ? 'rbacRoleDetails' : 'rbacCreateRole') }}</h3>
                 <p v-if="readOnly || securityReadOnly" class="text-sm text-slate-500">{{ t(readOnly ? 'rbacInheritedReadOnly' : 'rbacSelfRoleReadOnly') }}</p>
                 <div class="grid gap-5 sm:grid-cols-2">
@@ -284,14 +295,14 @@ onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
                 <div class="flex flex-wrap gap-3"><UiButton v-if="can('roles.manage') && !readOnly" type="submit" :loading="saving">{{ t('rbacSaveRole') }}</UiButton><UiButton variant="secondary" :disabled="saving" @click="editorOpen = false">{{ t('uiCancel') }}</UiButton></div>
             </form>
 
-            <section v-if="can('assignments.view')" class="flex flex-col gap-4" aria-labelledby="assignments-heading">
+            <section v-show="section === 'roles'" v-if="can('assignments.view')" class="flex flex-col gap-4" aria-labelledby="assignments-heading">
                 <h3 id="assignments-heading" class="font-semibold">{{ t('rbacAssignments') }}</h3>
                 <DataTable v-model:page="assignmentPage" :rows="assignmentRows" :columns="assignmentColumns" :caption="t('rbacAssignments')" :loading="loading" server-side :total="assignmentTotal" :per-page="10" @change="changeAssignmentPage">
                     <template #cell-actions="{ row }"><UiButton v-if="can('assignments.manage') && row.active && row.revocable" variant="danger" :disabled="saving" @click="prepareRevoke(row)">{{ t('rbacRevoke') }}</UiButton></template>
                 </DataTable>
             </section>
 
-            <section v-if="can('assignments.manage') && can('users.view') && can('roles.view')" class="flex flex-col gap-5 rounded-xl border border-slate-200 bg-white p-6" aria-labelledby="grant-heading">
+            <section v-show="section === 'roles'" v-if="can('assignments.manage') && can('users.view') && can('roles.view')" class="flex flex-col gap-5 rounded-xl border border-slate-200 bg-white p-6" aria-labelledby="grant-heading">
                 <h3 id="grant-heading" class="font-semibold">{{ t('rbacAssignRole') }}</h3>
                 <p class="text-sm leading-7 text-slate-500">{{ t('rbacEligibleNotice') }}</p>
                 <div class="grid gap-5 sm:grid-cols-2"><TextInput v-model="userSearch" :label="t('rbacAccountSearch')" /><TextInput v-model="roleSearch" :label="t('rbacRoleSearch')" /></div>

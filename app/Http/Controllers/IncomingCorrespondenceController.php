@@ -77,9 +77,9 @@ class IncomingCorrespondenceController extends Controller
                 $status = $record->status === 'draft' ? 'draft' : ($state?->status ?? 'received');
                 $yes = $lao ? 'ແມ່ນ' : 'Yes';
                 $no = $lao ? 'ບໍ່' : 'No';
-                $row = [$record->internal_number, $record->subject, $record->sender_organization, $record->received_date->format('Y-m-d'),
+                $row = [$record->internal_number, $record->subject, $record->sender_organization, $record->received_date->format('d/m/Y'),
                     $lao ? ($channels[$record->channel] ?? '') : str_replace('_', ' ', $record->channel ?? ''),
-                    $lao ? $statuses[$status] : ucfirst(str_replace('_', ' ', $status)), $state?->due_date?->format('Y-m-d'), $state?->response_required ? $yes : $no, $state?->response_completed_at ? $yes : $no];
+                    $lao ? $statuses[$status] : ucfirst(str_replace('_', ' ', $status)), $state?->due_date?->format('d/m/Y'), $state?->response_required ? $yes : $no, $state?->response_completed_at ? $yes : $no];
                 fputcsv($stream, array_map(fn (mixed $value): string => preg_match('/^[\s]*[=+@\-]/u', (string) $value) ? "'".$value : (string) $value, $row), escape: '');
             }
             fclose($stream);

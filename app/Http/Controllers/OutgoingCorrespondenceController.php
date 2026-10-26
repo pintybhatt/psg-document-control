@@ -9,6 +9,7 @@ use App\Http\Requests\OutgoingCorrespondenceRequest;
 use App\Http\Resources\OutgoingCorrespondenceResource;
 use App\Models\DocumentType;
 use App\Models\RegisterConfiguration;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -25,7 +26,10 @@ class OutgoingCorrespondenceController extends Controller
         $perPage = $request->integer('per_page', 10);
         $rows = [];
         $total = 0;
-        foreach ($outgoing->query($request->documentScope())->with(['profile', 'type.category', 'recipients.delivery', 'operation'])->orderByDesc('id')->lazy() as $record) {
+        foreach ($outgoing->query($request->documentScope())->with(['profile', 'type.category', 'recipients.delivery', 'operation'])->when($request->filled('search'), function (Builder $query) use ($request): void {
+            $term = '%'.$request->input('search').'%';
+            $query->where(fn (Builder $query): Builder => $query->where('subject', 'like', $term)->orWhere('internal_number', 'like', $term)->orWhere('official_number', 'like', $term)->orWhereHas('recipients', fn (Builder $query): Builder => $query->where('organization', 'like', $term)));
+        })->orderByDesc('id')->lazy() as $record) {
             if ($outgoing->canRead($request->user(), $record)) {
                 if ($total >= ($page - 1) * $perPage && count($rows) < $perPage) {
                     $rows[] = $record;

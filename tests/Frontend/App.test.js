@@ -49,7 +49,8 @@ describe('application shell', () => {
         ]);
         expect(wrapper.get('aside [aria-current="page"]').attributes('href')).toBe('/dashboard');
         expect(wrapper.get('main').text()).toContain('No site selected');
-        expect(wrapper.get('main').findAll('a')).toHaveLength(6);
+        expect(wrapper.get('main').text()).toContain(en.workspaceNoContexts);
+        expect(wrapper.get('main').findAll('a')).toHaveLength(0);
     });
 
     it.each([
@@ -87,17 +88,20 @@ describe('application shell', () => {
 
         expect(button.attributes('aria-expanded')).toBe('false');
         expect(menu.isVisible()).toBe(false);
+        await button.trigger('click');
+        await button.trigger('keydown', { key: 'Escape' });
+        expect(button.attributes('aria-expanded')).toBe('false');
     });
 
-    it('accepts company and site context without hardcoded workspace selection', () => {
+    it('does not treat unvalidated shell labels as an authorized workspace', () => {
         const wrapper = mountWorkspace('dashboard', {
             company: { id: 'company-example', name: 'Example Company' },
             site: { id: 'site-example', name: 'Example Site' },
         });
 
         expect(wrapper.get('header').text()).toContain('Example Company');
-        expect(wrapper.get('header').text()).toContain('Example Site');
-        expect(wrapper.get('main').text()).toContain('Example Site');
+        expect(wrapper.get('header').text()).toContain('No site selected');
+        expect(wrapper.get('main').text()).toContain(en.workspaceNoContexts);
     });
 });
 
@@ -109,7 +113,7 @@ describe('localization', () => {
 
         expect(dashboard.get('h1').text()).toBe('ພາບລວມ');
         expect(dashboard.get('aside nav a').text()).toBe('ພາບລວມ');
-        expect(dashboard.get('main').text()).toContain('ອົງກອນຂອງທ່ານ');
+        expect(dashboard.get('main').text()).toContain(lo.documentOverview);
         expect(dashboard.get('select').attributes('aria-label')).toBe('ພາສາ');
         expect(document.documentElement.lang).toBe('lo');
         expect(document.title).toBe('ພາບລວມ · DCMS');

@@ -20,7 +20,9 @@
             'navigation' => $navigation,
             'context' => ['company' => ['id' => null, 'name' => 'Phonesack Group'], 'site' => null],
             'initialLanguage' => session('language', auth()->user()?->preferred_language ?? 'en'),
+            'workspace' => ['contexts' => route('api.v1.incoming.contexts', [], false), 'dashboard' => route('api.v1.dashboard', [], false)],
             'auth' => [
+                'userId' => auth()->id(),
                 'loginUrl' => route('login.store', [], false),
                 'logoutUrl' => route('logout', [], false),
                 'csrfToken' => csrf_token(),

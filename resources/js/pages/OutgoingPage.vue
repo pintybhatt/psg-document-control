@@ -1,37 +1,27 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
-import OutgoingCorrespondence from '../components/OutgoingCorrespondence.vue';
+import { computed, onBeforeUnmount, onMounted } from 'vue';
+import Correspondence from '../components/OutgoingCorrespondence.vue';
 import SelectInput from '../components/ui/SelectInput.vue';
 import { useLocalization } from '../localization/index.js';
-import { createJsonClient } from '../utilities/jsonClient.js';
+import { createWorkspace, useWorkspace } from '../utilities/workspace.js';
 
 const props = defineProps({ endpoints: { type: Object, required: true }, csrfToken: { type: String, required: true } });
 const { t, language } = useLocalization();
-const contexts = ref([]);
-const selectedKey = ref('');
-const error = ref('');
-const loading = ref(true);
-const controller = new AbortController();
-const selected = computed(() => contexts.value.find(item => item.key === selectedKey.value));
+const shared = useWorkspace();
+const workspace = shared ?? createWorkspace('standalone', props.endpoints.contexts, props.csrfToken);
+const { selected, unitKey, units, loading, error } = workspace;
 const label = item => item?.[language.value === 'lo' ? 'name_lo' : 'name_en'] ?? '';
-const options = computed(() => [{ value: '', label: t('uiChoose') }, ...contexts.value.map(item => ({ value: item.key, label: [item.company, item.site, item.department].filter(Boolean).map(label).join(' / ') }))]);
-function revoke() { contexts.value = []; selectedKey.value = ''; error.value = 'rbacForbidden'; }
-onMounted(async () => {
-    try {
-        const result = await createJsonClient(props.csrfToken)(props.endpoints.contexts, { signal: controller.signal });
-        if (!controller.signal.aborted) { contexts.value = result.data; }
-    } catch (failure) { if (failure.name !== 'AbortError') { error.value = failure.message; } }
-    finally { loading.value = false; }
-});
-onBeforeUnmount(() => controller.abort());
+const options = computed(() => units.value.map(item => ({ value: item.key, label: label(item.department) || t('siteCorrespondence') })));
+onMounted(() => { if (!shared) { workspace.refresh(); } });
+onBeforeUnmount(() => { if (!shared) { workspace.revoke(); } });
 </script>
 
 <template>
-    <section class="flex flex-col gap-6">
-        <h1 class="text-2xl font-semibold">{{ t('outgoingTitle') }}</h1>
-        <p v-if="error" role="alert">{{ t(error) }}</p>
-        <SelectInput id="outgoing-context" v-model="selectedKey" :label="t('outgoingSendingUnit')" :options="options" :disabled="loading" />
-        <p v-if="!loading && !contexts.length && !error">{{ t('outgoingNoContexts') }}</p>
-        <OutgoingCorrespondence v-if="selected" :scope="selected" :endpoint="endpoints.endpoint" :incoming-endpoint="endpoints.incoming" :csrf-token="csrfToken" @unauthorized="revoke" />
+    <section class="flex flex-col gap-4">
+        <p v-if="error && !shared" role="alert">{{ t(error) }}</p>
+        <SelectInput v-if="units.length > 1" id="outgoing-context" v-model="unitKey" :label="t('department')" :options="options" :disabled="loading" class="max-w-sm" />
+        <p v-if="loading" role="status">{{ t('uiLoading') }}</p>
+        <p v-else-if="!selected && !error" class="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-600">{{ t('outgoingNoContexts') }}</p>
+        <Correspondence v-if="selected" :key="selected.key" :scope="selected" :endpoint="endpoints.endpoint" :incoming-endpoint="endpoints.incoming" :csrf-token="csrfToken" @unauthorized="workspace.revoke" />
     </section>
 </template>

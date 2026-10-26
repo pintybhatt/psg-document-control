@@ -1,5 +1,6 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue';
+import { formatDate, formatDateTime } from '../utilities/dates.js';
 import UiButton from './ui/UiButton.vue';
 import TextInput from './ui/TextInput.vue';
 import SelectInput from './ui/SelectInput.vue';
@@ -86,7 +87,8 @@ function display(field, value) {
     if (value == null || value === '') { return '—'; }
     if (field === 'status') { return t(`outgoingStatus-${value}`); }
     if (field === 'dispatch_channel') { return t(`outgoingChannel-${value}`); }
-    if (field.endsWith('_date')) { return String(value).slice(0, 10); }
+    if (field.endsWith('_at')) { return formatDateTime(value); }
+    if (field.endsWith('_date')) { return formatDate(value); }
     return value;
 }
 onBeforeUnmount(() => controller.abort());
@@ -135,13 +137,13 @@ onBeforeUnmount(() => controller.abort());
             <div class="flex gap-2"><UiButton type="submit" :loading="saving" :disabled="loading">{{ t('outgoingSaveOperation') }}</UiButton><UiButton variant="secondary" :disabled="saving" @click="mode = ''">{{ t('uiCancel') }}</UiButton></div>
         </form>
         <h3 class="font-semibold">{{ t('outgoingDeliveryTracking') }}</h3>
-        <ul class="flex flex-col gap-3"><li v-for="recipient in record.recipients" :key="recipient.id" class="rounded-xl border border-slate-200 p-3"><p class="font-medium">{{ recipient.organization }} · {{ t(recipient.delivery?.delivery_date ? 'outgoingStatus-delivered' : 'outgoingDeliveryPending') }}</p><dl><div v-for="field in ['delivery_date', 'acknowledged_by', 'acknowledgment_date', 'acknowledgment_reference'].filter(field => recipient.delivery?.[field])" :key="field"><dt class="inline text-sm text-slate-600">{{ t(`outgoingField-${field}`) }}: </dt><dd class="inline">{{ recipient.delivery[field] }}</dd></div></dl></li></ul>
+        <ul class="flex flex-col gap-3"><li v-for="recipient in record.recipients" :key="recipient.id" class="rounded-xl border border-slate-200 p-3"><p class="font-medium">{{ recipient.organization }} · {{ t(recipient.delivery?.delivery_date ? 'outgoingStatus-delivered' : 'outgoingDeliveryPending') }}</p><dl><div v-for="field in ['delivery_date', 'acknowledged_by', 'acknowledgment_date', 'acknowledgment_reference'].filter(field => recipient.delivery?.[field])" :key="field"><dt class="inline text-sm text-slate-600">{{ t(`outgoingField-${field}`) }}: </dt><dd class="inline">{{ field.endsWith('_date') ? formatDate(recipient.delivery[field]) : recipient.delivery[field] }}</dd></div></dl></li></ul>
         <h3 class="font-semibold">{{ t('outgoingRelatedIncoming') }}</h3>
         <p v-if="!relatedIncoming.length" class="text-sm text-slate-600">{{ t('outgoingNoRelatedIncoming') }}</p>
         <ul class="flex flex-col gap-2"><li v-for="item in relatedIncoming" :key="item.id" class="flex flex-wrap gap-2"><UiButton v-if="incomingEndpoint" variant="secondary" :disabled="saving || loading" @click="openIncoming(item)">{{ item.internal_number }} · {{ item.subject }}</UiButton><span v-else>{{ item.internal_number }} · {{ item.subject }}</span><UiButton v-if="canManage && state.status !== 'closed'" variant="secondary" :disabled="saving || loading || !!mode" @click="save('unlink', item.id)">{{ t('outgoingRemoveIncomingLink') }}</UiButton></li></ul>
-        <section v-if="incomingDetail" class="rounded-xl border border-slate-200 p-4" :aria-label="t('outgoingRelatedIncoming')"><h3 class="font-semibold">{{ incomingDetail.internal_number }} · {{ incomingDetail.subject }}</h3><p>{{ incomingDetail.sender_organization }} · {{ incomingDetail.received_date }}</p><p>{{ t(`confidentiality-${incomingDetail.classification}`) }}</p><UiButton variant="secondary" @click="incomingDetail = null">{{ t('outgoingClosePreview') }}</UiButton></section>
+        <section v-if="incomingDetail" class="rounded-xl border border-slate-200 p-4" :aria-label="t('outgoingRelatedIncoming')"><h3 class="font-semibold">{{ incomingDetail.internal_number }} · {{ incomingDetail.subject }}</h3><p>{{ incomingDetail.sender_organization }} · {{ formatDate(incomingDetail.received_date) }}</p><p>{{ t(`confidentiality-${incomingDetail.classification}`) }}</p><UiButton variant="secondary" @click="incomingDetail = null">{{ t('outgoingClosePreview') }}</UiButton></section>
         <h3 class="font-semibold">{{ t('outgoingOperationalHistory') }}</h3>
         <p v-if="!history.length" class="text-sm text-slate-600">{{ t('outgoingNoOperations') }}</p>
-        <ol class="flex flex-col gap-3"><li v-for="item in history" :key="item.id" class="rounded-xl border border-slate-200 p-3"><p class="font-medium">{{ t(`outgoingAction-${item.action}`) }} · {{ item.actor_name }} · {{ item.created_at }}</p><p v-if="item.note" class="whitespace-pre-wrap">{{ item.note }}</p><dl class="text-sm text-slate-600"><div v-for="change in changes(item)" :key="change.field"><dt class="inline font-medium">{{ t(`outgoingField-${change.field}`) }}: </dt><dd class="inline">{{ display(change.field, change.before) }} → {{ display(change.field, change.after) }}</dd></div></dl></li></ol>
+        <ol class="flex flex-col gap-3"><li v-for="item in history" :key="item.id" class="rounded-xl border border-slate-200 p-3"><p class="font-medium">{{ t(`outgoingAction-${item.action}`) }} · {{ item.actor_name }} · {{ formatDateTime(item.created_at) }}</p><p v-if="item.note" class="whitespace-pre-wrap">{{ item.note }}</p><dl class="text-sm text-slate-600"><div v-for="change in changes(item)" :key="change.field"><dt class="inline font-medium">{{ t(`outgoingField-${change.field}`) }}: </dt><dd class="inline">{{ display(change.field, change.before) }} → {{ display(change.field, change.after) }}</dd></div></dl></li></ol>
     </section>
 </template>

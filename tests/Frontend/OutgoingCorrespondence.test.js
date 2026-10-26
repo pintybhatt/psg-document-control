@@ -93,6 +93,7 @@ describe('outgoing correspondence', () => {
     it('confirms formal registration before sending and displays the two distinct numbers read-only', async () => {
         const fetch = server(); const wrapper = await render(); await show(wrapper);
         expect(wrapper.find('script').exists()).toBe(false);
+        expect(wrapper.find('table').exists()).toBe(false);
         await button(wrapper, 'Register and assign numbers').trigger('click'); await flushPromises();
         expect(fetch.mock.calls.some(([url]) => url.includes('/register?'))).toBe(false);
         await button(wrapper.get('dialog'), 'Confirm').trigger('click'); await flushPromises();
@@ -128,11 +129,19 @@ describe('outgoing correspondence', () => {
         await wrapper.get('select[aria-label="Language"]').setValue('lo');
         expect(wrapper.text()).toContain('ທະບຽນເອກະສານຂາອອກ'); expect(wrapper.text()).toContain('ຜູ້ຮັບຫຼັກ');
         expect(wrapper.find('script').exists()).toBe(false);
+        expect(wrapper.find('table').exists()).toBe(false);
     });
     it('opens the outgoing register through an authorized sending context', async () => {
         server(); const wrapper = mount(OutgoingPage, { props: { endpoints: { endpoint: '/outgoing', contexts: '/outgoing/contexts' }, csrfToken: 'sample-csrf' }, global: { plugins: [createLocalization()] } });
-        await flushPromises(); expect(wrapper.text()).toContain('Example company / Example site');
-        await wrapper.get('#outgoing-context').setValue(scope.key); await flushPromises();
+        await flushPromises(); expect(wrapper.find('#outgoing-context').exists()).toBe(false);
         expect(wrapper.text()).toContain(draft.subject);
+    });
+    it('shows request failure separately from a genuine empty register', async () => {
+        const fetch = server();
+        fetch.mockImplementationOnce(async () => response({ message: 'Server error' }, 500));
+        const wrapper = await render();
+        expect(wrapper.text()).toContain(en.rbacRequestFailed);
+        expect(wrapper.text()).not.toContain(en.uiEmpty);
+        expect(wrapper.findAll('tbody tr')).toHaveLength(1);
     });
 });

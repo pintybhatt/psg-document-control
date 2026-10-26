@@ -3,6 +3,7 @@
 use App\Http\Controllers\AuthenticatedSessionController;
 use App\Http\Controllers\AuthorizationContextController;
 use App\Http\Controllers\CurrentUserController;
+use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DocumentMasterDataController;
 use App\Http\Controllers\IncomingCorrespondenceController;
 use App\Http\Controllers\IncomingOperationController;
@@ -49,6 +50,7 @@ Route::middleware(['auth:web', EnsureActiveUserSession::class])->group(function 
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
     Route::get('/api/v1/user', CurrentUserController::class)->name('api.v1.user');
     Route::prefix('api/v1')->name('api.v1.')->group(function (): void {
+        Route::get('dashboard', DashboardController::class)->name('dashboard');
         Route::get('outgoing-correspondence/{record}/operation-options', [OutgoingOperationController::class, 'options'])->name('outgoing.operation-options');
         Route::post('outgoing-correspondence/{record}/operations', [OutgoingOperationController::class, 'operate'])->name('outgoing.operations');
         Route::get('outgoing-correspondence/contexts', [OutgoingCorrespondenceController::class, 'contexts'])->name('outgoing.contexts');

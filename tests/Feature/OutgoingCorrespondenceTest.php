@@ -169,6 +169,7 @@ class OutgoingCorrespondenceTest extends TestCase
 
     #[TestWith([['recipients' => [['kind' => 'copy', 'organization' => 'Only copies']]], 'recipients'])]
     #[TestWith([['recipients' => [['kind' => 'primary', 'organization' => '', 'email' => 'invalid', 'id' => 99]]], 'recipients.0'])]
+    #[TestWith([['document_date' => '03/04/2026'], 'document_date'])]
     #[TestWith([['internal_number' => 'FORGED', 'official_number' => 'FORGED', 'status' => 'registered'], 'official_number'])]
     public function test_invalid_recipients_and_client_supplied_numbers_are_rejected_without_persistence(array $invalid, string $field): void
     {
@@ -258,5 +259,16 @@ class OutgoingCorrespondenceTest extends TestCase
         $role->permissions()->detach(Permission::query()->where('key', 'outgoing.drafts.manage')->value('id'));
         $this->postJson($this->url($scope), $this->payload($scope, $type))->assertForbidden();
         $this->assertDatabaseCount('outgoing_correspondences', 0);
+    }
+
+    public function test_register_search_filters_subject_and_recipient_before_counting(): void
+    {
+        [, $scope, , $type] = $this->fixture();
+        $this->postJson($this->url($scope), array_replace($this->payload($scope, $type), ['subject' => 'Unique search subject']))->assertCreated();
+        $this->postJson($this->url($scope), array_replace($this->payload($scope, $type), ['subject' => 'Different subject']))->assertCreated();
+
+        $this->getJson($this->url($scope).'&search=Unique%20search')->assertOk()->assertJsonPath('meta.total', 1)->assertJsonPath('data.0.subject', 'Unique search subject');
+        $this->getJson($this->url($scope).'&search=Example%20recipient')->assertOk()->assertJsonPath('meta.total', 2);
+        $this->getJson($this->url($scope).'&search=No%20matching%20document')->assertOk()->assertJsonPath('meta.total', 0)->assertJsonPath('data', []);
     }
 }

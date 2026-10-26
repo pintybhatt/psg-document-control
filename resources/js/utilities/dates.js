@@ -16,3 +16,17 @@ export function formatDate(value, fallback = '—') {
 
     return isoDate ? isoDate.split('-').reverse().join('/') : fallback;
 }
+
+/** Parse only the explicit day/month/year format used in controls. */
+export function parseDisplayDate(value) {
+    if (typeof value !== 'string' || !/^\d{2}\/\d{2}\/\d{4}$/.test(value)) { return null; }
+    return toIsoDate(value.split('/').reverse().join('-'));
+}
+
+/** Audit timestamps retain their unambiguous server calendar date. */
+export function formatDateTime(value, fallback = '—') {
+    if (typeof value !== 'string') { return fallback; }
+    const date = formatDate(value.slice(0, 10), fallback);
+    const time = value.match(/[T ](\d{2}:\d{2})/);
+    return date === fallback ? fallback : `${date}${time ? ` · ${time[1]} UTC` : ''}`;
+}

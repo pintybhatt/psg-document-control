@@ -128,6 +128,7 @@ describe('incoming correspondence', () => {
         await wrapper.get('select[aria-label="Language"]').setValue('lo');
         expect(wrapper.text()).toContain('ທະບຽນເອກະສານຂາເຂົ້າ'); expect(wrapper.text()).toContain('ຈົດໝາຍ');
         expect(wrapper.text()).not.toContain('incomingStatus-');
+        expect(wrapper.find('table').exists()).toBe(false);
     });
     it('aborts old scope reads and ignores their late response', async () => {
         const fetch = server(); let resolveOld;
@@ -148,8 +149,15 @@ describe('incoming correspondence', () => {
     });
     it('integrates authorized receiving contexts into the incoming page', async () => {
         server(); const wrapper = mount(IncomingPage, { props: { endpoints: { endpoint: '/incoming', contexts: '/incoming/contexts' }, csrfToken: 'sample-csrf' }, global: { plugins: [createLocalization()] } });
-        await flushPromises(); expect(wrapper.text()).toContain('Example company / Example site');
-        await wrapper.get('#incoming-context').setValue(scope.key); await flushPromises();
+        await flushPromises(); expect(wrapper.find('#incoming-context').exists()).toBe(false);
         expect(wrapper.text()).toContain('Example sender');
+    });
+    it('shows request failure separately from a genuine empty register', async () => {
+        const fetch = server();
+        fetch.mockImplementationOnce(async () => response({ message: 'Server error' }, 500));
+        const wrapper = await render();
+        expect(wrapper.text()).toContain(en.rbacRequestFailed);
+        expect(wrapper.text()).not.toContain(en.uiEmpty);
+        expect(wrapper.findAll('tbody tr')).toHaveLength(1);
     });
 });
