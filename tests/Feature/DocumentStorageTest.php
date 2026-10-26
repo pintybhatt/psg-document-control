@@ -4,7 +4,9 @@ namespace Tests\Feature;
 
 use App\Authorization\AttachmentFiles;
 use App\Authorization\ManageControlledDocuments;
+use App\Authorization\ManageIncomingCorrespondence;
 use App\Authorization\ManageNumbering;
+use App\Authorization\ManageOutgoingCorrespondence;
 use App\Models\AttachmentVersion;
 use App\Models\ConfidentialityClearance;
 use App\Models\DocumentAccessGrant;
@@ -289,5 +291,33 @@ class DocumentStorageTest extends TestCase
         $version = AttachmentVersion::sole();
         $response = $this->getJson($this->url($record, 'versions/'.$version->id.'/preview'))->assertOk()->assertHeader('Content-Type', 'image/png');
         $this->assertSame($original, $response->streamedContent());
+    }
+
+    #[TestWith(['incoming'])]
+    #[TestWith(['outgoing'])]
+    public function test_registered_metadata_corrections_leave_existing_attachment_versions_unchanged(string $kind): void
+    {
+        [$record, $actor, $role] = $this->fixture($kind);
+        $scope = $record->profile->documentScope();
+        $authorizationScope = $scope->authorizationScope();
+        $permissions = Permission::query()->whereIn('key', [$kind.'.register', $kind.'.operations.manage'])->pluck('id');
+        $role->permissions()->syncWithoutDetaching($permissions);
+        foreach ($kind === 'outgoing' ? ['internal_register', 'official_outgoing'] : ['internal_register'] as $purpose) {
+            app(ManageNumbering::class)->save($actor, $authorizationScope, ['register_id' => $record->register_id, 'purpose' => $purpose, 'reset_policy' => 'annual', 'prefix' => strtoupper('FIX/'.$kind.'/'.($purpose === 'official_outgoing' ? 'OFF' : 'INT')), 'padding' => 3, 'active' => true]);
+        }
+        $attachment = $this->postJson($this->url($record, type: $kind), ['file' => $this->pdf(), 'reason' => 'Original'])->assertCreated()->json('data');
+        $this->postJson($this->url($record, type: $kind), ['file' => $this->pdf('corrected.pdf'), 'reason' => 'File correction', 'attachment_id' => $attachment['id'], 'expected_version' => 1])->assertOk();
+        $manager = app($kind === 'incoming' ? ManageIncomingCorrespondence::class : ManageOutgoingCorrespondence::class);
+        $manager->register($actor, $scope, (string) $record->id);
+        $versions = DB::table('attachment_versions')->orderBy('id')->get()->toArray();
+        $attachments = DB::table('document_attachments')->get()->toArray();
+        $events = DB::table('storage_events')->get()->toArray();
+        $this->postJson('/api/v1/'.$kind.'-correspondence/'.$record->id.'/operations?'.http_build_query(['company_id' => $scope->companyId, 'site_id' => $scope->siteId]), ['action' => 'correct_details', 'revision' => 0, 'note' => 'Correct subject transcription only', 'details' => ['subject' => 'Corrected registered subject']])->assertOk();
+        $this->assertEquals($versions, DB::table('attachment_versions')->orderBy('id')->get()->toArray());
+        $this->assertEquals($attachments, DB::table('document_attachments')->get()->toArray());
+        $this->assertEquals($events, DB::table('storage_events')->get()->toArray());
+        foreach (AttachmentVersion::all() as $version) {
+            Storage::disk('documents')->assertExists(app(AttachmentFiles::class)->key($version->id));
+        }
     }
 }

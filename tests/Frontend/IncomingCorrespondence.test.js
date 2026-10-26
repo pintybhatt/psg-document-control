@@ -104,7 +104,7 @@ describe('incoming correspondence', () => {
         await button(wrapper, 'Register formally').trigger('click'); await flushPromises();
         expect(fetch.mock.calls.some(([url]) => url.includes('/register?'))).toBe(false);
         await button(wrapper.get('dialog'), 'Confirm').trigger('click'); await flushPromises();
-        expect(wrapper.text()).toContain('TEST/IN/2026/000001'); expect(wrapper.text()).toContain('Registered details are read-only.');
+        expect(wrapper.text()).toContain('TEST/IN/2026/000001'); expect(wrapper.text()).toContain('Registration numbers, issuance, ownership, document type and classification remain protected');
         expect(wrapper.findAll('button').some(item => item.text() === 'Edit draft')).toBe(false);
     });
     it('shows translated validation errors and retains the draft form', async () => {

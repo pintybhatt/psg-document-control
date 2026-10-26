@@ -13,6 +13,7 @@ use App\Models\DocumentType;
 use App\Models\IncomingCorrespondence;
 use App\Models\OrganizationMembership;
 use App\Models\OutgoingCorrespondence;
+use App\Models\OutgoingOperation;
 use App\Models\OutgoingOperationAudit;
 use App\Models\Permission;
 use App\Models\RegisterConfiguration;
@@ -276,5 +277,127 @@ class OutgoingOperationsTest extends TestCase
         }
         $this->postJson($this->url($scope, $record), ['action' => 'reopen', 'revision' => 3, 'note' => 'Correction', 'official_number' => 'FORGED'])->assertUnprocessable()->assertJsonValidationErrors('official_number');
         $this->assertDatabaseHas('outgoing_operations', ['status' => 'closed', 'revision' => 3]);
+    }
+
+    public function test_undispatched_metadata_and_recipient_corrections_preserve_both_issuances(): void
+    {
+        [$actor, $scope, $record] = $this->fixture();
+        $identity = $record->only(['id', 'scope_id', 'profile_id', 'register_id', 'type_id', 'internal_number', 'official_number', 'registered_at', 'registered_by', 'created_at']);
+        $ledger = DB::table('issued_document_numbers')->get()->toArray();
+        $counters = DB::table('numbering_counters')->get()->toArray();
+        $recipient = $record->recipients()->first();
+        $original = $recipient->organization;
+        $details = ['subject' => 'Corrected subject', 'signatory_name' => 'Correct signatory', 'signatory_title' => 'Officer', 'document_date' => '2026-10-24', 'description_en' => 'Corrected', 'description_lo' => 'ແກ້ໄຂ', 'priority' => 'urgent',
+            'recipients' => [['id' => $recipient->id, 'organization' => 'Correct recipient', 'contact_name' => 'Contact', 'email' => 'example@example.test', 'phone' => '123', 'address' => 'Address']]];
+        $body = ['action' => 'correct_details', 'revision' => 0, 'note' => 'Correct transcription before dispatch', 'details' => $details];
+        $this->postJson($this->url($scope, $record), $body)->assertOk()->assertJsonPath('data.subject', 'Corrected subject')->assertJsonPath('data.recipients.0.id', $recipient->id)->assertJsonPath('data.recipients.0.organization', 'Correct recipient')->assertJsonPath('data.operations.revision', 1);
+        $this->assertEquals($identity, $record->fresh()->only(array_keys($identity)));
+        $this->assertEquals($ledger, DB::table('issued_document_numbers')->get()->toArray());
+        $this->assertEquals($counters, DB::table('numbering_counters')->get()->toArray());
+        $this->assertSame('primary', $recipient->fresh()->kind);
+        $audit = OutgoingOperationAudit::query()->sole();
+        $this->assertSame($original, $audit->before['details']['recipients'][$recipient->id]['organization']);
+        $this->assertSame('Correct recipient', $audit->after['details']['recipients'][$recipient->id]['organization']);
+        $this->assertSame($actor->id, $audit->actor_id);
+        $this->assertSame($body['note'], $audit->note);
+        $this->getJson($this->url($scope, $record, ''))->assertOk()->assertJsonPath('history.0.after.details.subject', 'Corrected subject');
+        $this->postJson($this->url($scope, $record), $body)->assertConflict();
+        $this->assertDatabaseCount('outgoing_operation_audits', 1);
+    }
+
+    #[TestWith(['dispatched'])]
+    #[TestWith(['delivered'])]
+    #[TestWith(['closed'])]
+    #[TestWith(['undone_dispatch'])]
+    #[TestWith(['reopened_dispatch'])]
+    public function test_post_dispatch_or_closed_metadata_corrections_cannot_change_sent_details(string $stage): void
+    {
+        [, $scope, $record] = $this->fixture();
+        $revision = 0;
+        if ($stage !== 'closed') {
+            $this->postJson($this->url($scope, $record), $this->dispatchData($revision++))->assertOk();
+        }
+        if ($stage === 'delivered') {
+            $this->postJson($this->url($scope, $record), ['action' => 'delivery', 'revision' => $revision++, 'recipient_id' => $record->recipients()->first()->id, 'delivery_date' => '2026-10-26'])->assertOk();
+        } elseif ($stage === 'undone_dispatch') {
+            $this->postJson($this->url($scope, $record), ['action' => 'correct_dispatch', 'revision' => $revision++, 'dispatch_date' => null, 'dispatch_channel' => null, 'note' => 'Dispatch recorded in error'])->assertOk();
+        } elseif (in_array($stage, ['closed', 'reopened_dispatch'], true)) {
+            $this->postJson($this->url($scope, $record), ['action' => 'close', 'revision' => $revision++, 'note' => 'End of handling'])->assertOk();
+            if ($stage === 'reopened_dispatch') {
+                $this->postJson($this->url($scope, $record), ['action' => 'reopen', 'revision' => $revision++, 'note' => 'Additional follow-up required'])->assertOk();
+            }
+        }
+        $original = $record->fresh()->getRawOriginal();
+        $historyCount = OutgoingOperationAudit::query()->count();
+        $this->postJson($this->url($scope, $record), ['action' => 'correct_details', 'revision' => $revision, 'note' => 'Correct original data-entry mistake', 'details' => ['subject' => 'Corrected']])->assertUnprocessable();
+        $this->assertSame($original, $record->fresh()->getRawOriginal());
+        $this->assertDatabaseCount('outgoing_operation_audits', $historyCount);
+    }
+
+    public function test_outgoing_corrections_reject_identity_recipient_reassignment_and_missing_reasons(): void
+    {
+        [, $scope, $record] = $this->fixture();
+        $body = ['action' => 'correct_details', 'revision' => 0, 'note' => 'Correct original data-entry mistake'];
+        $this->postJson($this->url($scope, $record), ['action' => 'correct_details', 'revision' => 0, 'details' => ['subject' => 'Corrected']])->assertUnprocessable()->assertJsonValidationErrors('note');
+        foreach (['type_id', 'scope_id', 'register_id', 'classification', 'internal_number', 'official_number', 'registered_at'] as $field) {
+            $this->postJson($this->url($scope, $record), $body + ['details' => ['subject' => 'Corrected', $field => '999']])->assertUnprocessable()->assertJsonValidationErrors('details');
+        }
+        $this->postJson($this->url($scope, $record), $body + ['details' => ['recipients' => [['id' => $record->recipients()->first()->id, 'organization' => 'Correct', 'kind' => 'copy']]]])->assertUnprocessable();
+        $this->postJson($this->url($scope, $record), $body + ['details' => ['recipients' => [['id' => 99999, 'organization' => 'Correct']]]])->assertNotFound();
+        $this->assertDatabaseCount('outgoing_operation_audits', 0);
+    }
+
+    #[TestWith(['permission', 403])]
+    #[TestWith(['membership', 403])]
+    #[TestWith(['restricted', 404])]
+    public function test_outgoing_corrections_require_current_authority_and_document_access(string $boundary, int $status): void
+    {
+        [, $scope, $record, $role] = $this->fixture();
+        if ($boundary === 'permission') {
+            $role->permissions()->detach(Permission::query()->where('key', 'outgoing.operations.manage')->value('id'));
+        } elseif ($boundary === 'membership') {
+            OrganizationMembership::query()->update(['active' => false]);
+        } else {
+            DB::table('document_security_profiles')->where('id', $record->profile_id)->update(['restricted' => true]);
+        }
+        $this->postJson($this->url($scope, $record), ['action' => 'correct_details', 'revision' => 0, 'note' => 'Correct original data-entry mistake', 'details' => ['subject' => 'Corrected']])->assertStatus($status);
+        $this->assertDatabaseCount('outgoing_operation_audits', 0);
+    }
+
+    #[TestWith(['audit'])]
+    #[TestWith(['revision'])]
+    public function test_failed_outgoing_correction_save_rolls_back_metadata_recipients_and_audit(string $stage): void
+    {
+        [, $scope, $record] = $this->fixture();
+        $original = $record->getRawOriginal();
+        $recipient = $record->recipients()->first();
+        $originalRecipient = $recipient->getRawOriginal();
+        $event = $stage === 'audit' ? 'eloquent.creating: '.OutgoingOperationAudit::class : 'eloquent.saving: '.OutgoingOperation::class;
+        app('events')->listen($event, fn () => false);
+        try {
+            $this->postJson($this->url($scope, $record), ['action' => 'correct_details', 'revision' => 0, 'note' => 'Correct original data-entry mistake', 'details' => ['subject' => 'Corrected', 'recipients' => [['id' => $recipient->id, 'organization' => 'Corrected recipient']]]])->assertServerError();
+        } finally {
+            app('events')->forget($event);
+        }
+        $this->assertSame($original, $record->fresh()->getRawOriginal());
+        $this->assertSame($originalRecipient, $recipient->fresh()->getRawOriginal());
+        $this->assertDatabaseCount('outgoing_operation_audits', 0);
+        $this->assertDatabaseCount('outgoing_operations', 0);
+    }
+
+    public function test_database_correction_guard_rejects_mismatched_audit_values_and_identity_changes(): void
+    {
+        [$actor, , $record] = $this->fixture();
+        $audit = OutgoingOperationAudit::query()->create(['correspondence_id' => $record->id, 'actor_id' => $actor->id, 'revision' => 1, 'action' => 'note',
+            'note' => 'Correct original transcription', 'before' => ['details' => ['subject' => $record->subject]], 'after' => ['details' => ['subject' => 'Corrected']]]);
+        foreach ([['subject' => 'Does not match audit'], ['subject' => 'Corrected', 'internal_number' => 'FORGED']] as $changes) {
+            try {
+                DB::table('outgoing_correspondences')->where('id', $record->id)->update($changes + ['updated_by' => $actor->id, 'updated_at' => $audit->created_at]);
+                $this->fail('Correction guard allowed unaudited or identity changes.');
+            } catch (QueryException) {
+            }
+        }
+        $this->assertSame($record->subject, $record->fresh()->subject);
+        $this->assertSame($record->internal_number, $record->fresh()->internal_number);
     }
 }

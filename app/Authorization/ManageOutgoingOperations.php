@@ -17,7 +17,7 @@ use LogicException;
 
 class ManageOutgoingOperations
 {
-    public function __construct(private ManageOutgoingCorrespondence $outgoing, private ManageIncomingCorrespondence $incoming) {}
+    public function __construct(private ManageOutgoingCorrespondence $outgoing, private ManageIncomingCorrespondence $incoming, private CorrectCorrespondenceDetails $corrections) {}
 
     /** @return array<string, mixed> */
     public function state(OutgoingCorrespondence $record): array
@@ -107,6 +107,9 @@ class ManageOutgoingOperations
                 abort(409, 'outgoingOperationStale');
             }
             $record->setRelation('operation', $operation);
+            if ($data['action'] === 'correct_details') {
+                return $this->corrections->correct($actor, $record, $operation, $data);
+            }
             $before = $this->state($record);
             $extraBefore = [];
             $extraAfter = [];
@@ -236,7 +239,7 @@ class ManageOutgoingOperations
     private function validate(array $input): array
     {
         $action = $input['action'] ?? null;
-        $rules = ['action' => ['required', Rule::in(['dispatch', 'correct_dispatch', 'delivery', 'close', 'reopen', 'note', 'link', 'unlink'])],
+        $rules = ['action' => ['required', Rule::in(['dispatch', 'correct_dispatch', 'delivery', 'close', 'reopen', 'note', 'link', 'unlink', 'correct_details'])],
             'revision' => ['required', 'integer', 'min:0'], 'note' => [in_array($action, ['correct_dispatch', 'reopen', 'note'], true) ? 'required' : 'nullable', 'string', 'max:2000']];
         if (in_array($action, ['dispatch', 'correct_dispatch'], true)) {
             $rules += ['dispatch_date' => $action === 'dispatch' ? ['required', 'date_format:Y-m-d', 'before_or_equal:today'] : ['present', 'nullable', 'date_format:Y-m-d', 'before_or_equal:today'],
@@ -249,10 +252,15 @@ class ManageOutgoingOperations
         } elseif (in_array($action, ['link', 'unlink'], true)) {
             $rules['incoming_id'] = ['required', 'integer', 'min:1'];
         }
+        if ($action === 'correct_details') {
+            $rules += $this->corrections->rules(true);
+            $rules['note'] = ['required', 'string', 'min:10', 'max:2000', 'regex:/\p{L}/u'];
+            $input['note'] = isset($input['note']) && is_string($input['note']) ? trim($input['note']) : ($input['note'] ?? null);
+        }
         foreach (array_diff(array_keys($input), array_keys($rules)) as $field) {
             $rules[$field] = ['prohibited'];
         }
 
-        return Validator::make($input, $rules, array_fill_keys(['required', 'present', 'integer', 'min', 'string', 'max', 'date_format', 'before_or_equal', 'after_or_equal', 'in', 'prohibited'], 'outgoingValidation'))->validate();
+        return Validator::make($input, $rules, array_fill_keys(['required', 'present', 'integer', 'min', 'string', 'max', 'date_format', 'before_or_equal', 'after_or_equal', 'in', 'prohibited', 'array', 'list', 'email', 'distinct', 'regex'], 'outgoingValidation'))->validate();
     }
 }

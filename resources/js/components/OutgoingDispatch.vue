@@ -1,4 +1,5 @@
 <script setup>
+import CorrespondenceCorrectionHistory from './CorrespondenceCorrectionHistory.vue';
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { formatDate, formatDateTime } from '../utilities/dates.js';
 import UiButton from './ui/UiButton.vue';
@@ -144,6 +145,6 @@ onBeforeUnmount(() => controller.abort());
         <section v-if="incomingDetail" class="rounded-xl border border-slate-200 p-4" :aria-label="t('outgoingRelatedIncoming')"><h3 class="font-semibold">{{ incomingDetail.internal_number }} · {{ incomingDetail.subject }}</h3><p>{{ incomingDetail.sender_organization }} · {{ formatDate(incomingDetail.received_date) }}</p><p>{{ t(`confidentiality-${incomingDetail.classification}`) }}</p><UiButton variant="secondary" @click="incomingDetail = null">{{ t('outgoingClosePreview') }}</UiButton></section>
         <h3 class="font-semibold">{{ t('outgoingOperationalHistory') }}</h3>
         <p v-if="!history.length" class="text-sm text-slate-600">{{ t('outgoingNoOperations') }}</p>
-        <ol class="flex flex-col gap-3"><li v-for="item in history" :key="item.id" class="rounded-xl border border-slate-200 p-3"><p class="font-medium">{{ t(`outgoingAction-${item.action}`) }} · {{ item.actor_name }} · {{ formatDateTime(item.created_at) }}</p><p v-if="item.note" class="whitespace-pre-wrap">{{ item.note }}</p><dl class="text-sm text-slate-600"><div v-for="change in changes(item)" :key="change.field"><dt class="inline font-medium">{{ t(`outgoingField-${change.field}`) }}: </dt><dd class="inline">{{ display(change.field, change.before) }} → {{ display(change.field, change.after) }}</dd></div></dl></li></ol>
+        <ol class="flex flex-col gap-3"><li v-for="item in history" :key="item.id" class="rounded-xl border border-slate-200 p-3"><p class="font-medium">{{ t(item.after?.details ? 'correspondenceCorrectDetails' : `outgoingAction-${item.action}`) }} · {{ item.actor_name }} · {{ formatDateTime(item.created_at) }}</p><p v-if="item.note" class="whitespace-pre-wrap">{{ item.note }}</p><CorrespondenceCorrectionHistory v-if="item.after?.details" :item="item" kind="outgoing" /><dl v-else class="text-sm text-slate-600"><div v-for="change in changes(item)" :key="change.field"><dt class="inline font-medium">{{ t(`outgoingField-${change.field}`) }}: </dt><dd class="inline">{{ display(change.field, change.before) }} → {{ display(change.field, change.after) }}</dd></div></dl></li></ol>
     </section>
 </template>

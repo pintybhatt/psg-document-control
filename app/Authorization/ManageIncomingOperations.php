@@ -16,7 +16,7 @@ use LogicException;
 
 class ManageIncomingOperations
 {
-    public function __construct(private ManageIncomingCorrespondence $incoming, private MembershipAccess $memberships, private AccessControl $roles) {}
+    public function __construct(private ManageIncomingCorrespondence $incoming, private MembershipAccess $memberships, private AccessControl $roles, private CorrectCorrespondenceDetails $corrections) {}
 
     /** @return array<string, mixed> */
     public function state(IncomingCorrespondence $record): array
@@ -131,6 +131,9 @@ class ManageIncomingOperations
             }
             $action = $data['action'];
             $record->setRelation('operation', $operation);
+            if ($data['action'] === 'correct_details') {
+                return $this->corrections->correct($actor, $record, $operation, $data);
+            }
             $before = $this->state($record);
             if ($action === 'reopen') {
                 $this->incoming->authorizeContext($actor, $scope, 'incoming.operations.reopen');
@@ -254,7 +257,7 @@ class ManageIncomingOperations
     private function validate(array $input): array
     {
         $action = $input['action'] ?? null;
-        $rules = ['action' => ['required', Rule::in(['update', 'note', 'link', 'unlink', 'close', 'reopen'])], 'revision' => ['required', 'integer', 'min:0'],
+        $rules = ['action' => ['required', Rule::in(['update', 'note', 'link', 'unlink', 'close', 'reopen', 'correct_details'])], 'revision' => ['required', 'integer', 'min:0'],
             'note' => [in_array($action, ['note', 'reopen'], true) ? 'required' : 'nullable', 'string', 'max:2000']];
         if ($action === 'update') {
             $rules += ['responsible_user_id' => ['sometimes', 'nullable', 'integer'], 'responsible_department_id' => ['sometimes', 'nullable', 'integer'],
@@ -264,10 +267,15 @@ class ManageIncomingOperations
         if (in_array($action, ['link', 'unlink'], true)) {
             $rules['related_id'] = ['required', 'integer', 'min:1'];
         }
+        if ($action === 'correct_details') {
+            $rules += $this->corrections->rules(false);
+            $rules['note'] = ['required', 'string', 'min:10', 'max:2000', 'regex:/\p{L}/u'];
+            $input['note'] = isset($input['note']) && is_string($input['note']) ? trim($input['note']) : ($input['note'] ?? null);
+        }
         foreach (array_diff(array_keys($input), array_keys($rules)) as $field) {
             $rules[$field] = ['prohibited'];
         }
-        $data = Validator::make($input, $rules, array_fill_keys(['required', 'integer', 'min', 'string', 'max', 'in', 'boolean', 'date_format', 'prohibited'], 'incomingValidation'))->validate();
+        $data = Validator::make($input, $rules, array_fill_keys(['required', 'integer', 'min', 'string', 'max', 'in', 'boolean', 'date_format', 'prohibited', 'array', 'list', 'email', 'distinct', 'regex'], 'incomingValidation'))->validate();
         $data['revision'] = (int) $data['revision'];
         foreach (['related_id', 'responsible_user_id', 'responsible_department_id'] as $field) {
             if (isset($data[$field])) {

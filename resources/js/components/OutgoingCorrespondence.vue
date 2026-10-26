@@ -1,4 +1,5 @@
 <script setup>
+import CorrespondenceCorrection from './CorrespondenceCorrection.vue';
 import DocumentStorage from './DocumentStorage.vue';
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { formatDate, formatDateTime } from '../utilities/dates.js';
@@ -179,6 +180,7 @@ onBeforeUnmount(() => controller?.abort());
         </form>
         <section v-else-if="detail" class="flex flex-col gap-5 rounded-2xl border border-slate-200 bg-white p-5" aria-labelledby="outgoing-detail-title">
             <div class="flex flex-wrap items-center justify-between gap-3"><h2 id="outgoing-detail-title" tabindex="-1" class="text-lg font-semibold">{{ detail.subject }}</h2><div v-if="detail.status === 'draft'" class="flex gap-3"><UiButton v-if="canManage" variant="secondary" :disabled="saving || loading" @click="edit()">{{ t('outgoingEdit') }}</UiButton><UiButton v-if="canRegister" :disabled="saving || loading" @click="confirmation = true">{{ t('outgoingRegister') }}</UiButton></div></div>
+            <CorrespondenceCorrection :key="detail.id" kind="outgoing" :record="detail" :scope="scope" :endpoint="endpoint" :csrf-token="csrfToken" :history="handling?.history ?? []" @failure="fail" @saved="operationSaved" />
             <div><UiButton variant="secondary" :disabled="loading || saving" @click="preview(`/${detail.id}/pdf`)">{{ t('reportPreviewDetailPdf') }}</UiButton></div>
             <dl class="grid gap-4 md:grid-cols-2">
                 <div><dt class="text-sm text-slate-600">{{ t('outgoingNumber') }}</dt><dd class="font-mono">{{ detail.internal_number ?? '—' }}</dd></div>
@@ -196,7 +198,7 @@ onBeforeUnmount(() => controller?.abort());
             </dl></details>
             <h3 class="font-semibold">{{ t('outgoingRecipients') }}</h3>
             <ul class="flex flex-col gap-3"><li v-for="(recipient, index) in detail.recipients" :key="index" class="rounded-xl border border-slate-200 p-3"><p class="font-medium">{{ t(`outgoingRecipient-${recipient.kind}`) }} · {{ recipient.organization }}</p><p v-for="field in recipientFields.filter(field => field !== 'organization' && recipient[field])" :key="field" class="whitespace-pre-wrap wrap-anywhere">{{ t(`outgoingRecipient-${field}`) }}: {{ recipient[field] }}</p></li></ul>
-            <p v-if="detail.status === 'registered'" class="text-sm text-slate-600">{{ t('outgoingImmutable') }}</p>
+            <p v-if="detail.status === 'registered'" class="text-sm text-slate-600">{{ t('correspondenceProtectedIdentity') }}</p>
             <OutgoingDispatch v-if="detail.status === 'registered'" :key="detail.id" :record="detail" :scope="scope" :endpoint="endpoint" :incoming-endpoint="incomingEndpoint" :csrf-token="csrfToken" :history="handling?.history ?? []" :related-incoming="handling?.related_incoming ?? []" @failure="fail" @saved="operationSaved" />
             <DocumentStorage v-if="detail.storage_url" :key="detail.id" :endpoint="detail.storage_url" :scope="scope" :csrf-token="csrfToken" @failure="fail" />
             <h3 class="font-semibold">{{ t('outgoingHistory') }}</h3>

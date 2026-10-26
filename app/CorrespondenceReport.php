@@ -35,9 +35,11 @@ class CorrespondenceReport
         'generated' => ['Generated', 'ສ້າງເມື່ອ'], 'filters' => ['Applied filters', 'ຕົວກອງທີ່ນຳໃຊ້'],
         'none' => ['None', 'ບໍ່ມີ'], 'total' => ['Total records', 'ຈຳນວນລາຍການ'],
         'empty' => ['No correspondence matches these filters.', 'ບໍ່ມີເອກະສານທີ່ກົງກັບຕົວກອງ.'],
+        'correct_details' => ['Details corrected', 'ແກ້ໄຂລາຍລະອຽດແລ້ວ'],
         'before' => ['Before', 'ກ່ອນ'], 'after' => ['After', 'ຫຼັງ'], 'page' => ['Page', 'ໜ້າ'], 'of' => ['of', 'ຈາກ'], 'yes' => ['Yes', 'ແມ່ນ'], 'no' => ['No', 'ບໍ່'],
         'internal_number' => ['Internal number', 'ເລກທະບຽນພາຍໃນ'], 'official_number' => ['Official number', 'ເລກເອກະສານທາງການ'],
         'subject' => ['Subject', 'ຫົວຂໍ້'], 'sender_organization' => ['Sender', 'ຜູ້ສົ່ງ'],
+        'recipient' => ['Recipient', 'ຜູ້ຮັບ'],
         'recipients' => ['Recipients', 'ຜູ້ຮັບ'], 'received_date' => ['Received date', 'ວັນທີຮັບ'],
         'correspondence_date' => ['Correspondence date', 'ວັນທີເອກະສານ'], 'document_date' => ['Document date', 'ວັນທີເອກະສານ'],
         'channel' => ['Channel', 'ຊ່ອງທາງ'], 'status' => ['Status', 'ສະຖານະ'], 'due_date' => ['Due date', 'ວັນຄົບກຳນົດ'],
@@ -138,6 +140,11 @@ class CorrespondenceReport
             $sections[] = ['title' => $this->label($recipient['kind'], $language), 'fields' => $this->fields(array_diff_key($recipient, array_flip(['id', 'kind', 'delivery'])) + ($recipient['delivery'] ?? []), $language)];
         }
         foreach ($details['history'] ?? [] as $item) {
+            if (isset($item['after']['details'])) {
+                $item['action'] = 'correct_details';
+                $item['before'] = $item['before']['details'];
+                $item['after'] = $item['after']['details'];
+            }
             $changes = [];
             foreach (array_unique([...array_keys($item['before']), ...array_keys($item['after'])]) as $field) {
                 $changes[] = ['label' => $this->label($field, $language), 'value' => $this->label('before', $language).': '.$this->fieldValue($field, $item['before'][$field] ?? null, $language)."\n".$this->label('after', $language).': '.$this->fieldValue($field, $item['after'][$field] ?? null, $language)];
@@ -203,6 +210,9 @@ class CorrespondenceReport
         }
         if (is_bool($value)) {
             return $this->label($value ? 'yes' : 'no', $language);
+        }
+        if ($field === 'recipients' && is_array($value)) {
+            return implode("\n", array_map(fn (array $recipient): string => $this->label('recipient', $language).': '.$this->fieldValue('recipient', $recipient, $language), array_values($value)));
         }
         if (is_array($value)) {
             if (array_key_exists('name_'.$language, $value)) {

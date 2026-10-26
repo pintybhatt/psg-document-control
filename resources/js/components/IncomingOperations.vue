@@ -1,4 +1,5 @@
 <script setup>
+import CorrespondenceCorrectionHistory from './CorrespondenceCorrectionHistory.vue';
 import { computed, nextTick, onBeforeUnmount, reactive, ref } from 'vue';
 import { formatDate, formatDateTime } from '../utilities/dates.js';
 import UiButton from './ui/UiButton.vue';
@@ -128,9 +129,9 @@ onBeforeUnmount(() => controller.abort());
         <p v-if="!history.length" class="text-sm text-slate-600">{{ t('incomingNoActions') }}</p>
         <ol class="flex flex-col gap-3">
             <li v-for="item in history" :key="item.id" class="rounded-xl border border-slate-200 p-3">
-                <p class="font-medium">{{ t(`incomingOperation-${item.action}`) }} · {{ item.actor_name }} · {{ formatDateTime(item.created_at) }}</p>
+                <p class="font-medium">{{ t(item.after?.details ? 'correspondenceCorrectDetails' : `incomingOperation-${item.action}`) }} · {{ item.actor_name }} · {{ formatDateTime(item.created_at) }}</p>
                 <p v-if="item.note" class="whitespace-pre-wrap">{{ item.note }}</p>
-                <dl class="text-sm text-slate-600"><div v-for="field in [...new Set([...Object.keys(item.before), ...Object.keys(item.after)])]" :key="field"><dt class="inline font-medium">{{ t(`incomingField-${field}`) }}: </dt><dd class="inline">{{ display(field, item.before[field] ?? null) }} → {{ display(field, item.after[field] ?? null) }}</dd></div></dl>
+                <CorrespondenceCorrectionHistory v-if="item.after?.details" :item="item" kind="incoming" /><dl v-else class="text-sm text-slate-600"><div v-for="field in [...new Set([...Object.keys(item.before), ...Object.keys(item.after)])]" :key="field"><dt class="inline font-medium">{{ t(`incomingField-${field}`) }}: </dt><dd class="inline">{{ display(field, item.before[field] ?? null) }} → {{ display(field, item.after[field] ?? null) }}</dd></div></dl>
             </li>
         </ol>
     </section>

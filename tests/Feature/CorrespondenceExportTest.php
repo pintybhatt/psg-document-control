@@ -202,13 +202,16 @@ class CorrespondenceExportTest extends TestCase
         }
         $this->travelTo('2026-10-26 18:35:00');
         $this->postJson($this->url($kind, $site, '/'.$visible.'/register'))->assertOk()->assertJsonPath('data.registered_at', '2026-10-26T18:35:00.000000Z');
+        $this->postJson($this->url($kind, $site, '/'.$visible.'/operations'), ['action' => 'correct_details', 'revision' => 0, 'note' => 'Correct transcription for export review', 'details' => [
+            $kind === 'incoming' ? 'correspondence_date' : 'document_date' => '2026-04-04',
+        ]])->assertOk();
         $operation = $kind === 'incoming'
-            ? ['action' => 'update', 'revision' => 0, 'due_date' => '2026-10-28', 'response_required' => true]
-            : ['action' => 'dispatch', 'revision' => 0, 'dispatch_date' => '2026-10-26', 'dispatch_channel' => 'courier', 'dispatch_reference' => 'REVIEW/001'];
+            ? ['action' => 'update', 'revision' => 1, 'due_date' => '2026-10-28', 'response_required' => true]
+            : ['action' => 'dispatch', 'revision' => 1, 'dispatch_date' => '2026-10-26', 'dispatch_channel' => 'courier', 'dispatch_reference' => 'REVIEW/001'];
         $this->postJson($this->url($kind, $site, '/'.$visible.'/operations'), $operation)->assertOk();
         if ($kind === 'outgoing') {
             $recipientId = OutgoingRecipient::query()->where('correspondence_id', $visible)->sole()->id;
-            $this->postJson($this->url($kind, $site, '/'.$visible.'/operations'), ['action' => 'delivery', 'revision' => 1, 'recipient_id' => $recipientId, 'delivery_date' => '2026-10-26', 'acknowledgment_date' => '2026-10-26', 'acknowledged_by' => 'Review recipient'])->assertOk();
+            $this->postJson($this->url($kind, $site, '/'.$visible.'/operations'), ['action' => 'delivery', 'revision' => 2, 'recipient_id' => $recipientId, 'delivery_date' => '2026-10-26', 'acknowledgment_date' => '2026-10-26', 'acknowledged_by' => 'Review recipient'])->assertOk();
         }
 
         $rendered = [];
@@ -222,11 +225,15 @@ class CorrespondenceExportTest extends TestCase
         $report = app(CorrespondenceReport::class);
         $fields = collect($rendered['sections'][0]['fields']);
         $this->assertSame('27/10/2026, 01:35', $fields->firstWhere('label', $report->label('registered_at', $language))['value']);
-        $this->assertSame('03/04/2026', $fields->firstWhere('label', $report->label($kind === 'incoming' ? 'correspondence_date' : 'document_date', $language))['value']);
+        $this->assertSame('04/04/2026', $fields->firstWhere('label', $report->label($kind === 'incoming' ? 'correspondence_date' : 'document_date', $language))['value']);
         $registration = collect($rendered['sections'])->firstWhere('title', $report->label('registration_history', $language));
         $this->assertStringContainsString('27/10/2026, 01:35', $registration['fields'][1]['value']);
         $history = collect($rendered['sections'])->first(fn (array $section): bool => str_starts_with($section['title'], $report->label('history', $language).' · '));
         $this->assertStringContainsString('27/10/2026, 01:35', $history['title']);
+        $this->assertStringContainsString($report->label('correct_details', $language), $history['title']);
+        $this->assertSame('Correct transcription for export review', $history['text']);
+        $this->assertStringContainsString('03/04/2026', $history['fields'][0]['value']);
+        $this->assertStringContainsString('04/04/2026', $history['fields'][0]['value']);
         $this->assertStringNotContainsString('UTC', json_encode($rendered['sections'], JSON_UNESCAPED_UNICODE));
         $this->getJson($this->url($kind, $site, '/'.$visible))->assertOk()->assertJsonPath('data.registered_at', '2026-10-26T18:35:00.000000Z');
         $this->assertDatabaseHas($kind === 'incoming' ? 'incoming_correspondences' : 'outgoing_correspondences', ['id' => $visible, 'registered_at' => '2026-10-26 18:35:00']);

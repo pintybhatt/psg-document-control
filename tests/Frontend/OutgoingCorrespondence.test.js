@@ -98,7 +98,7 @@ describe('outgoing correspondence', () => {
         expect(fetch.mock.calls.some(([url]) => url.includes('/register?'))).toBe(false);
         await button(wrapper.get('dialog'), 'Confirm').trigger('click'); await flushPromises();
         expect(wrapper.text()).toContain('TEST/OUT/2026/000001'); expect(wrapper.text()).toContain('TEST/OFFICIAL/2026/000001');
-        expect(wrapper.text()).toContain('Registered details and recipients are read-only.');
+        expect(wrapper.text()).toContain('Registration numbers, issuance, ownership, document type and classification remain protected');
         expect(wrapper.findAll('button').some(item => item.text() === 'Edit draft')).toBe(false);
     });
     it('shows nested recipient validation and preserves the draft editor', async () => {
