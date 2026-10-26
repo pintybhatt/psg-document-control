@@ -67,6 +67,82 @@ class BootstrapAdministratorTest extends TestCase
         $this->assertDatabaseCount('users', 0);
     }
 
+    #[TestWith([8])]
+    #[TestWith([9])]
+    #[TestWith([10])]
+    #[TestWith([11])]
+    #[TestWith([12])]
+    #[TestWith([13])]
+    #[TestWith([14])]
+    #[TestWith([15])]
+    public function test_local_bootstrap_accepts_passwords_between_eight_and_fifteen_characters(int $length): void
+    {
+        $this->app['env'] = 'local';
+        $password = str_repeat('x', $length);
+
+        $this->artisan('user:bootstrap-admin', $this->identity())
+            ->expectsQuestion('Password', $password)->expectsQuestion('Confirm password', $password)
+            ->assertExitCode(0);
+
+        $this->assertTrue(Hash::check($password, User::query()->sole()->password));
+        $this->assertDatabaseCount('roles', 0);
+        $this->assertDatabaseCount('user_role_assignments', 0);
+        $this->assertDatabaseCount('companies', 0);
+        $this->assertDatabaseCount('sites', 0);
+        $this->assertDatabaseCount('departments', 0);
+    }
+
+    #[TestWith(['testing', 8])]
+    #[TestWith(['testing', 15])]
+    #[TestWith(['staging', 8])]
+    #[TestWith(['staging', 15])]
+    #[TestWith(['production', 8])]
+    #[TestWith(['production', 15])]
+    #[TestWith(['development', 8])]
+    #[TestWith(['development', 15])]
+    #[TestWith(['', 15])]
+    public function test_nonlocal_bootstrap_rejects_passwords_below_sixteen_characters(string $environment, int $length): void
+    {
+        $this->app['env'] = $environment;
+        $password = str_repeat('x', $length);
+
+        $this->artisan('user:bootstrap-admin', $this->identity())
+            ->expectsQuestion('Password', $password)->expectsQuestion('Confirm password', $password)
+            ->expectsOutputToContain('Password must be at least 16 characters')
+            ->assertExitCode(1);
+
+        $this->assertDatabaseCount('users', 0);
+    }
+
+    #[TestWith(['testing'])]
+    #[TestWith(['production'])]
+    public function test_nonlocal_bootstrap_accepts_the_sixteen_character_minimum(string $environment): void
+    {
+        $this->app['env'] = $environment;
+        $password = '1234567890abcdef';
+
+        $this->artisan('user:bootstrap-admin', $this->identity())
+            ->expectsQuestion('Password', $password)->expectsQuestion('Confirm password', $password)
+            ->assertExitCode(0);
+
+        $this->assertTrue(Hash::check($password, User::query()->sole()->password));
+    }
+
+    #[TestWith(['1234567', '1234567'])]
+    #[TestWith(['12345678', '87654321'])]
+    #[TestWith(["valid\0password", "valid\0password"])]
+    public function test_local_bootstrap_rejects_short_null_byte_or_mismatched_passwords(string $password, string $confirmation): void
+    {
+        $this->app['env'] = 'local';
+
+        $this->artisan('user:bootstrap-admin', $this->identity())
+            ->expectsQuestion('Password', $password)->expectsQuestion('Confirm password', $confirmation)
+            ->expectsOutputToContain('Password must be at least 8 characters')
+            ->assertExitCode(1);
+
+        $this->assertDatabaseCount('users', 0);
+    }
+
     #[TestWith(['short', 'short'])]
     #[TestWith(['A test-only long password 123', 'A different long password 123'])]
     #[TestWith(['', ''])]
@@ -79,8 +155,11 @@ class BootstrapAdministratorTest extends TestCase
         $this->assertDatabaseCount('users', 0);
     }
 
-    public function test_passwords_over_the_bcrypt_byte_limit_are_rejected(): void
+    #[TestWith(['local'])]
+    #[TestWith(['testing'])]
+    public function test_passwords_over_the_bcrypt_byte_limit_are_rejected(string $environment): void
     {
+        $this->app['env'] = $environment;
         $password = str_repeat('ກ', 25);
 
         $this->artisan('user:bootstrap-admin', $this->identity())

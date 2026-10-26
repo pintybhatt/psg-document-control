@@ -63,9 +63,10 @@ class BootstrapAdministrator extends Command
 
         $password = $this->secret('Password', false);
         $confirmation = $this->secret('Confirm password', false);
+        $minimumPasswordLength = app()->environment('local') ? 8 : 16;
         $validator = Validator::make(['password' => $password, 'password_confirmation' => $confirmation], [
             'password' => [
-                'bail', 'required', 'string', Password::min(16), 'confirmed',
+                'bail', 'required', 'string', Password::min($minimumPasswordLength), 'confirmed',
                 function (string $attribute, mixed $value, Closure $fail): void {
                     if (strlen($value) > 72 || str_contains($value, "\0")) {
                         $fail('Password must not exceed 72 bytes or contain null bytes.');
@@ -75,7 +76,7 @@ class BootstrapAdministrator extends Command
         ]);
 
         if ($validator->fails()) {
-            $this->error('Password must be at least 16 characters, at most 72 bytes, contain no null bytes, and match its confirmation.');
+            $this->error("Password must be at least {$minimumPasswordLength} characters, at most 72 bytes, contain no null bytes, and match its confirmation.");
 
             return self::FAILURE;
         }
