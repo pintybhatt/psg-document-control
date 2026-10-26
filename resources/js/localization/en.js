@@ -1,4 +1,6 @@
 export default {
+    searchHistoryHelp: "Controlled searches include revision history. Open Details to inspect historical matches.",
+
     "searchPhysical": "Physical identifier or location",
     "searchCustodian": "Current physical custodian",
     "searchCopyKind": "Original / copy",
@@ -12,7 +14,7 @@ export default {
     "searchTo": "To date",
     "searchRevisionState": "Revision status",
     "searchOwner": "Revision owner or custodian",
-    "searchDateHelp": "Dates: incoming received; outgoing document; controlled current released effective date, or initial draft effective date.",
+    "searchDateHelp": "Dates: incoming received; outgoing document; controlled last released effective date, or initial draft effective date.",
 
     "searchAllRegisters": "All registers",
     "searchRegister": "Register",

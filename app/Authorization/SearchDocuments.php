@@ -3,16 +3,19 @@
 namespace App\Authorization;
 
 use App\Models\ConfidentialityClearance;
+use App\Models\DocumentSecurityAudit;
 use App\Models\DocumentSecurityProfile;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Database\Query\Builder;
+use Illuminate\Database\Query\JoinClause;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use LogicException;
 
 class SearchDocuments
 {
-    public function __construct(private AccessControl $roles, private DocumentAccess $access) {}
+    public function __construct(private AccessControl $roles) {}
 
     /**
      * The caller must authorize the exact workspace before building this query.
@@ -64,8 +67,9 @@ class SearchDocuments
                 'incoming' => 'd.received_date', 'outgoing' => 'd.document_date', default => 'r.effective_date'
             };
             if ($register === 'controlled') {
-                $query->leftJoin('controlled_revisions as r', function ($join): void {
-                    $join->on('r.document_id', '=', 'd.id')->whereRaw('r.id = COALESCE(d.current_revision_id, (SELECT MAX(latest.id) FROM controlled_revisions latest WHERE latest.document_id = d.id))');
+                $query->leftJoin('controlled_revisions as draft', fn (JoinClause $join): JoinClause => $join->on('draft.document_id', '=', 'd.id')->where('draft.draft_slot', 1));
+                $query->leftJoin('controlled_revisions as r', function (JoinClause $join): void {
+                    $join->on('r.document_id', '=', 'd.id')->whereRaw('r.id = COALESCE(d.current_revision_id, draft.id)');
                 });
             }
             if ($register !== 'controlled') {
@@ -75,14 +79,15 @@ class SearchDocuments
             $status = $register === 'controlled' ? 'd.status' : ($register === 'incoming' ? "CASE WHEN d.status = 'draft' THEN 'draft' ELSE COALESCE(op.status, 'received') END" : 'COALESCE(op.status, d.status)');
             $query->select(['d.id', 'd.profile_id', 'd.internal_number', 'd.type_id', 'd.created_at'])
                 ->selectRaw($status.' as status')->selectRaw(($register === 'controlled' ? "CASE WHEN d.status = 'current' AND r.released_at IS NOT NULL THEN r.revision_number ELSE NULL END" : 'NULL').' as authoritative_revision')
-                ->selectRaw(($register === 'controlled' ? '(SELECT dr.revision_number FROM controlled_revisions dr WHERE dr.document_id = d.id AND dr.released_at IS NULL LIMIT 1)' : 'NULL').' as draft_revision')
+                ->selectRaw(($register === 'controlled' ? 'draft.revision_number' : 'NULL').' as draft_revision')
+                ->selectRaw(($register === 'controlled' ? 'd.current_revision_id' : 'NULL').' as current_revision_id')
                 ->selectRaw('? as register', [$register])->selectRaw($number.' as number')->selectRaw($date.' as document_date')
                 ->selectRaw(($register === 'controlled' ? 'r.title_en' : 'd.subject').' as title_en')
                 ->selectRaw(($register === 'controlled' ? 'r.title_lo' : 'NULL').' as title_lo')
                 ->selectRaw(($register === 'outgoing' ? 'd.official_number' : 'NULL').' as official_number')
                 ->selectRaw(($register === 'incoming' ? 'd.external_reference' : 'NULL').' as external_reference');
             if (! empty($filters['physical']) || ! empty($filters['custodian']) || ! empty($filters['copy_kind']) || ! empty($filters['custody_status'])) {
-                $query->whereExists($this->physicalQuery($filters)->whereColumn('pc.profile_id', 'd.profile_id')->selectRaw('1'));
+                $query->whereIn('d.profile_id', $this->physicalQuery($filters)->select('pc.profile_id'));
             }
             if (! empty($filters['type_id'])) {
                 $query->where('d.type_id', $filters['type_id']);
@@ -93,31 +98,15 @@ class SearchDocuments
             if (! empty($filters['status'])) {
                 $query->whereRaw($status.' = ?', [$filters['status']]);
             }
-            foreach (['date_from' => '>=', 'date_to' => '<='] as $filter => $operator) {
+            foreach (['date_from', 'date_to'] as $filter) {
                 if (! empty($filters[$filter])) {
                     $query->where($date, $filter === 'date_to' ? '<' : '>=', $filter === 'date_to' ? Carbon::parse($filters[$filter])->addDay()->format('Y-m-d') : $filters[$filter]);
                 }
             }
             if ($register === 'controlled' && (isset($filters['revision']) || ! empty($filters['revision_state']) || ! empty($filters['owner']))) {
-                $query->whereExists(function (Builder $revision) use ($filters): void {
-                    $revision->selectRaw('1')->from('controlled_revisions as rev')->whereColumn('rev.document_id', 'd.id');
-                    if (isset($filters['revision'])) {
-                        $revision->where('rev.revision_number', (int) $filters['revision']);
-                    }
-                    match ($filters['revision_state'] ?? '') {
-                        'draft' => $revision->whereNull('rev.released_at'),
-                        'current' => $revision->whereNotNull('rev.released_at')->whereColumn('rev.id', 'd.current_revision_id')->where('d.status', 'current'),
-                        'superseded' => $revision->whereNotNull('rev.released_at')->where(fn (Builder $q): Builder => $q->whereColumn('rev.id', '<>', 'd.current_revision_id')->orWhere('d.status', 'superseded')),
-                        default => null,
-                    };
-                    if (! empty($filters['owner'])) {
-                        $value = '%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $filters['owner']).'%';
-                        $revision->where(fn (Builder $q): Builder => $q->whereRaw("rev.owner_name LIKE ? ESCAPE '!'", [$value])->orWhereRaw("rev.custodian_name LIKE ? ESCAPE '!'", [$value])
-                            ->orWhereExists(fn (Builder $person): Builder => $person->selectRaw('1')->from('users')->where(fn (Builder $id): Builder => $id->whereColumn('users.id', 'rev.owner_id')->orWhereColumn('users.id', 'rev.custodian_id'))->whereRaw("users.name LIKE ? ESCAPE '!'", [$value])));
-                    }
-                });
+                $query->whereIn('d.id', $this->revisionQuery($filters)->select('rev.document_id'));
             }
-            if (! empty($filters['search'])) {
+            if (isset($filters['search']) && $filters['search'] !== '') {
                 $term = (string) $filters['search'];
                 $exact = ! empty($filters['exact']);
                 $value = $exact ? $term : '%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $term).'%';
@@ -125,19 +114,20 @@ class SearchDocuments
                 $columns = [...$columns, ...match ($register) {
                     'incoming' => ['d.external_reference', 'd.subject', 'd.description_en', 'd.description_lo', 'd.sender_organization'], 'outgoing' => ['d.official_number', 'd.subject', 'd.description_en', 'd.description_lo'], default => ['d.document_code']
                 }];
+                if ($register === 'controlled') {
+                    $matches = $this->revisionQuery($filters)->select('rev.document_id')->distinct()->where(function (Builder $text) use ($value, $exact): void {
+                        foreach (['title_en', 'title_lo', 'description_en', 'description_lo', 'revision_reason', 'change_description'] as $column) {
+                            $text->orWhereRaw('rev.'.$column.($exact ? ' = ?' : " LIKE ? ESCAPE '!'"), [$value]);
+                        }
+                    });
+                    $query->leftJoinSub($matches, 'revision_matches', 'revision_matches.document_id', '=', 'd.id');
+                }
                 $query->where(function (Builder $query) use ($columns, $value, $exact, $register): void {
                     foreach ($columns as $column) {
                         $query->orWhereRaw($column.($exact ? ' = ?' : " LIKE ? ESCAPE '!'"), [$value]);
                     }
                     if ($register === 'controlled') {
-                        $query->orWhereExists(function (Builder $revision) use ($value, $exact): void {
-                            $revision->selectRaw('1')->from('controlled_revisions as rev')->whereColumn('rev.document_id', 'd.id')
-                                ->where(function (Builder $text) use ($value, $exact): void {
-                                    foreach (['title_en', 'title_lo', 'description_en', 'description_lo', 'revision_reason', 'change_description'] as $column) {
-                                        $text->orWhereRaw('rev.'.$column.($exact ? ' = ?' : " LIKE ? ESCAPE '!'"), [$value]);
-                                    }
-                                });
-                        });
+                        $query->orWhereNotNull('revision_matches.document_id');
                     }
                 });
             }
@@ -152,6 +142,31 @@ class SearchDocuments
         };
 
         return $query->orderBy('register')->orderBy('id');
+    }
+
+    /** @param array<string, mixed> $filters */
+    private function revisionQuery(array $filters): Builder
+    {
+        $revision = DB::table('controlled_revisions as rev');
+        if (in_array($filters['revision_state'] ?? '', ['current', 'superseded'], true)) {
+            $revision->join('controlled_documents as parent', 'parent.id', '=', 'rev.document_id');
+        }
+        if (isset($filters['revision'])) {
+            $revision->where('rev.revision_number', (int) $filters['revision']);
+        }
+        match ($filters['revision_state'] ?? '') {
+            'draft' => $revision->whereNull('rev.released_at'),
+            'current' => $revision->whereNotNull('rev.released_at')->whereColumn('rev.id', 'parent.current_revision_id')->where('parent.status', 'current'),
+            'superseded' => $revision->whereNotNull('rev.released_at')->where(fn (Builder $q): Builder => $q->whereColumn('rev.id', '<>', 'parent.current_revision_id')->orWhere('parent.status', 'superseded')),
+            default => null,
+        };
+        if (! empty($filters['owner'])) {
+            $value = '%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $filters['owner']).'%';
+            $revision->where(fn (Builder $q): Builder => $q->whereRaw("rev.owner_name LIKE ? ESCAPE '!'", [$value])->orWhereRaw("rev.custodian_name LIKE ? ESCAPE '!'", [$value])
+                ->orWhereExists(fn (Builder $person): Builder => $person->selectRaw('1')->from('users')->where(fn (Builder $id): Builder => $id->where(fn (Builder $owner): Builder => $owner->whereColumn('users.id', 'rev.owner_id')->whereNull('rev.owner_name'))->orWhere(fn (Builder $custodian): Builder => $custodian->whereColumn('users.id', 'rev.custodian_id')->whereNull('rev.custodian_name')))->whereRaw("users.name LIKE ? ESCAPE '!'", [$value])));
+        }
+
+        return $revision;
     }
 
     /** @param array<string, mixed> $filters */
@@ -179,9 +194,29 @@ class SearchDocuments
         return $query;
     }
 
-    public function audit(User $actor, int $profileId): void
+    /**
+     * Recheck the bounded page through the same SQL policy immediately before serialization.
+     * Persist the existing per-document access audit, including privileged access, without
+     * repeating role, membership and clearance queries for every result.
+     *
+     * @param  list<int>  $profileIds
+     */
+    public function auditResults(User $actor, DocumentScope $scope, array $profileIds): void
     {
-        $profile = DocumentSecurityProfile::findOrFail($profileId);
-        abort_unless($this->access->allows($actor, DocumentSecurityDescriptor::fromProfile($profile), DocumentOperation::Metadata), 404);
+        if ($profileIds === []) {
+            return;
+        }
+        $profiles = $this->visibleProfiles($actor, $scope)->whereKey($profileIds)->get();
+        abort_unless($profiles->count() === count(array_unique($profileIds)), 404);
+        $privileged = $this->roles->isSystemAdministrator($actor);
+        foreach ($profiles as $profile) {
+            $audit = DocumentSecurityAudit::query()->create([
+                'actor_id' => $actor->id, 'profile_id' => $profile->id, 'event' => 'access.allowed',
+                'operation' => DocumentOperation::Metadata->value, 'reason' => $privileged ? 'system_administrator' : null,
+            ]);
+            if (! $audit->exists) {
+                throw new LogicException('Document access audit persistence was cancelled.');
+            }
+        }
     }
 }

@@ -141,3 +141,15 @@ it('finds an accessible current replacement and submits a reasoned supersession 
     expect(wrapper.text()).toContain(en.controlledNoAuthority);
     expect(wrapper.findAll('button').some(item => item.text() === en['controlledAction-revisions'])).toBe(false);
 });
+
+it('opens the existing controlled detail directly from a document search link', async () => {
+    window.history.replaceState({}, '', '/controlled-documents?unit=7:site&record=1');
+    try {
+        server({ released: true });
+        const wrapper = await render();
+        expect(wrapper.get('#controlled-detail-title').text()).toBe('XPPL/SOP/001');
+        expect(wrapper.text()).toContain(en.controlledAuthoritative);
+    } finally {
+        window.history.replaceState({}, '', '/');
+    }
+});

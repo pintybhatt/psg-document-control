@@ -13,6 +13,11 @@ class PhysicalCopy extends Model
 
     protected $keyType = 'string';
 
+    public function revision(): BelongsTo
+    {
+        return $this->belongsTo(ControlledRevision::class, 'revision_id');
+    }
+
     public function location(): BelongsTo
     {
         return $this->belongsTo(StorageLocation::class, 'location_id');

@@ -54,3 +54,20 @@ it.each([422, 403])('shows validation or access failure without rows for %s', as
     expect(wrapper.find('[role="alert"]').exists()).toBe(true);
     expect(wrapper.text()).not.toContain('COPY/001');
 });
+it('shows loading and cancels stale responses after a workspace change', async () => {
+    const { wrapper, fetch, workspace } = await render();
+    let resolve;
+    fetch.mockImplementationOnce(() => new Promise(done => { resolve = done; }));
+    await wrapper.findAll('form')[0].trigger('submit');
+    expect(wrapper.find('[aria-busy="true"]').exists()).toBe(true);
+    workspace.revoke(); await flushPromises();
+    resolve(response({ data: [record], meta: { total: 1 } })); await flushPromises();
+    expect(wrapper.text()).not.toContain('COPY/001'); expect(wrapper.find('table').exists()).toBe(false);
+});
+
+it('shows the shared empty state when no authorized records match', async () => {
+    const { wrapper, fetch } = await render();
+    fetch.mockImplementationOnce(async () => response({ data: [], meta: { total: 0 } }));
+    await wrapper.findAll('form')[0].trigger('submit'); await flushPromises();
+    expect(wrapper.text()).toContain(en.uiEmpty); expect(wrapper.findAll('tbody a')).toHaveLength(0);
+});

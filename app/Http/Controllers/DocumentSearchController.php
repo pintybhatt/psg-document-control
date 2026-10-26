@@ -9,6 +9,7 @@ use App\Models\DocumentType;
 use App\Models\PhysicalCopy;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Support\Carbon;
 
 class DocumentSearchController extends Controller
 {
@@ -27,19 +28,22 @@ class DocumentSearchController extends Controller
     {
         $scope = $request->documentScope();
         $page = $search->query($request->user(), $scope, $request->validated())->paginate($request->integer('per_page', 10));
+        $search->auditResults($request->user(), $scope, $page->getCollection()->pluck('profile_id')->all());
         $types = DocumentType::with('category')->whereIn('id', $page->getCollection()->pluck('type_id'))->get()->keyBy('id');
         $profiles = DocumentSecurityProfile::query()->whereIn('id', $page->getCollection()->pluck('profile_id'))
             ->with(['physicalCopies' => fn (HasMany $query): HasMany => $query->whereIn('id', $search->physicalQuery($request->validated())->select('pc.id'))
-                ->with(['location', 'custodian'])->orderBy('identifier')->orderBy('id')->limit(3)])->get()->keyBy('id');
-        $rows = $page->getCollection()->map(function (object $row) use ($request, $search, $scope, $types, $profiles): array {
-            $search->audit($request->user(), $row->profile_id);
+                ->with(['location', 'custodian', 'revision'])->orderBy('identifier')->orderBy('id')->limit(3)])->get()->keyBy('id');
+        $rows = $page->getCollection()->map(function (object $row) use ($scope, $types, $profiles): array {
             $type = $types[$row->type_id];
             $route = $row->register === 'controlled' ? 'controlled-documents' : $row->register;
 
             $values = (array) $row;
-            unset($values['profile_id']);
+            unset($values['profile_id'], $values['current_revision_id']);
+            $values['document_date'] = $row->document_date ? Carbon::parse($row->document_date)->format('Y-m-d') : null;
+            $values['created_at'] = Carbon::parse($row->created_at, 'UTC')->toISOString();
 
             return $values + ['physical_copies' => $profiles[$row->profile_id]->physicalCopies->map(fn (PhysicalCopy $copy): array => [
+                'revision' => $copy->revision?->identifier(), 'revision_status' => $copy->revision ? ($copy->revision->released_at === null ? 'draft' : ($copy->revision_id === $row->current_revision_id ? $row->status : 'superseded')) : null,
                 'identifier' => $copy->identifier, 'kind' => $copy->kind, 'revision_id' => $copy->revision_id, 'status' => $copy->status, 'location' => $copy->location->label(), 'custodian' => $copy->custodian?->name,
             ])] + ['key' => $row->register.':'.$row->id, 'type' => $type->only(['id', 'name_en', 'name_lo']), 'category' => $type->category->only(['id', 'name_en', 'name_lo']),
                 'detail_url' => route('dcms.'.$route, ['unit' => $scope->siteId.':'.($scope->departmentId ?? 'site'), 'record' => $row->id], false)];

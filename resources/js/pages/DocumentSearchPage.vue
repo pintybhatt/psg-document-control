@@ -9,6 +9,7 @@ import SelectInput from '../components/ui/SelectInput.vue';
 import CheckboxInput from '../components/ui/CheckboxInput.vue';
 import UiButton from '../components/ui/UiButton.vue';
 import DataTable from '../components/ui/DataTable.vue';
+import StatusBadge from '../components/ui/StatusBadge.vue';
 
 const props = defineProps({ endpoint: { type: String, required: true }, csrfToken: { type: String, required: true } });
 const workspace = useWorkspace();
@@ -48,13 +49,14 @@ async function load(reset = false) {
 }
 watch(register, () => { filters.status = ''; filters.type_id = ''; filters.category_id = ''; filters.revision = ''; filters.revision_state = ''; filters.owner = ''; load(true); });
 watch(() => filters.category_id, () => { filters.type_id = ''; });
-watch(() => selected.value?.key, async () => {
+watch(() => selected.value?.key, async (key, previous, onCleanup) => {
+    const lookupController = new AbortController(); const signal = lookupController.signal;
+    onCleanup(() => lookupController.abort());
     types.value = []; Object.keys(filters).forEach(key => { filters[key] = ''; });
     await load(true);
-    const signal = controller.signal;
     if (!selected.value || signal.aborted) { return; }
     const scope = selected.value;
-    try { const result = await request(`${props.endpoint}/lookups?${new URLSearchParams(Object.entries({ company_id: scope.company_id, site_id: scope.site_id, department_id: scope.department_id }).filter(([, value]) => value != null))}`, { signal }); if (!signal.aborted) { types.value = result.data; } } catch (failure) { if (!signal.aborted) { error.value = 'rbacRequestFailed'; } }
+    try { const result = await request(`${props.endpoint}/lookups?${new URLSearchParams(Object.entries({ company_id: scope.company_id, site_id: scope.site_id, department_id: scope.department_id }).filter(([, value]) => value != null))}`, { signal }); if (!signal.aborted) { types.value = result.data; } } catch (failure) { if (!signal.aborted) { error.value = 'rbacRequestFailed'; if ([401, 403, 419].includes(failure.status)) { rows.value = []; total.value = 0; types.value = []; workspace.revoke(); } } }
 }, { immediate: true });
 onBeforeUnmount(() => controller?.abort());
 </script>
@@ -63,7 +65,8 @@ onBeforeUnmount(() => controller?.abort());
     <section class="flex flex-col gap-5">
         <SelectInput v-if="units.length > 1" id="search-unit" v-model="unitKey" :label="t('department')" :options="unitOptions" class="max-w-sm" />
         <p v-if="error || workspace.error.value" role="alert" class="rounded-xl bg-red-50 p-4 text-red-800">{{ t(error || workspace.error.value) }}</p>
-        <p v-if="!selected" role="status">{{ t('incomingNoContexts') }}</p>
+        <p v-if="workspace.loading.value" role="status">{{ t('uiLoading') }}</p>
+        <p v-else-if="!selected" role="status">{{ t('incomingNoContexts') }}</p>
         <template v-else>
             <form class="flex flex-wrap items-end gap-3" @submit.prevent="load(true)">
                 <TextInput id="document-search" v-model="search" :label="t('searchQuery')" maxlength="200" class="min-w-56 grow" />
@@ -72,7 +75,7 @@ onBeforeUnmount(() => controller?.abort());
                 <CheckboxInput id="search-exact" v-model="exact" :label="t('searchExact')" />
                 <UiButton type="submit" :disabled="loading">{{ t('document-search') }}</UiButton>
             </form>
-            <details class="rounded-xl border border-slate-200 bg-white p-4" open>
+            <details class="rounded-xl border border-slate-200 bg-white p-4">
                 <summary class="cursor-pointer font-semibold">{{ t('searchFilters') }}</summary>
                 <form class="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4" @submit.prevent="load(true)">
                     <SelectInput id="search-category" v-model="filters.category_id" :label="t('searchCategory')" :options="categoryOptions" />
@@ -91,6 +94,7 @@ onBeforeUnmount(() => controller?.abort());
                     <SelectInput id="search-kind" v-model="filters.copy_kind" :label="t('searchCopyKind')" :options="kindOptions" />
                     <SelectInput id="search-custody" v-model="filters.custody_status" :label="t('searchCustody')" :options="custodyOptions" />
                     <p class="self-center text-xs text-slate-600">{{ t('searchDateHelp') }}</p>
+                    <p v-if="!register || register === 'controlled'" class="self-center text-xs text-slate-600">{{ t('searchHistoryHelp') }}</p>
                     <UiButton type="submit" variant="secondary" :disabled="loading" class="self-end">{{ t('incomingApplyFilters') }}</UiButton>
                 </form>
             </details>
@@ -100,8 +104,8 @@ onBeforeUnmount(() => controller?.abort());
                 <template #cell-title="{ row }">{{ language === 'lo' ? row.title_lo || row.title_en : row.title_en }}<span v-if="row.register === 'controlled'" class="block text-xs text-slate-600">{{ t('controlledAuthoritative') }}: {{ row.authoritative_revision == null ? t('controlledNoAuthority') : String(row.authoritative_revision).padStart(2, '0') }}<span v-if="row.draft_revision != null" class="block">{{ t('controlledStatus-draft') }}: {{ String(row.draft_revision).padStart(2, '0') }}</span></span></template>
                 <template #cell-type="{ row }">{{ label(row.category) }} / {{ label(row.type) }}</template>
                 <template #cell-document_date="{ row }">{{ formatDate(row.document_date) }}</template>
-                <template #cell-status="{ row }">{{ t(`${row.register === 'controlled' ? 'controlledStatus' : row.register === 'incoming' ? 'incomingStatus' : 'outgoingStatus'}-${row.status}`) }}</template>
-                <template #cell-physical="{ row }"><ul v-if="row.physical_copies?.length" class="flex flex-col gap-2 text-xs"><li v-for="copy in row.physical_copies" :key="copy.identifier"><span class="font-semibold">{{ copy.identifier }}</span> · {{ t(`storageKind-${copy.kind}`) }}<span class="block">{{ copy.location }}</span><span class="block">{{ t(`storageStatus-${copy.status}`) }}<span v-if="copy.custodian"> · {{ copy.custodian }}</span></span></li></ul><span v-else>—</span><a v-if="row.physical_copies?.length" :href="row.detail_url" class="block text-xs text-teal-800 hover:underline">{{ t('searchPhysicalDetails') }}</a></template>
+                <template #cell-status="{ row }"><StatusBadge :status="row.status" :label="t(`${row.register === 'controlled' ? 'controlledStatus' : row.register === 'incoming' ? 'incomingStatus' : 'outgoingStatus'}-${row.status}`)" /></template>
+                <template #cell-physical="{ row }"><ul v-if="row.physical_copies?.length" class="flex flex-col gap-2 text-xs"><li v-for="copy in row.physical_copies" :key="copy.identifier"><span class="font-semibold">{{ copy.identifier }}</span> · {{ t(`storageKind-${copy.kind}`) }}<span v-if="copy.revision" class="block">{{ t('controlledRevision') }} {{ copy.revision }} · {{ t(`controlledStatus-${copy.revision_status}`) }}</span><span class="block">{{ copy.location }}</span><span class="block">{{ t(`storageStatus-${copy.status}`) }}<span v-if="copy.custodian"> · {{ copy.custodian }}</span></span></li></ul><span v-else>—</span><a v-if="row.physical_copies?.length" :href="row.detail_url" class="block text-xs text-teal-800 hover:underline">{{ t('searchPhysicalDetails') }}</a></template>
                 <template #cell-actions="{ row }"><a :href="row.detail_url" class="font-semibold text-teal-800 hover:underline focus-visible:outline-2">{{ t('rbacDetails') }}</a></template>
             </DataTable>
         </template>
