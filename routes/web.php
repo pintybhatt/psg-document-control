@@ -13,6 +13,7 @@ use App\Http\Controllers\MembershipController;
 use App\Http\Controllers\NumberingController;
 use App\Http\Controllers\OutgoingCorrespondenceController;
 use App\Http\Controllers\OutgoingOperationController;
+use App\Http\Controllers\PhysicalCustodyController;
 use App\Http\Controllers\RoleAssignmentController;
 use App\Http\Controllers\RoleController;
 use App\Http\Middleware\AuditDocumentStorageRequests;
@@ -120,6 +121,10 @@ Route::prefix('api/v1/document-storage/{type}/{record}')->whereIn('type', ['inco
     ->middleware([AuditDocumentStorageRequests::class, 'auth:web', EnsureActiveUserSession::class])->name('api.v1.storage.')->group(function (): void {
         Route::get('versions/{version}/preview', [DocumentStorageController::class, 'preview'])->whereUuid('version')->name('attachments.preview');
         Route::get('versions/{version}/download', [DocumentStorageController::class, 'download'])->whereUuid('version')->name('attachments.download');
+        Route::get('copies', [PhysicalCustodyController::class, 'copies'])->name('copies.index');
+        Route::post('copies', [PhysicalCustodyController::class, 'createCopy'])->name('copies.store');
+        Route::post('copies/{copy}/events', [PhysicalCustodyController::class, 'change'])->whereUuid('copy')->name('copies.change');
+        Route::post('locations', [PhysicalCustodyController::class, 'createLocation'])->name('locations.store');
         Route::get('attachments', [DocumentStorageController::class, 'index'])->name('attachments.index');
         Route::post('attachments', [DocumentStorageController::class, 'store'])->name('attachments.store');
     });

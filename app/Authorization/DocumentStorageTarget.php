@@ -2,6 +2,7 @@
 
 namespace App\Authorization;
 
+use App\Models\AuthorizationScope;
 use App\Models\ControlledDocument;
 use App\Models\ControlledRevision;
 use App\Models\User;
@@ -18,10 +19,11 @@ class DocumentStorageTarget
         $manager = match ($type) {
             'incoming' => $this->incoming, 'outgoing' => $this->outgoing, 'controlled' => $this->controlled, default => abort(404),
         };
-        $manager->authorizeContext($actor, $scope, $permission);
         if ($lock && DB::getDriverName() === 'sqlite') {
-            DB::table('register_configurations')->where('scope_id', $scope->authorizationScope()->id)->where('register_key', $type)->update(['id' => DB::raw('id')]);
+            DB::table('register_configurations')->whereIn('scope_id', AuthorizationScope::query()->where('scope_key', 'site:'.$scope->siteId)->select('id'))->where('register_key', $type)->update(['id' => DB::raw('id')]);
         }
+
+        $manager->authorizeContext($actor, $scope, $permission);
 
         return $manager->find($actor, $scope, $id, $lock);
     }
