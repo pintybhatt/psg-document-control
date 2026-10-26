@@ -12,6 +12,7 @@ use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
+use LogicException;
 
 class ManageDocumentMasterData
 {
@@ -33,6 +34,7 @@ class ManageDocumentMasterData
     public function save(User $actor, AuthorizationScope $scope, string $kind, array $data, ?string $id = null): ScopedDocumentMaster
     {
         return DB::transaction(function () use ($actor, $scope, $kind, $data, $id): ScopedDocumentMaster {
+            $scope = AuthorizationScope::context($scope->scope_type, $scope->company_id, $scope->site_id);
             $this->access->authorize($actor, 'master-data.manage', $scope);
             abort_unless(in_array($scope->scope_type, ['company', 'site'], true), 403, 'rbacForbidden');
             $scope->persist();
@@ -57,14 +59,19 @@ class ManageDocumentMasterData
                 $record->created_by = $actor->id;
             }
             $record->updated_by = $actor->id;
-            $record->save();
+            if (! $record->save()) {
+                throw new LogicException('Master data persistence was cancelled.');
+            }
             if ($record instanceof DocumentType && array_key_exists('register_ids', $data)) {
                 $record->registers()->syncWithPivotValues($data['register_ids'], ['scope_id' => $scope->id]);
             }
-            MasterDataAudit::query()->create([
+            $audit = MasterDataAudit::query()->create([
                 'actor_id' => $actor->id, 'scope_id' => $scope->id, 'subject_type' => $kind, 'subject_id' => $record->id,
                 'action' => $before === null ? 'created' : 'updated', 'before' => $before, 'after' => $this->snapshot($record),
             ]);
+            if (! $audit->exists) {
+                throw new LogicException('Master data audit persistence was cancelled.');
+            }
 
             return $record->refresh();
         });

@@ -63,6 +63,8 @@ Phase 3A verification uses the isolated SQLite suite and frontend tests. The sch
 
 ## Phase 3B secure document numbering
 
+The [Phase 3 final integration review](../docs/security/phase-3-final-integration-review.md) records the final security corrections, registration contract for Phases 4–6, verification evidence and Phase 4A checklist. MySQL 8.4 verification remains outstanding.
+
 ### Series, purposes and formats
 
 `numbering_series` has one permanent row per scoped register configuration and purpose, enforced by a unique key. Company and site configurations stay independent. A series cannot change its scope, register, purpose or reset policy, even while inactive. There is therefore no second overlapping series for the same purpose or year. Reconfigure/reactivate the existing series instead of replacing it. The purposes are `internal_register` and `official_outgoing`; the latter is restricted to the Outgoing register. External references remain ordinary externally supplied registration data, outside this service and without an invented global uniqueness constraint.

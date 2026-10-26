@@ -406,6 +406,34 @@ class NumberingTest extends TestCase
         $this->issue($actor, $siteScope, $siteSeries);
     }
 
+    #[TestWith(['configuration'])]
+    #[TestWith(['issuance'])]
+    public function test_numbering_services_cannot_use_a_foreign_scope_id_with_local_authorization_attributes(string $operation): void
+    {
+        [$actor, $scope] = $this->actor();
+        [$foreignActor, $foreignScope, $foreignRegister] = $this->actor();
+        $series = $this->series($foreignActor, $foreignScope, $foreignRegister);
+        $forgedScope = clone $scope;
+        $forgedScope->id = $foreignScope->id;
+
+        try {
+            if ($operation === 'configuration') {
+                app(ManageNumbering::class)->save($actor, $forgedScope, ['prefix' => 'EXAMPLE/FORGED', 'padding' => 4, 'active' => false], (string) $series->id);
+            } else {
+                $this->issue($actor, $forgedScope, $series);
+            }
+            $this->fail('Local authorization attributes allowed a foreign numbering operation.');
+        } catch (HttpException $exception) {
+            $this->assertSame(404, $exception->getStatusCode());
+        }
+
+        $this->assertDatabaseCount('numbering_configurations', 1);
+        $this->assertDatabaseCount('numbering_namespaces', 1);
+        $this->assertDatabaseCount('numbering_counters', 0);
+        $this->assertDatabaseCount('issued_document_numbers', 0);
+        $this->assertDatabaseCount('test_formal_numbering_records', 0);
+    }
+
     #[TestWith(['numbering_configurations'])]
     #[TestWith(['issued_document_numbers'])]
     public function test_replacement_statements_cannot_rewrite_numbering_history(string $table): void

@@ -24,7 +24,9 @@ use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Validation\ValidationException;
+use LogicException;
 use PHPUnit\Framework\Attributes\TestWith;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 use Tests\Concerns\InteractsWithRbac;
 use Tests\TestCase;
 
@@ -317,6 +319,52 @@ class DocumentMasterDataTest extends TestCase
         $this->assertDatabaseCount('master_data_audits', 0);
     }
 
+    public function test_cancelled_audit_insert_rolls_back_master_creation(): void
+    {
+        [$actor, $scope] = $this->administrator();
+        $event = 'eloquent.creating: '.MasterDataAudit::class;
+        Event::listen($event, fn (): bool => false);
+
+        try {
+            app(ManageDocumentMasterData::class)->save($actor, $scope, 'categories', $this->categoryData());
+            $this->fail('A cancelled audit allowed master creation.');
+        } catch (LogicException $exception) {
+            $this->assertStringContainsString('cancelled', $exception->getMessage());
+        } finally {
+            Event::forget($event);
+        }
+
+        $this->assertDatabaseCount('document_categories', 0);
+        $this->assertDatabaseCount('master_data_audits', 0);
+    }
+
+    #[TestWith(['record'])]
+    #[TestWith(['audit'])]
+    public function test_cancelled_persistence_rolls_back_type_changes_and_register_applicability(string $cancelled): void
+    {
+        [$actor, $scope] = $this->administrator();
+        [$category, $incoming] = $this->parents($scope);
+        $outgoing = RegisterConfiguration::factory()->create(['scope_id' => $scope->id, 'register_key' => 'outgoing']);
+        $type = DocumentType::factory()->create(['category_id' => $category->id]);
+        $type->registers()->attach($incoming->id, ['scope_id' => $scope->id]);
+        $event = $cancelled === 'record' ? 'eloquent.updating: '.DocumentType::class : 'eloquent.creating: '.MasterDataAudit::class;
+        Event::listen($event, fn (): bool => false);
+
+        try {
+            app(ManageDocumentMasterData::class)->save($actor, $scope, 'types', ['active' => false, 'register_ids' => [$outgoing->id]], (string) $type->id);
+            $this->fail('Cancelled persistence allowed an inconsistent master change.');
+        } catch (LogicException $exception) {
+            $this->assertStringContainsString('cancelled', $exception->getMessage());
+        } finally {
+            Event::forget($event);
+        }
+
+        $this->assertTrue($type->refresh()->active);
+        $this->assertDatabaseHas('document_type_register', ['type_id' => $type->id, 'register_id' => $incoming->id, 'scope_id' => $scope->id]);
+        $this->assertDatabaseMissing('document_type_register', ['type_id' => $type->id, 'register_id' => $outgoing->id]);
+        $this->assertDatabaseCount('master_data_audits', 0);
+    }
+
     #[TestWith(['update'])]
     #[TestWith(['delete'])]
     public function test_audit_history_rejects_database_mutations(string $operation): void
@@ -364,6 +412,24 @@ class DocumentMasterDataTest extends TestCase
         $this->postJson('/api/v1/document-master-data/categories', array_replace($this->scopeData($scope) + $this->categoryData(), ['company_id' => $foreign->company_id]))->assertForbidden();
         $this->getJson('/api/v1/document-master-data/unknown')->assertNotFound();
         $this->postJson('/api/v1/document-master-data/classifications', $this->scopeData($scope))->assertStatus(405);
+    }
+
+    public function test_master_service_cannot_use_a_foreign_scope_id_with_local_authorization_attributes(): void
+    {
+        [$actor, $scope] = $this->administrator();
+        $foreign = DocumentCategory::factory()->create();
+        $forgedScope = clone $scope;
+        $forgedScope->id = $foreign->scope_id;
+
+        try {
+            app(ManageDocumentMasterData::class)->save($actor, $forgedScope, 'categories', ['active' => false], (string) $foreign->id);
+            $this->fail('Local authorization attributes allowed a foreign master update.');
+        } catch (HttpException $exception) {
+            $this->assertSame(404, $exception->getStatusCode());
+        }
+
+        $this->assertTrue($foreign->refresh()->active);
+        $this->assertDatabaseCount('master_data_audits', 0);
     }
 
     public function test_outer_rollback_removes_master_mutation_and_its_transactional_audit(): void

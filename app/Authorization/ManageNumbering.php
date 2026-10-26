@@ -25,6 +25,7 @@ class ManageNumbering
                 if ($id !== null && DB::getDriverName() === 'sqlite') {
                     DB::table('numbering_series')->where('scope_id', $scope->id)->where('id', $id)->update(['id' => DB::raw('id')]);
                 }
+                $scope = AuthorizationScope::context($scope->scope_type, $scope->company_id, $scope->site_id);
                 $this->access->authorize($actor, 'numbering.manage', $scope);
                 $series = $id === null ? null : NumberingSeries::query()->where('scope_id', $scope->id)->whereKey($id)->lockForUpdate()->first();
                 abort_if($id !== null && ! $series, 404);

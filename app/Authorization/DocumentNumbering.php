@@ -35,6 +35,7 @@ class DocumentNumbering
             if (DB::getDriverName() === 'sqlite') {
                 DB::table('numbering_series')->where('scope_id', $scope->id)->where('id', $seriesId)->update(['id' => DB::raw('id')]);
             }
+            $scope = AuthorizationScope::context($scope->scope_type, $scope->company_id, $scope->site_id);
             $this->access->authorize($actor, 'numbering.issue', $scope);
             $register = RegisterConfiguration::query()->where('scope_id', $scope->id)
                 ->whereIn('id', NumberingSeries::query()->where('scope_id', $scope->id)->whereKey($seriesId)->select('register_id'))
