@@ -37,7 +37,7 @@ class IncomingOperationsMigrationTest extends TestCase
                 'correspondence_date' => '2026-10-25', 'received_date' => '2026-10-26', 'priority' => 'normal', 'status' => 'registered',
                 'internal_number' => 'MIGRATION/IN/2026/000001', 'registered_at' => now(), 'registered_by' => $profile->created_by,
                 'created_by' => $profile->created_by, 'updated_by' => $profile->created_by]);
-            $this->artisan('migrate:rollback', ['--step' => 4, '--force' => true, '--no-interaction' => true])->assertExitCode(0);
+            $this->artisan('migrate:rollback', ['--step' => DB::table('migrations')->where('migration', '>=', '2026_10_26_031455_create_incoming_operations_tables')->count(), '--force' => true, '--no-interaction' => true])->assertExitCode(0);
             $this->assertFalse(Schema::hasTable('incoming_correspondence_operations'));
             $this->assertFalse(Schema::hasColumn('incoming_correspondences', 'channel'));
             $before = $record->fresh()->getRawOriginal();

@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AuthenticatedSessionController;
 use App\Http\Controllers\AuthorizationContextController;
+use App\Http\Controllers\ControlledDocumentController;
 use App\Http\Controllers\CurrentUserController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DocumentMasterDataController;
@@ -51,6 +52,16 @@ Route::middleware(['auth:web', EnsureActiveUserSession::class])->group(function 
     Route::get('/api/v1/user', CurrentUserController::class)->name('api.v1.user');
     Route::prefix('api/v1')->name('api.v1.')->group(function (): void {
         Route::get('dashboard', DashboardController::class)->name('dashboard');
+        Route::get('controlled-documents/contexts', [ControlledDocumentController::class, 'contexts'])->name('controlled.contexts');
+        Route::get('controlled-documents/lookups', [ControlledDocumentController::class, 'lookups'])->name('controlled.lookups');
+        Route::get('controlled-documents', [ControlledDocumentController::class, 'index'])->name('controlled.index');
+        Route::post('controlled-documents', [ControlledDocumentController::class, 'store'])->name('controlled.store');
+        Route::get('controlled-documents/{record}', [ControlledDocumentController::class, 'show'])->name('controlled.show');
+        Route::patch('controlled-documents/{record}', [ControlledDocumentController::class, 'update'])->name('controlled.update');
+        Route::post('controlled-documents/{record}/register', [ControlledDocumentController::class, 'register'])->name('controlled.register');
+        Route::post('controlled-documents/{record}/revisions', [ControlledDocumentController::class, 'revise'])->name('controlled.revise');
+        Route::post('controlled-documents/{record}/release', [ControlledDocumentController::class, 'release'])->name('controlled.release');
+        Route::post('controlled-documents/{record}/status', [ControlledDocumentController::class, 'changeStatus'])->name('controlled.changeStatus');
         Route::get('outgoing-correspondence/{record}/operation-options', [OutgoingOperationController::class, 'options'])->name('outgoing.operation-options');
         Route::post('outgoing-correspondence/{record}/operations', [OutgoingOperationController::class, 'operate'])->name('outgoing.operations');
         Route::get('outgoing-correspondence/contexts', [OutgoingCorrespondenceController::class, 'contexts'])->name('outgoing.contexts');
