@@ -2,6 +2,7 @@
 defineProps({ name: { type: String, required: true } });
 
 const paths = {
+    calendar: 'M4 5h16v16H4z M4 10h16 M8 3v4 M16 3v4 M8 14h2 M14 14h2 M8 17h2',
     dashboard: 'M3 3h7v7H3z M14 3h7v7h-7z M3 14h7v7H3z M14 14h7v7h-7z',
     incoming: 'M4 4h16v16H4z M12 7v9 M8 12l4 4 4-4',
     outgoing: 'M4 4h16v16H4z M12 17V8 M8 12l4-4 4 4',
