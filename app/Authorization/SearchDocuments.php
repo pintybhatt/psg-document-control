@@ -81,6 +81,9 @@ class SearchDocuments
                 ->selectRaw(($register === 'controlled' ? 'r.title_lo' : 'NULL').' as title_lo')
                 ->selectRaw(($register === 'outgoing' ? 'd.official_number' : 'NULL').' as official_number')
                 ->selectRaw(($register === 'incoming' ? 'd.external_reference' : 'NULL').' as external_reference');
+            if (! empty($filters['physical']) || ! empty($filters['custodian']) || ! empty($filters['copy_kind']) || ! empty($filters['custody_status'])) {
+                $query->whereExists($this->physicalQuery($filters)->whereColumn('pc.profile_id', 'd.profile_id')->selectRaw('1'));
+            }
             if (! empty($filters['type_id'])) {
                 $query->where('d.type_id', $filters['type_id']);
             }
@@ -149,6 +152,31 @@ class SearchDocuments
         };
 
         return $query->orderBy('register')->orderBy('id');
+    }
+
+    /** @param array<string, mixed> $filters */
+    public function physicalQuery(array $filters): Builder
+    {
+        $query = DB::table('physical_copies as pc')->join('storage_locations as loc', 'loc.id', '=', 'pc.location_id')->leftJoin('users as custodian', 'custodian.id', '=', 'pc.custodian_id');
+        foreach (['copy_kind' => 'pc.kind', 'custody_status' => 'pc.status'] as $key => $column) {
+            if (! empty($filters[$key])) {
+                $query->where($column, $filters[$key]);
+            }
+        }
+        if (! empty($filters['physical'])) {
+            $term = '%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $filters['physical']).'%';
+            $query->where(function (Builder $query) use ($term): void {
+                foreach (['pc.identifier', 'loc.room', 'loc.cabinet', 'loc.shelf', 'loc.box'] as $column) {
+                    $query->orWhereRaw($column." LIKE ? ESCAPE '!'", [$term]);
+                }
+            });
+        }
+        if (! empty($filters['custodian'])) {
+            $term = '%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $filters['custodian']).'%';
+            $query->whereRaw("custodian.name LIKE ? ESCAPE '!'", [$term]);
+        }
+
+        return $query;
     }
 
     public function audit(User $actor, int $profileId): void

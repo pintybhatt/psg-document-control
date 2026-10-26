@@ -1,4 +1,10 @@
 export default {
+    "searchPhysical": "Physical identifier or location",
+    "searchCustodian": "Current physical custodian",
+    "searchCopyKind": "Original / copy",
+    "searchCustody": "Custody status",
+    "searchPhysicalDetails": "First 3 matching copies · Full locations and files",
+
     "searchAny": "Any",
     "searchFilters": "Filters",
     "searchCategory": "Category",

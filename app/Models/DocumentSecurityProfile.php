@@ -45,6 +45,11 @@ class DocumentSecurityProfile extends Model
         return $this->hasMany(DocumentAccessGrant::class, 'profile_id');
     }
 
+    public function physicalCopies(): HasMany
+    {
+        return $this->hasMany(PhysicalCopy::class, 'profile_id');
+    }
+
     /** @return array<string, string> */
     protected function casts(): array
     {

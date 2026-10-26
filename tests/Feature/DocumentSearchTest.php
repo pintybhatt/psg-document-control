@@ -6,6 +6,7 @@ use App\Authorization\DocumentScope;
 use App\Authorization\ManageControlledDocuments;
 use App\Authorization\ManageNumbering;
 use App\Authorization\ManageOutgoingCorrespondence;
+use App\Authorization\ManagePhysicalCustody;
 use App\Models\AuthorizationScope;
 use App\Models\DocumentType;
 use App\Models\OrganizationMembership;
@@ -96,5 +97,28 @@ class DocumentSearchTest extends TestCase
         $this->getJson($this->searchUrl($record, ['revision' => '00', 'revision_state' => 'superseded']))->assertOk()->assertJsonPath('meta.total', 1)->assertJsonPath('data.0.authoritative_revision', 1)->assertJsonPath('data.0.draft_revision', null);
         $this->getJson($this->searchUrl($record, ['revision' => '00', 'revision_state' => 'current']))->assertOk()->assertJsonPath('meta.total', 0);
         $this->getJson($this->searchUrl($record, ['owner' => $actor->name, 'revision' => 1]))->assertOk()->assertJsonPath('meta.total', 1);
+    }
+
+    public function test_physical_location_search_and_retrieval_keep_content_permissions_separate(): void
+    {
+        [$record, $actor] = $this->fixture();
+        $scope = new DocumentScope($record->profile->company_id, $record->profile->site_id);
+        $custody = app(ManagePhysicalCustody::class);
+        $location = $custody->location($actor, $scope, 'incoming', (string) $record->id, ['room' => 'Synthetic archive', 'cabinet' => 'Cabinet A', 'shelf' => 'Shelf B', 'box' => 'Box C']);
+        $copy = $custody->create($actor, $scope, 'incoming', (string) $record->id, null, ['identifier' => 'PHYS/DEMO/001', 'kind' => 'original', 'location_id' => $location->id, 'reason' => 'Synthetic fixture']);
+        $version = $this->postJson($this->url($record), ['file' => $this->pdf(), 'reason' => 'Synthetic upload'])->assertCreated()->json('data.versions.0.id');
+        $reader = User::factory()->create();
+        $site = Site::findOrFail($scope->siteId);
+        OrganizationMembership::factory()->for($reader)->atSite($site)->create();
+        $this->grant($reader, $scope->authorizationScope(), ['documents.metadata.view']);
+        $this->signIn($reader);
+
+        $this->getJson($this->searchUrl($record, ['physical' => 'Box C', 'copy_kind' => 'original', 'custody_status' => 'stored']))->assertOk()->assertJsonPath('meta.total', 1)->assertJsonPath('data.0.physical_copies.0.identifier', $copy->identifier)->assertJsonPath('data.0.physical_copies.0.location', 'Synthetic archive → Cabinet A → Shelf B → Box C');
+        $this->getJson($this->searchUrl($record, ['physical' => $copy->identifier, 'copy_kind' => 'copy']))->assertOk()->assertJsonPath('meta.total', 0);
+        $this->getJson($this->url($record))->assertOk()->assertJsonPath('capabilities.preview', false)->assertJsonPath('capabilities.download', false);
+        $this->getJson($this->url($record, 'versions/'.$version.'/preview'))->assertNotFound();
+        $this->getJson($this->url($record, 'versions/'.$version.'/download'))->assertNotFound();
+        $record->profile->update(['restricted' => true]);
+        $this->getJson($this->searchUrl($record, ['physical' => $copy->identifier]))->assertOk()->assertJsonPath('meta.total', 0)->assertJsonCount(0, 'data');
     }
 }

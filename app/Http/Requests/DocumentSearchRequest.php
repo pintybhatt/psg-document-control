@@ -34,6 +34,8 @@ class DocumentSearchRequest extends FormRequest
             'classification' => ['nullable', Rule::in(['normal', 'confidential', 'highly_confidential'])],
             'date_from' => ['nullable', 'date_format:Y-m-d'], 'date_to' => ['nullable', 'date_format:Y-m-d', Rule::when($this->filled('date_from'), 'after_or_equal:date_from')],
             'revision' => ['nullable', 'regex:/^[0-9]{1,6}$/D'], 'revision_state' => ['nullable', Rule::in(['draft', 'current', 'superseded'])],
+            'physical' => ['nullable', 'string', 'max:200'], 'custodian' => ['nullable', 'string', 'max:200'],
+            'copy_kind' => ['nullable', Rule::in(['original', 'copy'])], 'custody_status' => ['nullable', Rule::in(['stored', 'checked_out', 'missing'])],
             'owner' => ['nullable', 'string', 'max:200'],
             'sort' => ['nullable', Rule::in(['recent', 'oldest', 'number', 'date'])],
         ];

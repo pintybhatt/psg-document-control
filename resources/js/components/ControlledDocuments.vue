@@ -68,7 +68,10 @@ async function reset() {
     rows.value = []; detail.value = null; audits.value = []; related.value = []; types.value = []; people.value = []; replacements.value = []; total.value = 0; page.value = 1; editing.value = false; action.value = ''; error.value = ''; fields.value = {}; saving.value = false;
     await load(signal);
     if (signal.aborted) { return; }
-    try { const result = await request(url('/lookups'), { signal }); if (!signal.aborted) { types.value = result.data; people.value = result.people; } }
+    try { const result = await request(url('/lookups'), { signal }); if (!signal.aborted) { types.value = result.data; people.value = result.people;
+        const query = new URLSearchParams(window.location.search);
+        if (/^[1-9][0-9]*$/.test(query.get('record') ?? '')) { await show({ id: query.get('record') }); }
+    } }
     catch (failure) { if (!signal.aborted) { fail(failure); } }
 }
 async function show(row) {

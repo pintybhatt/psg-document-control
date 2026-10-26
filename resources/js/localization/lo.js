@@ -1,4 +1,10 @@
 export default {
+    "searchPhysical": "ລະຫັດ ຫຼື ບ່ອນເກັບເອກະສານ",
+    "searchCustodian": "ຜູ້ຖືຄອງເອກະສານປັດຈຸບັນ",
+    "searchCopyKind": "ຕົ້ນສະບັບ / ສຳເນົາ",
+    "searchCustody": "ສະຖານະການຖືຄອງ",
+    "searchPhysicalDetails": "ສຳເນົາທີ່ກົງກັນ 3 ລາຍການທຳອິດ · ບ່ອນເກັບ ແລະ ໄຟລ໌ທັງໝົດ",
+
     "searchAny": "ທັງໝົດ",
     "searchFilters": "ຕົວກັ່ນຕອງ",
     "searchCategory": "ໝວດເອກະສານ",
