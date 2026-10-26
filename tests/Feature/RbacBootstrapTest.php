@@ -33,11 +33,14 @@ class RbacBootstrapTest extends TestCase
         $this->assertSame('Configured name', $role->refresh()->name_en);
         $this->assertFalse($role->active);
         $this->assertDatabaseCount('roles', 4);
-        $this->assertDatabaseCount('permissions', 23);
+        $this->assertDatabaseCount('permissions', 25);
         $this->assertDatabaseCount('users', 0);
         $this->assertDatabaseCount('user_role_assignments', 0);
         $this->assertSame([], Role::query()->where('code', 'DOCUMENT_CONTROLLER')->firstOrFail()->permissions()->pluck('key')->all());
         $this->assertFalse(Permission::query()->where('key', 'documents.register')->firstOrFail()->active);
+        $this->assertTrue(Permission::query()->where('key', 'incoming.register')->firstOrFail()->active);
+        $this->assertTrue(Permission::query()->where('key', 'incoming.drafts.manage')->firstOrFail()->active);
+        $this->assertFalse(Permission::query()->where('key', 'documents.control')->firstOrFail()->active);
         $this->seed();
         $this->assertDatabaseCount('user_role_assignments', 0);
     }

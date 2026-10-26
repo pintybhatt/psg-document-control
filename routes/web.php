@@ -4,6 +4,7 @@ use App\Http\Controllers\AuthenticatedSessionController;
 use App\Http\Controllers\AuthorizationContextController;
 use App\Http\Controllers\CurrentUserController;
 use App\Http\Controllers\DocumentMasterDataController;
+use App\Http\Controllers\IncomingCorrespondenceController;
 use App\Http\Controllers\MembershipController;
 use App\Http\Controllers\NumberingController;
 use App\Http\Controllers\RoleAssignmentController;
@@ -45,6 +46,13 @@ Route::middleware(['auth:web', EnsureActiveUserSession::class])->group(function 
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
     Route::get('/api/v1/user', CurrentUserController::class)->name('api.v1.user');
     Route::prefix('api/v1')->name('api.v1.')->group(function (): void {
+        Route::get('incoming-correspondence/contexts', [IncomingCorrespondenceController::class, 'contexts'])->name('incoming.contexts');
+        Route::get('incoming-correspondence/lookups', [IncomingCorrespondenceController::class, 'lookups'])->name('incoming.lookups');
+        Route::get('incoming-correspondence', [IncomingCorrespondenceController::class, 'index'])->name('incoming.index');
+        Route::post('incoming-correspondence', [IncomingCorrespondenceController::class, 'store'])->name('incoming.store');
+        Route::get('incoming-correspondence/{record}', [IncomingCorrespondenceController::class, 'show'])->name('incoming.show');
+        Route::patch('incoming-correspondence/{record}', [IncomingCorrespondenceController::class, 'update'])->name('incoming.update');
+        Route::post('incoming-correspondence/{record}/register', [IncomingCorrespondenceController::class, 'register'])->name('incoming.register');
         Route::get('numbering-series', [NumberingController::class, 'index'])->name('numbering.index');
         Route::get('numbering-series/registers', [NumberingController::class, 'registers'])->name('numbering.registers');
         Route::post('numbering-series/preview', [NumberingController::class, 'preview'])->name('numbering.preview');
