@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:noNamespaceSchemaLocation="vendor/phpunit/phpunit/phpunit.xsd"
+         bootstrap="tests/mysql-bootstrap.php"
+         colors="true"
+         cacheDirectory="storage/framework/testing/mysql84/phpunit-cache"
+>
+    <testsuites>
+        <testsuite name="MySQL">
+            <directory>tests/Unit</directory>
+            <directory>tests/Feature</directory>
+            <exclude>tests/Feature/NumberingConcurrencyTest.php</exclude>
+            <exclude>tests/Feature/SetupPhaseThreeDemoTest.php</exclude>
+        </testsuite>
+    </testsuites>
+    <source>
+        <include><directory>app</directory></include>
+    </source>
+    <php>
+        <env name="APP_MAINTENANCE_DRIVER" value="file"/>
+        <env name="PULSE_ENABLED" value="false"/>
+        <env name="TELESCOPE_ENABLED" value="false"/>
+        <env name="NIGHTWATCH_ENABLED" value="false"/>
+    </php>
+</phpunit>

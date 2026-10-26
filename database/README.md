@@ -35,6 +35,8 @@ The command is not called by migrations or the default seeder. The default seede
 
 ## SQLite / MySQL 8.4 considerations
 
+Current local MySQL evidence and reproduction instructions are in the [isolated MySQL 8.4 verification report](../docs/security/mysql-8-4-verification.md). This follow-up uses Docker Engine and MySQL 8.4.13 Community, without changing the default SQLite configuration. Earlier phase-specific verification statements below describe their original review dates.
+
 - The same migrations define required columns, scoped unique keys, restrictive foreign keys and the company/site composite constraint for both databases. No database-specific triggers or check constraints are needed.
 - SQLite foreign-key enforcement must remain enabled (`DB_FOREIGN_KEYS=true`, the existing default). With it disabled, direct SQL can bypass ownership and deletion restrictions.
 - MySQL must use InnoDB with foreign-key checks enabled. The explicit unique parent key `(id, company_id)` avoids reliance on non-standard references to non-unique keys, which MySQL 8.4 restricts. IDs and foreign IDs use Laravel's matching unsigned big integer types on MySQL.
@@ -65,7 +67,7 @@ Phase 3A verification uses the isolated SQLite suite and frontend tests. The sch
 
 ## Phase 3B secure document numbering
 
-The [Phase 3 final integration review](../docs/security/phase-3-final-integration-review.md) records the final security corrections, registration contract for Phases 4–6, verification evidence and Phase 4A checklist. MySQL 8.4 verification remains outstanding.
+The [Phase 3 final integration review](../docs/security/phase-3-final-integration-review.md) records the final security corrections, registration contract for Phases 4–6, verification evidence and Phase 4A checklist. The subsequent [isolated MySQL verification](../docs/security/mysql-8-4-verification.md) records executed Phase 2/3 migrations, constraints and concurrent numbering checks, plus remaining deployment limitations.
 
 ### Series, purposes and formats
 
@@ -103,4 +105,4 @@ Configuration versions and issuance ledger rows are transactional mutation audit
 
 The full SQLite suite includes a disposable file database and four real PHP workers on separate connections, synchronized before simultaneous registration attempts. Three commit; a deliberate fourth rollback consumes no sequence. It also tests annual rollover, continuous policy, formatting edits, purpose separation, rollback/savepoints, scoped authorization, immutable history and unsafe counter operations. Fixtures and worker scripts live under `tests/` only, create no application document workflow and remove the isolated database afterward. The fixture's external references deliberately allow repetition.
 
-MySQL 8.4 migration, constraint and separate-process concurrency verification is **pending**: no safe existing isolated MySQL instance/setup was found, and no new database was installed, initialized or configured. SQLite evidence is not proof of MySQL concurrency or trigger behavior. Before deployment, run fresh/upgrade migrations and the transaction/concurrency matrix on an approved disposable MySQL 8.4 instance with InnoDB, foreign keys, shared production-equivalent configuration and trigger permissions. Do not use operational databases. Reviewed sources: [SQLite transaction and writer-lock behavior](https://www.sqlite.org/lang_transaction.html) and [MySQL 8.4 locking reads](https://dev.mysql.com/doc/refman/8.4/en/innodb-locking-reads.html).
+Local MySQL 8.4.13 migration, constraint and separate-process concurrency evidence is now recorded in the [isolated MySQL verification report](../docs/security/mysql-8-4-verification.md). It includes rollback, lock timeout, whole-transaction deadlock retry and authorization snapshot checks. This does not certify production configuration, all future workflow interleavings or linearizable revocation. Before deployment, review the report's remaining checks using production-equivalent settings and trigger privileges on disposable infrastructure. Do not use operational databases. Reviewed sources: [SQLite transaction and writer-lock behavior](https://www.sqlite.org/lang_transaction.html) and [MySQL 8.4 locking reads](https://dev.mysql.com/doc/refman/8.4/en/innodb-locking-reads.html).

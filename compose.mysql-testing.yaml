@@ -1,0 +1,48 @@
+name: dcms-mysql84-tests
+
+services:
+  mysql:
+    image: mysql:8.4.13@sha256:76f0358884cb92d9a086d24e5671c38048d3fef40f2588703d73eb55392d6b69
+    container_name: dcms-mysql84-tests
+    environment:
+      MYSQL_DATABASE: dcms_mysql_test
+      MYSQL_USER: dcms_test_runner
+      MYSQL_PASSWORD_FILE: /run/secrets/mysql_password
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/mysql_root_password
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-storage-engine=InnoDB
+      - --log-bin-trust-function-creators=1
+      - --mysqlx=OFF
+    ports:
+      - "127.0.0.1:33084:3306"
+    secrets:
+      - mysql_password
+      - mysql_root_password
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - private
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "--silent"]
+      interval: 2s
+      timeout: 3s
+      retries: 60
+      start_period: 20s
+    mem_limit: 1g
+
+secrets:
+  mysql_password:
+    file: ./storage/framework/testing/mysql84/password
+  mysql_root_password:
+    file: ./storage/framework/testing/mysql84/root-password
+
+volumes:
+  mysql_data:
+    name: dcms-mysql84-tests-data
+
+networks:
+  private:
+    name: dcms-mysql84-tests-private
+    driver: bridge

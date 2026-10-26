@@ -1,5 +1,7 @@
 # Phase 3 final integration and security review
 
+Subsequent verification: the [isolated MySQL 8.4 report](mysql-8-4-verification.md) supplies local MySQL 8.4.13 migration, constraint and concurrency evidence and records remaining limits. The findings and verification status below preserve this review's original baseline.
+
 Review date: 2026-10-26. Baseline: `phase-3-master-data-numbering` at `b894c39fcb37d9a72b512a0e95ded0d650d3a954`, with a clean working tree. Reviewed the implemented Phase 3A/3B services, requests, controllers, resources, models, migrations, Administration components and tests against [database contracts](../../database/README.md) and the [Phase 2 security review](phase-2-2e-1-review.md). No architecture redesign or correspondence workflow was introduced.
 
 Installed versions checked: PHP 8.5.4, Laravel 13.38.0, PHPUnit 12.5.40, Vue 3.5.44, Vitest 4.1.12 and Vite 8.3.5. SQLite is the executed test database. MySQL 8.4 remains an unverified deployment target for Phase 3.
