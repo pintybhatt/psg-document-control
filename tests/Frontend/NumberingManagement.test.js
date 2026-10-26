@@ -143,16 +143,21 @@ describe('numbering administration', () => {
     });
 
     it('keeps history read-only and safely renders untrusted change reasons', async () => {
-        server({ history: [{ ...configuration, change_reason: '<img src=x onerror=alert(1)>' }] });
+        server({ history: [{ ...configuration, effective_at: '2026-10-26T18:35:00Z', change_reason: '<img src=x onerror=alert(1)>' }] });
         const wrapper = await render({ ...scope, permissions: ['numbering.view'] });
         expect(wrapper.text()).not.toContain('Create numbering series');
         await button(wrapper, 'Configuration history').trigger('click');
         await flushPromises();
         expect(wrapper.get('section[aria-labelledby="numbering-history"]').text()).toContain('<img src=x onerror=alert(1)>');
         expect(wrapper.find('img').exists()).toBe(false);
+        expect(wrapper.get('section[aria-labelledby="numbering-history"]').text()).toContain('27/10/2026, 01:35');
+        expect(wrapper.text()).not.toMatch(/\bUTC\b/);
         await button(wrapper, 'Details').trigger('click');
         expect(control(wrapper, 'Prefix').element.readOnly).toBe(true);
         expect(wrapper.find('button[type="submit"]').exists()).toBe(false);
+        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        expect(wrapper.text()).toContain('27/10/2026, 01:35');
+        expect(wrapper.text()).not.toMatch(/\bUTC\b/);
     });
 
     it('marks inactive-register configurations unavailable and disables official numbering for incoming registers', async () => {

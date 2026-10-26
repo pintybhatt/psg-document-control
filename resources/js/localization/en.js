@@ -159,7 +159,7 @@ export default {
     numberingSaveConfirm: 'Save this configuration? Changes take effect immediately. Issued numbers and counters remain unchanged.',
     numberingHistory: 'Configuration history',
     numberingVersion: 'Version',
-    numberingEffective: 'Effective from (UTC)',
+    numberingEffective: 'Effective from',
     numberingActor: 'Actor ID',
     numberingReason: 'Reason for change (optional)',
     numberingBoundary: 'Configure numbering only in the selected company or site. Internal and official outgoing numbers use separate sequences. External references are entered separately, never generated here. Preview shows sequence 1; it does not reserve a number.',

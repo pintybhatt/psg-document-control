@@ -146,7 +146,7 @@ class CorrespondenceReport
         }
         $registration = [];
         foreach ($audits as $audit) {
-            $registration[] = ['label' => $this->label($audit->action, $language), 'value' => $audit->created_at->format('d/m/Y H:i').' UTC · '.$this->label('actor', $language).' '.$audit->actor_id];
+            $registration[] = ['label' => $this->label($audit->action, $language), 'value' => $this->dateTime($audit->created_at).' · '.$this->label('actor', $language).' '.$audit->actor_id];
         }
         $sections[] = ['title' => $this->label('registration_history', $language), 'fields' => $registration];
         $related = $details['related'] ?? $details['related_incoming'] ?? [];
@@ -180,7 +180,7 @@ class CorrespondenceReport
         }
 
         return ['language' => $language, 'title' => $this->label($kind, $language), 'workspace' => implode(' / ', $workspace),
-            'generated' => now()->utc()->format('d/m/Y H:i').' UTC', 'filters' => implode(' · ', $filters) ?: $this->label('none', $language)];
+            'generated' => $this->dateTime(now()), 'filters' => implode(' · ', $filters) ?: $this->label('none', $language)];
     }
 
     /** @param array<string, mixed> $values
@@ -216,7 +216,7 @@ class CorrespondenceReport
             return implode("\n", $lines) ?: '—';
         }
         if (str_ends_with($field, '_at')) {
-            return CarbonImmutable::parse($value)->utc()->format('d/m/Y H:i').' UTC';
+            return $this->dateTime($value);
         }
         if (str_ends_with($field, '_date')) {
             return CarbonImmutable::parse($value)->format('d/m/Y');
@@ -226,6 +226,11 @@ class CorrespondenceReport
         }
 
         return (string) $value;
+    }
+
+    private function dateTime(DateTimeInterface|string $value): string
+    {
+        return CarbonImmutable::parse($value, 'UTC')->setTimezone('Asia/Vientiane')->format('d/m/Y, H:i');
     }
 
     /** @param array<string, mixed> $data */

@@ -23,10 +23,19 @@ export function parseDisplayDate(value) {
     return toIsoDate(value.split('/').reverse().join('-'));
 }
 
-/** Audit timestamps retain their unambiguous server calendar date. */
+const timestampFormatter = new Intl.DateTimeFormat('en-GB', {
+    timeZone: 'Asia/Vientiane', calendar: 'gregory', numberingSystem: 'latn',
+    day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23',
+});
+
+/** Display system timestamps in Laos; timezone-less system values are stored UTC. */
 export function formatDateTime(value, fallback = '—') {
     if (typeof value !== 'string') { return fallback; }
-    const date = formatDate(value.slice(0, 10), fallback);
-    const time = value.match(/[T ](\d{2}:\d{2})/);
-    return date === fallback ? fallback : `${date}${time ? ` · ${time[1]} UTC` : ''}`;
+    if (toIsoDate(value)) { return formatDate(value, fallback); }
+    const match = value.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2})(?::(\d{2})(?:\.\d{1,6})?)?(Z|[+-]\d{2}:\d{2})?$/);
+    if (!match || !toIsoDate(match[1]) || Number(match[2]) > 23 || Number(match[3]) > 59 || Number(match[4] ?? 0) > 59) { return fallback; }
+    const timestamp = new Date(value.replace(' ', 'T').replace(/(\.\d{3})\d+/, '$1') + (match[5] ? '' : 'Z'));
+    if (Number.isNaN(timestamp.getTime())) { return fallback; }
+    const parts = Object.fromEntries(timestampFormatter.formatToParts(timestamp).map(part => [part.type, part.value]));
+    return `${parts.day}/${parts.month}/${parts.year.padStart(4, '0')}, ${parts.hour}:${parts.minute}`;
 }

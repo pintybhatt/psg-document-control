@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Authorization\ManageNumbering;
+use App\CorrespondenceReport;
 use App\Models\AuthorizationScope;
 use App\Models\Department;
 use App\Models\DocumentCategory;
@@ -16,6 +17,7 @@ use App\Models\Site;
 use App\Models\User;
 use App\Models\UserRoleAssignment;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\View;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
@@ -117,6 +119,7 @@ class CorrespondenceExportTest extends TestCase
         $department = Department::factory()->create(['company_id' => $site->company_id, 'site_id' => $site->id]);
         $this->draft($kind, $site, $type, ['subject' => 'VISIBLE OTHER DEPARTMENT', 'department_id' => $department->id]);
         $reader = $this->reader($site);
+        $this->travelTo('2026-10-26 18:35:00');
         $response = $this->getJson($this->url($kind, $site, parameters: ['search' => 'VISIBLE', 'page' => 2, 'per_page' => 1, 'language' => 'lo']))->assertOk()->assertHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')->assertDownload($kind.'-correspondence.xlsx');
         $this->artifact($kind.'-lo.xlsx', $response->getContent());
         $book = $this->workbook($response->getContent());
@@ -125,7 +128,8 @@ class CorrespondenceExportTest extends TestCase
             $this->assertSame(19, $sheet->getHighestDataRow());
             $this->assertSame('ທະບຽນເອກະສານ'.($kind === 'incoming' ? 'ຂາເຂົ້າ' : 'ຂາອອກ'), $sheet->getCell('A1')->getValue());
             $this->assertStringContainsString('ສະຖານທີ່ທົດສອບ', $sheet->getCell('A2')->getValue());
-            $this->assertStringContainsString('26/10/2026', $sheet->getCell('A3')->getValue());
+            $this->assertStringContainsString('27/10/2026, 01:35', $sheet->getCell('A3')->getValue());
+            $this->assertStringNotContainsString('UTC', $sheet->getCell('A3')->getValue());
             $this->assertStringContainsString('VISIBLE', $sheet->getCell('A4')->getValue());
             $subjectCell = $kind === 'incoming' ? 'B8' : 'C8';
             $this->assertSame('=VISIBLE 11 ເອກະສານທົດສອບ', $sheet->getCell($subjectCell)->getValue());
@@ -183,9 +187,9 @@ class CorrespondenceExportTest extends TestCase
         $this->getJson($this->url($kind, $site, parameters: ['format' => $format]))->assertForbidden();
     }
 
-    #[TestWith(['incoming'])]
-    #[TestWith(['outgoing'])]
-    public function test_detail_pdf_rechecks_document_confidentiality_and_organization(string $kind): void
+    #[TestWith(['incoming', 'en'])]
+    #[TestWith(['outgoing', 'lo'])]
+    public function test_detail_pdf_rechecks_document_confidentiality_and_organization(string $kind, string $language): void
     {
         [, $site, $type] = $this->fixture($kind);
         $visible = $this->draft($kind, $site, $type, ['subject' => 'Detail <img src="file:///etc/passwd"> ທົດສອບ', 'description_lo' => 'ລາຍລະອຽດເອກະສານ']);
@@ -196,7 +200,8 @@ class CorrespondenceExportTest extends TestCase
         foreach ($kind === 'incoming' ? ['internal_register'] : ['internal_register', 'official_outgoing'] as $purpose) {
             app(ManageNumbering::class)->save($administrator, $scope, ['register_id' => $register->id, 'purpose' => $purpose, 'reset_policy' => 'annual', 'prefix' => 'REVIEW/'.strtoupper(str_replace('_', '-', $purpose)), 'padding' => 6, 'active' => true]);
         }
-        $this->postJson($this->url($kind, $site, '/'.$visible.'/register'))->assertOk();
+        $this->travelTo('2026-10-26 18:35:00');
+        $this->postJson($this->url($kind, $site, '/'.$visible.'/register'))->assertOk()->assertJsonPath('data.registered_at', '2026-10-26T18:35:00.000000Z');
         $operation = $kind === 'incoming'
             ? ['action' => 'update', 'revision' => 0, 'due_date' => '2026-10-28', 'response_required' => true]
             : ['action' => 'dispatch', 'revision' => 0, 'dispatch_date' => '2026-10-26', 'dispatch_channel' => 'courier', 'dispatch_reference' => 'REVIEW/001'];
@@ -206,9 +211,25 @@ class CorrespondenceExportTest extends TestCase
             $this->postJson($this->url($kind, $site, '/'.$visible.'/operations'), ['action' => 'delivery', 'revision' => 1, 'recipient_id' => $recipientId, 'delivery_date' => '2026-10-26', 'acknowledgment_date' => '2026-10-26', 'acknowledged_by' => 'Review recipient'])->assertOk();
         }
 
+        $rendered = [];
+        View::composer('correspondence-report', function (\Illuminate\View\View $view) use (&$rendered): void {
+            $rendered = $view->getData();
+        });
         $this->reader($site);
-        $response = $this->getJson($this->url($kind, $site, '/'.$visible.'/pdf', ['language' => 'lo']))->assertOk()->assertDownload($kind.'-correspondence-'.$visible.'.pdf');
-        $this->artifact($kind.'-detail-lo.pdf', $response->getContent());
+        $response = $this->getJson($this->url($kind, $site, '/'.$visible.'/pdf', ['language' => $language]))->assertOk()->assertDownload($kind.'-correspondence-'.$visible.'.pdf');
+        $this->artifact($kind.'-detail-'.$language.'.pdf', $response->getContent());
+        $this->assertSame('27/10/2026, 01:35', $rendered['generated']);
+        $report = app(CorrespondenceReport::class);
+        $fields = collect($rendered['sections'][0]['fields']);
+        $this->assertSame('27/10/2026, 01:35', $fields->firstWhere('label', $report->label('registered_at', $language))['value']);
+        $this->assertSame('03/04/2026', $fields->firstWhere('label', $report->label($kind === 'incoming' ? 'correspondence_date' : 'document_date', $language))['value']);
+        $registration = collect($rendered['sections'])->firstWhere('title', $report->label('registration_history', $language));
+        $this->assertStringContainsString('27/10/2026, 01:35', $registration['fields'][1]['value']);
+        $history = collect($rendered['sections'])->first(fn (array $section): bool => str_starts_with($section['title'], $report->label('history', $language).' · '));
+        $this->assertStringContainsString('27/10/2026, 01:35', $history['title']);
+        $this->assertStringNotContainsString('UTC', json_encode($rendered['sections'], JSON_UNESCAPED_UNICODE));
+        $this->getJson($this->url($kind, $site, '/'.$visible))->assertOk()->assertJsonPath('data.registered_at', '2026-10-26T18:35:00.000000Z');
+        $this->assertDatabaseHas($kind === 'incoming' ? 'incoming_correspondences' : 'outgoing_correspondences', ['id' => $visible, 'registered_at' => '2026-10-26 18:35:00']);
         $this->assertGreaterThanOrEqual(1, $this->pdfPages($response->getContent()));
         $this->getJson($this->url($kind, $site, '/'.$secret.'/pdf'))->assertNotFound();
         $this->getJson($this->url($kind, Site::factory()->create(), '/'.$visible.'/pdf'))->assertForbidden();

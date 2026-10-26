@@ -9,6 +9,7 @@ import ConfirmDialog from './ui/ConfirmDialog.vue';
 import ToastNotifications from './ui/ToastNotifications.vue';
 import { useNotifications } from './ui/useNotifications.js';
 import { useLocalization } from '../localization/index.js';
+import { formatDateTime } from '../utilities/dates.js';
 import { createJsonClient } from '../utilities/jsonClient.js';
 
 const props = defineProps({ scope: { type: Object, required: true }, endpoint: { type: String, required: true }, csrfToken: { type: String, required: true } });
@@ -45,8 +46,8 @@ const purposes = computed(() => ['internal_register', 'official_outgoing'].map(v
 const policies = computed(() => ['annual', 'continuous'].map(value => ({ value, label: t(`numberingPolicy-${value}`) })));
 const columns = computed(() => [{ key: 'register_label', label: t('masterRegister') }, { key: 'purpose_label', label: t('numberingPurpose') }, { key: 'prefix', label: t('numberingPrefix') }, { key: 'policy_label', label: t('numberingPolicy') }, { key: 'status', label: t('uiStatus') }, { key: 'actions', label: t('rbacActions') }]);
 const displayRows = computed(() => rows.value.map(row => ({ ...row, register_label: t(`masterRegister-${row.register_key}`), purpose_label: t(`numberingPurpose-${row.purpose}`), prefix: row.configuration?.prefix ?? '—', policy_label: t(`numberingPolicy-${row.reset_policy}`), status: t(!row.configuration?.active ? 'rbacInactive' : row.effective ? 'rbacActive' : 'masterBlocked') })));
-const historyColumns = computed(() => [{ key: 'version', label: t('numberingVersion') }, { key: 'prefix', label: t('numberingPrefix') }, { key: 'padding', label: t('numberingPadding') }, { key: 'status', label: t('uiStatus') }, { key: 'effective_at', label: t('numberingEffective'), type: 'date' }, { key: 'created_by', label: t('numberingActor') }, { key: 'change_reason', label: t('numberingReason') }]);
-const historyRows = computed(() => history.value.map(row => ({ ...row, effective_at: row.effective_at?.slice(0, 10), status: t(row.active ? 'rbacActive' : 'rbacInactive') })));
+const historyColumns = computed(() => [{ key: 'version', label: t('numberingVersion') }, { key: 'prefix', label: t('numberingPrefix') }, { key: 'padding', label: t('numberingPadding') }, { key: 'status', label: t('uiStatus') }, { key: 'effective_at', label: t('numberingEffective') }, { key: 'created_by', label: t('numberingActor') }, { key: 'change_reason', label: t('numberingReason') }]);
+const historyRows = computed(() => history.value.map(row => ({ ...row, effective_at: formatDateTime(row.effective_at), status: t(row.active ? 'rbacActive' : 'rbacInactive') })));
 function scopeData() { return { scope_type: props.scope.scope_type, company_id: props.scope.company_id, site_id: props.scope.site_id }; }
 function url(path = '', requestedPage = 1) { return `${props.endpoint}${path}?${new URLSearchParams(Object.entries({ ...scopeData(), page: requestedPage, per_page: 10 }).filter(([, value]) => value !== null))}`; }
 function fail(error) {

@@ -8,7 +8,7 @@ import en from '../../resources/js/localization/en.js';
 import lo from '../../resources/js/localization/lo.js';
 
 const scope = { key: '7:site', company_id: 4, site_id: 7, permissions: ['documents.attachments.manage', 'documents.content.preview', 'documents.attachments.download', 'documents.custody.manage', 'storage-locations.manage'] };
-const version = { id: 'version-a', version: 1, original_name: '<script>original.pdf</script>', mime_type: 'application/pdf', size: 1024, uploaded_by: 5, uploaded_at: '2026-10-26T10:00:00Z', reason: 'Original', previewable: true };
+const version = { id: 'version-a', version: 1, original_name: '<script>original.pdf</script>', mime_type: 'application/pdf', size: 1024, uploaded_by: 5, uploaded_at: '2026-10-26T18:35:00Z', reason: 'Original', previewable: true };
 const copy = { id: 'copy-a', identifier: 'ORIGINAL-001', kind: 'original', status: 'stored', location: 'Archive → A → 2 → 001', location_id: 3, lock_version: 1, overdue: false };
 enableAutoUnmount(afterEach);
 beforeEach(() => localStorage.clear());
@@ -20,7 +20,7 @@ function server({ writable = true, failure = null, content = true } = {}) {
         const path = new URL(url, 'http://localhost').pathname;
         if (options.method === 'POST') { return response({ data: {} }); }
         if (path.endsWith('/attachments')) { return response({ data: [{ id: 'attachment-a', versions: [version] }], writable, capabilities: { preview: content, download: content }, max_upload_kb: 25600 }); }
-        if (path.endsWith('/copies')) { return response({ data: [copy], history: [{ id: 1, action: 'copy.created', subject_id: copy.id, reason: 'Filed original', created_at: '2026-10-26T10:00:00Z', after: { location_id: 3 } }], locations: [{ id: 3, label: copy.location }], people: [{ id: 5, name: 'Example officer' }] }); }
+        if (path.endsWith('/copies')) { return response({ data: [copy], history: [{ id: 1, action: 'copy.created', subject_id: copy.id, reason: 'Filed original', created_at: '2026-10-26T20:00:00Z', after: { location_id: 3 } }], locations: [{ id: 3, label: copy.location }], people: [{ id: 5, name: 'Example officer' }] }); }
         throw new Error(`Unexpected request ${url}`);
     });
     vi.stubGlobal('fetch', fetch); return fetch;
@@ -36,10 +36,11 @@ it('loads only on expansion and renders escaped names, bilingual custody and dis
     const fetch = server(); const wrapper = await render(); expect(fetch).not.toHaveBeenCalled();
     await expand(wrapper);
     expect(wrapper.text()).toContain(copy.location); expect(wrapper.find('script').exists()).toBe(false);
-    expect(wrapper.text()).toContain('26/10/2026');
+    expect(wrapper.text()).toContain('27/10/2026, 01:35'); expect(wrapper.text()).toContain('27/10/2026, 03:00'); expect(wrapper.text()).not.toContain('UTC');
     await wrapper.get('select[aria-label="Language"]').setValue('lo');
     expect(wrapper.text()).toContain(lo.storageTitle); expect(wrapper.text()).toContain(lo['storageAction-checkout']);
     expect(wrapper.text()).not.toMatch(/storage[A-Z-]|uiSave/);
+    expect(wrapper.text()).toContain('27/10/2026, 01:35'); expect(wrapper.text()).toContain('27/10/2026, 03:00');
 });
 it('uploads multipart data with CSRF and expected attachment version for replacements', async () => {
     const fetch = server(); const wrapper = await render(); await expand(wrapper);

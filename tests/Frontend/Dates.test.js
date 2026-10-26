@@ -39,7 +39,34 @@ describe('explicit day/month/year entry', () => {
         expect(parseDisplayDate(value)).toBe(expected);
     });
     it('formats audit timestamps consistently with date-only values', () => {
-        expect(formatDateTime('2026-04-03T09:15:00.000000Z')).toBe('03/04/2026 · 09:15 UTC');
+        expect(formatDateTime('2026-04-03T09:15:00.000000Z')).toBe('03/04/2026, 16:15');
         expect(formatDateTime(null)).toBe('—');
+    });
+});
+
+describe('Laos-local system timestamp display', () => {
+    it.each([
+        ['2026-10-26T12:35:00.000000Z', '26/10/2026, 19:35'],
+        ['2026-10-26T16:59:00Z', '26/10/2026, 23:59'],
+        ['2026-10-26T17:00:00Z', '27/10/2026, 00:00'],
+        ['2026-12-31T18:35:00Z', '01/01/2027, 01:35'],
+        ['2024-02-29T18:00:00Z', '01/03/2024, 01:00'],
+        ['2026-10-26T19:35:00+07:00', '26/10/2026, 19:35'],
+        ['2026-10-26T23:35:00-04:00', '27/10/2026, 10:35'],
+        ['2026-10-26 18:35:00', '27/10/2026, 01:35'],
+        ['2026-10-26', '26/10/2026'],
+    ])('formats %s as %s', (value, expected) => {
+        expect(formatDateTime(value)).toBe(expected);
+    });
+    it.each(['America/Los_Angeles', 'Pacific/Kiritimati'])('ignores the device timezone %s', timezone => {
+        vi.stubEnv('TZ', timezone);
+        try {
+            expect(formatDateTime('2026-10-26 18:35:00')).toBe('27/10/2026, 01:35');
+            expect(formatDate('2026-10-26')).toBe('26/10/2026');
+        } finally { vi.unstubAllEnvs(); }
+    });
+    it.each([null, undefined, '', 'invalid', '2026-02-30T18:00:00Z', '2026-10-26T25:00:00Z', '2026-10-26T18:65:00Z'])('handles invalid timestamps safely: %s', value => {
+        expect(formatDateTime(value)).toBe('—');
+        expect(formatDateTime(value, 'Not available')).toBe('Not available');
     });
 });
