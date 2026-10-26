@@ -18,11 +18,13 @@ class ManageRoles
     public function saveRole(User $actor, AuthorizationScope $scope, array $data, ?Role $role = null): Role
     {
         return $this->mutation->run(function () use ($actor, $scope, $data, $role): Role {
+            $scope = AuthorizationScope::context($scope->scope_type, $scope->company_id, $scope->site_id);
             $this->access->authorize($actor, 'roles.manage', $scope);
             if ($role) {
                 $role->refresh();
                 abort_unless($role->scope_id === $scope->id, 403, 'rbacForbidden');
             }
+            abort_unless($this->access->canManageRole($actor, $role?->code ?? $data['code'], $scope), 403, 'rbacDelegationDenied');
             $this->validateDelegation($actor, $scope, $data['permission_keys']);
             $before = $role ? $this->roleSnapshot($role) : null;
             $oldKeys = $role ? $role->permissions()->pluck('key')->sort()->values()->all() : [];
@@ -57,6 +59,7 @@ class ManageRoles
     public function assign(User $actor, AuthorizationScope $scope, User $target, Role $role, bool $confirmGlobal = false): UserRoleAssignment
     {
         return $this->mutation->run(function () use ($actor, $scope, $target, $role, $confirmGlobal): UserRoleAssignment {
+            $scope = AuthorizationScope::context($scope->scope_type, $scope->company_id, $scope->site_id);
             $this->access->authorize($actor, 'assignments.manage', $scope);
             if ($scope->scope_type === 'global' && ! $confirmGlobal) {
                 throw ValidationException::withMessages(['confirm_global' => 'rbacConfirmGlobal']);
@@ -66,6 +69,7 @@ class ManageRoles
             abort_unless($this->access->eligibleUsers($actor, $scope)->whereKey($target->id)->exists(), 403, 'rbacForbidden');
             $role->refresh()->load('scope');
             abort_unless($role->active && $role->scope->covers($scope), 403, 'rbacForbidden');
+            abort_unless($this->access->canManageRole($actor, $role->code, $scope), 403, 'rbacDelegationDenied');
             $this->validateDelegation($actor, $scope, $role->permissions()->pluck('key')->all());
             $assignment = UserRoleAssignment::query()->firstOrNew(['user_id' => $target->id, 'role_id' => $role->id, 'scope_id' => $scope->persist()->id]);
             if (! $assignment->exists || ! $assignment->active) {
@@ -82,9 +86,11 @@ class ManageRoles
     public function revoke(User $actor, AuthorizationScope $scope, UserRoleAssignment $assignment): void
     {
         $this->mutation->run(function () use ($actor, $scope, $assignment): void {
+            $scope = AuthorizationScope::context($scope->scope_type, $scope->company_id, $scope->site_id);
             $this->access->authorize($actor, 'assignments.manage', $scope);
             $assignment->refresh();
             abort_unless($assignment->scope_id === $scope->id, 403, 'rbacForbidden');
+            abort_unless($this->access->canManageRole($actor, $assignment->role->code, $scope), 403, 'rbacDelegationDenied');
             abort_if($actor->id === $assignment->user_id, 403, 'rbacSelfChange');
             $this->validateDelegation($actor, $scope, $assignment->role->permissions()->pluck('key')->all());
             if ($assignment->active) {

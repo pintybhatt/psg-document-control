@@ -4,6 +4,7 @@ namespace App\Authorization;
 
 use App\Models\AuthorizationScope;
 use App\Models\Company;
+use App\Models\OrganizationMembership;
 use App\Models\Role;
 use App\Models\User;
 use App\Models\UserRoleAssignment;
@@ -12,11 +13,29 @@ use Illuminate\Support\Collection;
 
 class AccessControl
 {
+    /** Reload authority for every decision; email addresses and loaded role relations confer no privilege. */
+    public function isSystemAdministrator(User $user): bool
+    {
+        return User::query()->whereKey($user->id)->where('active', true)
+            ->whereHas('roleAssignments', fn (Builder $query): Builder => $query->where('active', true)
+                ->whereHas('scope', fn (Builder $scope): Builder => $scope->where('scope_key', 'global'))
+                ->whereHas('role', fn (Builder $role): Builder => $role->where('code', Role::SYSTEM_ADMINISTRATOR_CODE)->where('active', true)
+                    ->whereHas('scope', fn (Builder $scope): Builder => $scope->where('scope_key', 'global'))))->exists();
+    }
+
+    public function canManageRole(User $actor, string $roleCode, AuthorizationScope $scope): bool
+    {
+        return $roleCode !== Role::SYSTEM_ADMINISTRATOR_CODE || $scope->scope_type !== 'global' || $this->isSystemAdministrator($actor);
+    }
+
     /** @return list<string> */
     public function grantedPermissions(User $user, AuthorizationScope $scope): array
     {
         if (! User::query()->whereKey($user->id)->where('active', true)->exists() || ! $scope->isActive()) {
             return [];
+        }
+        if ($this->isSystemAdministrator($user)) {
+            return array_keys(array_filter(PermissionCatalog::definitions(), fn (array $definition): bool => $definition['available']));
         }
         $keys = [];
         $assignments = UserRoleAssignment::query()->where('user_id', $user->id)->where('active', true)
@@ -39,10 +58,11 @@ class AccessControl
     public function permissions(User $user, AuthorizationScope $scope, ?int $departmentId = null): array
     {
         $membership = app(MembershipAccess::class);
+        $isSystemAdministrator = $this->isSystemAdministrator($user);
 
         return array_values(array_filter($this->grantedPermissions($user, $scope),
-            fn (string $key): bool => ! PermissionCatalog::requiresDocument($key) && (PermissionCatalog::administrative($key)
-                ? $departmentId === null : $membership->matches($user, $scope, $departmentId))));
+            fn (string $key): bool => ! PermissionCatalog::requiresDocument($key) && ($isSystemAdministrator || (PermissionCatalog::administrative($key)
+                ? $departmentId === null : $membership->matches($user, $scope, $departmentId)))));
     }
 
     public function allows(User $user, string $permission, AuthorizationScope $scope, ?int $departmentId = null): bool
@@ -122,6 +142,34 @@ class AccessControl
         }
 
         return $candidates->filter(fn (AuthorizationScope $scope): bool => $this->permissions($user, $scope) !== [])->values();
+    }
+
+    /**
+     * @return Collection<int, array{
+     *     membership_type: string, unit_key: string,
+     *     company: array{id: int, name_en: string, name_lo: string},
+     *     site: array{id: int, name_en: string, name_lo: string}|null,
+     *     department: array{id: int, name_en: string, name_lo: string}|null
+     * }>
+     */
+    public function operationalContexts(User $user): Collection
+    {
+        if ($this->isSystemAdministrator($user)) {
+            return $this->contexts($user)->filter(fn (AuthorizationScope $scope): bool => $scope->scope_type !== 'global')
+                ->map(fn (AuthorizationScope $scope): array => [
+                    'membership_type' => $scope->scope_type, 'unit_key' => $scope->scope_key,
+                    'company' => $scope->company->only(['id', 'name_en', 'name_lo']),
+                    'site' => $scope->site?->only(['id', 'name_en', 'name_lo']), 'department' => null,
+                ])->values();
+        }
+
+        return app(MembershipAccess::class)->effectiveQuery()->where('user_id', $user->id)->with(['company', 'site', 'department'])->get()
+            ->filter(fn (OrganizationMembership $membership): bool => $this->allowsOperational($user, 'organization.access', $membership->authorizationScope(), $membership->department_id))
+            ->map(fn (OrganizationMembership $membership): array => [
+                'membership_type' => $membership->membership_type, 'unit_key' => $membership->unit_key,
+                'company' => $membership->company->only(['id', 'name_en', 'name_lo']), 'site' => $membership->site?->only(['id', 'name_en', 'name_lo']),
+                'department' => $membership->department?->only(['id', 'name_en', 'name_lo']),
+            ])->values();
     }
 
     /** @return list<int> */

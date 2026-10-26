@@ -1,5 +1,7 @@
 # Organization foundation — Phase 2.2A
 
+Current authorization follows the [System Administrator contract](../README.md#current-system-administrator-authority): an active global `SECURITY_ADMINISTRATOR` assignment has full system and audited document access. Exact memberships and separate operational grants described in the phase history below still apply to ordinary users and scoped administrators. This requires no account, grant or data migration.
+
 ## Structure and integrity
 
 - Companies have a globally unique `code`.

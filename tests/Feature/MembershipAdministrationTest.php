@@ -218,7 +218,7 @@ class MembershipAdministrationTest extends TestCase
         $this->assertDatabaseCount('organization_memberships', 0);
     }
 
-    public function test_initializer_requires_explicit_confirmation_to_extend_security_role_and_never_grants_membership_or_operations(): void
+    public function test_initializer_requires_confirmation_for_stored_grants_and_global_system_authority_needs_no_membership(): void
     {
         $this->definitions();
         $user = User::factory()->create();
@@ -234,7 +234,8 @@ class MembershipAdministrationTest extends TestCase
 
         $this->assertSame(['role.membership-administration-enabled', 'administrator.bootstrapped'], RbacAudit::query()->orderBy('id')->pluck('action')->all());
         $this->assertTrue(app(AccessControl::class)->allows($user, 'memberships.manage', AuthorizationScope::context('global')));
-        $this->assertFalse(app(AccessControl::class)->allowsOperational($user, 'organization.access', AuthorizationScope::context('global')));
+        $this->assertTrue(app(AccessControl::class)->isSystemAdministrator($user));
+        $this->assertTrue(app(AccessControl::class)->allowsOperational($user, 'organization.access', AuthorizationScope::context('global')));
         $this->assertDatabaseCount('organization_memberships', 0);
         $this->assertDatabaseCount('users', 1);
     }

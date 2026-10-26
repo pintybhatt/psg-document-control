@@ -22,7 +22,7 @@ class InitializeRoleDefinitions
                 ]);
             }
             $templates = [
-                'SECURITY_ADMINISTRATOR' => ['Security Administrator', 'ຜູ້ບໍລິຫານຄວາມປອດໄພ'],
+                'SECURITY_ADMINISTRATOR' => ['System Administrator', 'ຜູ້ບໍລິຫານລະບົບ'],
                 'DOCUMENT_CONTROLLER' => ['Document Controller', 'ຜູ້ຄວບຄຸມເອກະສານ'],
                 'DEPARTMENT_USER' => ['Department User', 'ຜູ້ໃຊ້ພະແນກ'],
                 'VIEWER' => ['Viewer', 'ຜູ້ເບິ່ງຂໍ້ມູນ'],
@@ -30,7 +30,7 @@ class InitializeRoleDefinitions
             foreach ($templates as $code => [$english, $lao]) {
                 $role = Role::query()->firstOrCreate(['code' => $code], [
                     'scope_id' => $scope->id, 'name_en' => $english, 'name_lo' => $lao,
-                    'description' => $code === 'SECURITY_ADMINISTRATOR' ? 'Identity visibility and authorization configuration only; no document access.' : 'Document capabilities remain unavailable until their operations are implemented.',
+                    'description' => $code === Role::SYSTEM_ADMINISTRATOR_CODE ? Role::SYSTEM_ADMINISTRATOR_DESCRIPTION : 'Document capabilities remain unavailable until their operations are implemented.',
                 ]);
                 if ($role->wasRecentlyCreated && $code === 'SECURITY_ADMINISTRATOR') {
                     $role->permissions()->sync(Permission::query()->whereIn('key', PermissionCatalog::ADMINISTRATOR_KEYS)->pluck('id')->all());

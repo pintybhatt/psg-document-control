@@ -9,7 +9,6 @@ use App\Http\Requests\MembershipRequest;
 use App\Http\Resources\MembershipResource;
 use App\Models\Company;
 use App\Models\Department;
-use App\Models\OrganizationMembership;
 use App\Models\Site;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
@@ -109,16 +108,8 @@ class MembershipController extends Controller
         return response()->json($units);
     }
 
-    public function operationalContexts(Request $request, MembershipAccess $memberships, AccessControl $access): JsonResponse
+    public function operationalContexts(Request $request, AccessControl $access): JsonResponse
     {
-        $contexts = $memberships->effectiveQuery()->where('user_id', $request->user()->id)->with(['company', 'site', 'department'])->get()
-            ->filter(fn (OrganizationMembership $membership): bool => $access->allowsOperational($request->user(), 'organization.access', $membership->authorizationScope(), $membership->department_id))
-            ->map(fn (OrganizationMembership $membership): array => [
-                'membership_type' => $membership->membership_type, 'unit_key' => $membership->unit_key,
-                'company' => $membership->company->only(['id', 'name_en', 'name_lo']), 'site' => $membership->site?->only(['id', 'name_en', 'name_lo']),
-                'department' => $membership->department?->only(['id', 'name_en', 'name_lo']),
-            ])->values();
-
-        return response()->json(['data' => $contexts]);
+        return response()->json(['data' => $access->operationalContexts($request->user())]);
     }
 }

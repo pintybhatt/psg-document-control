@@ -57,6 +57,16 @@ If you discover a security vulnerability within Laravel, please send an e-mail t
 
 The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
 
+## Current System Administrator authority
+
+An active **global** assignment of the existing `SECURITY_ADMINISTRATOR` role grants full System Administrator authority. The account, assignment and global role definition must all remain active. Authority is resolved from persisted records by `AccessControl::isSystemAdministrator()` on every decision, without email checks, new roles, membership requirements or stored permission expansion. Scoped assignments and other administrators continue to use configured permissions, exact memberships, clearances and document allowlists.
+
+`AccessControl` supplies all available system capabilities and company/site contexts to this administrator. Unknown and unimplemented catalog operations remain unavailable. Future workflows must use this same authorization service and authorize server-loaded resources through `DocumentAccess` for metadata, preview and download. Do not add a blanket `Gate::before` grant: it would skip the document access audit. Resource validity, formal-registration transactions, disabled numbering configurations and immutable issued-number/audit history remain enforced.
+
+`DocumentAccess` permits the global administrator to access Normal, Confidential and Highly Confidential documents without separate clearance or allowlisting, and records each operation with actor, profile, timestamp and `system_administrator` as the reason. Audit exceptions or cancelled inserts fail closed. Audit durability still follows the existing transaction boundary documented in the Phase 2 review. Only a System Administrator may grant, revoke or manage the privileged global role through Administration; explicit global confirmation, self-change protections and the final-administrator invariant remain in effect.
+
+Role labels are displayed as **System Administrator / ຜູ້ບໍລິຫານລະບົບ**, including existing records with legacy stored labels. No account initialization or operational-data changes are needed. The phase descriptions below and historical security reports record earlier boundaries; this section supersedes their statements denying global System Administrator document authority. No document workflows or file-delivery infrastructure are introduced by this authorization change.
+
 ## DCMS authentication foundation — Phase 2.2B
 
 Browser authentication uses Laravel's existing `web` session guard. `/login` is bilingual; `/logout` is POST-only. The root welcome page remains public. The seven workspace pages require authentication and an active, non-revoked account session. The development preview additionally requires the local/testing environment at request time, including when routes are cached.

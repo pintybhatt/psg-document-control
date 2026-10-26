@@ -19,7 +19,7 @@ use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 
 #[Signature('rbac:bootstrap-admin {--email=} {--scope=} {--company=} {--site=} {--operator=} {--confirm-global}')]
-#[Description('Assign the initial security administrator to an existing active account in an explicitly selected scope')]
+#[Description('Assign the initial System Administrator to an existing active account; a global assignment grants full system access')]
 class AssignSecurityAdministrator extends Command
 {
     public function handle(RbacMutation $mutation, AccessControl $access, ManageRoles $manager): int
@@ -74,7 +74,7 @@ class AssignSecurityAdministrator extends Command
 
             return self::FAILURE;
         }
-        $this->info('Security administrator scope verified. No document or confidential-access capability was granted.');
+        $this->info('System Administrator scope verified. An active global assignment grants full system access, including confidential documents; scoped assignments use configured permissions.');
 
         return self::SUCCESS;
     }

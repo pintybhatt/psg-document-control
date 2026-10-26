@@ -18,6 +18,24 @@ class Role extends Model
     /** @use HasFactory<RoleFactory> */
     use HasFactory;
 
+    public const SYSTEM_ADMINISTRATOR_CODE = 'SECURITY_ADMINISTRATOR';
+
+    public const SYSTEM_ADMINISTRATOR_DESCRIPTION = 'An active global assignment grants full system and document access. Scoped assignments use configured permissions.';
+
+    public function displayName(string $language): string
+    {
+        if ($this->code === self::SYSTEM_ADMINISTRATOR_CODE) {
+            return $language === 'lo' ? 'ຜູ້ບໍລິຫານລະບົບ' : 'System Administrator';
+        }
+
+        return $this->getAttribute('name_'.$language);
+    }
+
+    public function displayDescription(): ?string
+    {
+        return $this->code === self::SYSTEM_ADMINISTRATOR_CODE ? self::SYSTEM_ADMINISTRATOR_DESCRIPTION : $this->description;
+    }
+
     protected static function booted(): void
     {
         static::updating(function (Role $role): void {

@@ -9,6 +9,7 @@ use App\Models\User;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Validation\ValidationException;
+use LogicException;
 use ValueError;
 
 class DocumentAccess
@@ -20,11 +21,15 @@ class DocumentAccess
         $operation = is_string($operation) ? DocumentOperation::tryFrom($operation) : $operation;
         $profile = $resource instanceof DocumentSecurityDescriptor ? $resource->resolve() : null;
         $actor = $user?->exists ? User::query()->find($user->getKey()) : null;
-        $reason = $this->denialReason($actor, $profile, $operation);
-        DocumentSecurityAudit::query()->create([
+        $isSystemAdministrator = $actor !== null && $this->roles->isSystemAdministrator($actor);
+        $reason = $this->denialReason($actor, $profile, $operation, $isSystemAdministrator);
+        $audit = DocumentSecurityAudit::query()->create([
             'actor_id' => $actor?->id, 'profile_id' => $profile?->id, 'event' => $reason === null ? 'access.allowed' : 'access.denied',
-            'operation' => $operation?->value, 'reason' => $reason,
+            'operation' => $operation?->value, 'reason' => $reason ?? ($isSystemAdministrator ? 'system_administrator' : null),
         ]);
+        if (! $audit->exists) {
+            throw new LogicException('Document access audit persistence was cancelled.');
+        }
 
         return $reason === null;
     }
@@ -36,7 +41,7 @@ class DocumentAccess
         }
     }
 
-    private function denialReason(?User $user, ?DocumentSecurityProfile $profile, ?DocumentOperation $operation): ?string
+    private function denialReason(?User $user, ?DocumentSecurityProfile $profile, ?DocumentOperation $operation, bool $isSystemAdministrator): ?string
     {
         if (! $operation || ! $profile) {
             return 'unsupported_resource';
@@ -52,6 +57,9 @@ class DocumentAccess
             }
         } catch (ValidationException|ValueError) {
             return 'invalid_resource';
+        }
+        if ($isSystemAdministrator) {
+            return null;
         }
         if (! in_array($operation->permission(), $this->roles->grantedPermissions($user, $scope->authorizationScope()), true)) {
             return 'permission_denied';

@@ -71,7 +71,7 @@ const permissionGroups = computed(() => Object.entries(permissions.value.reduce(
     return groups;
 }, {})));
 const candidateUsers = computed(() => [{ value: '', label: t('uiChoose') }, ...users.value.map(user => ({ value: user.id, label: `${user.name} (${user.email})` }))]);
-const candidateRoles = computed(() => [{ value: '', label: t('uiChoose') }, ...roleOptions.value.filter(role => role.active && role.permission_keys.every(key => permissions.value.some(permission => permission.key === key && permission.available && permission.delegatable))).map(role => ({ value: role.id, label: `${label(role)} (${role.code})` }))]);
+const candidateRoles = computed(() => [{ value: '', label: t('uiChoose') }, ...roleOptions.value.filter(role => role.assignable !== false && role.active && role.permission_keys.every(key => permissions.value.some(permission => permission.key === key && permission.available && permission.delegatable))).map(role => ({ value: role.id, label: `${label(role)} (${role.code})` }))]);
 const confirmationMessage = computed(() => {
     const action = pending.value;
     if (!action || !selected.value) { return ''; }
@@ -251,8 +251,8 @@ onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
             <div class="rounded-xl border border-slate-200 bg-white p-5"><SelectInput v-model="selectedKey" :label="t('rbacScope')" :options="scopeOptions" :disabled="saving || confirmationOpen" /><p class="mt-3 text-xs leading-6 text-slate-500">{{ t(selected?.scope_type === 'global' ? 'rbacGlobalWarning' : 'rbacScopeNotice') }}</p></div>
 
             <MembershipManagement v-if="selected && can('memberships.view')" :scope="selected" :endpoints="endpoints" :csrf-token="csrfToken" @unauthorized="handleError" />
-            <DocumentMasterDataManagement v-if="selected && can('master-data.view')" :scope="selected" :endpoints="endpoints.masterData" :csrf-token="csrfToken" @unauthorized="handleError" />
-            <NumberingManagement v-if="selected && can('numbering.view')" :scope="selected" :endpoint="endpoints.numbering" :csrf-token="csrfToken" @unauthorized="handleError" />
+            <DocumentMasterDataManagement v-if="selected && selected.scope_type !== 'global' && can('master-data.view')" :scope="selected" :endpoints="endpoints.masterData" :csrf-token="csrfToken" @unauthorized="handleError" />
+            <NumberingManagement v-if="selected && selected.scope_type !== 'global' && can('numbering.view')" :scope="selected" :endpoint="endpoints.numbering" :csrf-token="csrfToken" @unauthorized="handleError" />
 
             <section v-if="can('roles.view')" class="flex flex-col gap-4" aria-labelledby="roles-heading">
                 <div class="flex flex-wrap items-center justify-between gap-3"><h3 id="roles-heading" class="font-semibold">{{ t('rbacRoles') }}</h3><UiButton v-if="can('roles.manage')" :disabled="loading || saving" @click="showRole()">{{ t('rbacCreateRole') }}</UiButton></div>

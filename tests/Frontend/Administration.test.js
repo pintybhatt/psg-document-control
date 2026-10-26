@@ -97,6 +97,39 @@ async function newRole(wrapper) {
 }
 
 describe('scoped role administration', () => {
+    it('shows System Administrator in English and Lao for roles and assignments', async () => {
+        const systemRole = { ...sampleRole, code: 'SECURITY_ADMINISTRATOR', name_en: 'System Administrator', name_lo: 'ຜູ້ບໍລິຫານລະບົບ' };
+        server({ roles: [systemRole], assignments: [{ ...sampleAssignment, role: systemRole }] });
+        const wrapper = await render();
+
+        expect(wrapper.text()).toContain('System Administrator');
+        expect(wrapper.text()).toContain('Confidential and Highly Confidential documents');
+        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        expect(wrapper.text()).toContain('ຜູ້ບໍລິຫານລະບົບ');
+    });
+
+    it('excludes a protected global role from assignment choices when the server refuses delegation', async () => {
+        const systemRole = { ...sampleRole, id: 11, code: 'SECURITY_ADMINISTRATOR', name_en: 'System Administrator', assignable: false };
+        server({ roles: [sampleRole, systemRole] });
+        const wrapper = await render();
+
+        await button(wrapper, 'Find eligible accounts and roles').trigger('click');
+        await flushPromises();
+
+        const choices = control(wrapper, 'Role').findAll('option').map(option => option.text());
+        expect(choices).toContain('Example Role (EXAMPLE_ROLE)');
+        expect(choices).not.toContain('System Administrator (SECURITY_ADMINISTRATOR)');
+    });
+
+    it('keeps company and site configuration panels out of the global scope even with full authority', async () => {
+        server({ contexts: [{ ...globalScope, permissions: [...allKeys, 'master-data.view', 'master-data.manage', 'numbering.view', 'numbering.manage'] }] });
+        const wrapper = await render();
+
+        expect(wrapper.text()).not.toContain('Document master data');
+        expect(wrapper.text()).not.toContain('Document numbering');
+        expect(wrapper.text()).toContain('Roles');
+    });
+
     it('loads the Administration section through the existing authenticated application shell', async () => {
         server({ contexts: [] });
         const wrapper = mount(App, {
