@@ -1,4 +1,17 @@
 export default {
+    "searchAllRegisters": "ທຸກທະບຽນ",
+    "searchRegister": "ທະບຽນ",
+    "searchIdentity": "ເລກທີ / ລະຫັດເອກະສານ",
+    "searchDate": "ວັນທີເອກະສານ",
+    "searchSort": "ຈັດລຽງຕາມ",
+    "searchSort-recent": "ໃໝ່ສຸດ",
+    "searchSort-oldest": "ເກົ່າສຸດ",
+    "searchSort-number": "ເລກທີ / ລະຫັດເອກະສານ",
+    "searchSort-date": "ວັນທີເອກະສານ (ໃໝ່ສຸດ)",
+    "searchQuery": "ເລກທີ, ເລກອ້າງອີງ, ເລື່ອງ ຫຼື ຫົວຂໍ້",
+    "searchExact": "ກົງກັນທັງໝົດ",
+    "searchValidation": "ກະລຸນາກວດສອບຕົວກັ່ນຕອງ ແລ້ວລອງໃໝ່.",
+
     "correspondenceCorrectDetails": "ແກ້ໄຂລາຍລະອຽດ",
     "correspondenceCorrectionReason": "ເຫດຜົນການແກ້ໄຂ",
     "correspondenceCorrectionReasonHelp": "ອະທິບາຍຂໍ້ຜິດພາດໃນການປ້ອນຂໍ້ມູນ ແລະ ການແກ້ໄຂ (ຢ່າງໜ້ອຍ 10 ຕົວອັກສອນ). ຄ່າເກົ່າຍັງຄົງຢູ່ໃນປະຫວັດ.",

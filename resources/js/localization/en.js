@@ -1,4 +1,17 @@
 export default {
+    "searchAllRegisters": "All registers",
+    "searchRegister": "Register",
+    "searchIdentity": "Document number / code",
+    "searchDate": "Document date",
+    "searchSort": "Sort by",
+    "searchSort-recent": "Most recent",
+    "searchSort-oldest": "Oldest",
+    "searchSort-number": "Document number / code",
+    "searchSort-date": "Document date (newest)",
+    "searchQuery": "Number, reference, subject or title",
+    "searchExact": "Exact match",
+    "searchValidation": "Check the search filters and try again.",
+
     "correspondenceCorrectDetails": "Correct details",
     "correspondenceCorrectionReason": "Correction reason",
     "correspondenceCorrectionReasonHelp": "Explain the data-entry mistake and correction (at least 10 characters). Previous values remain in history.",

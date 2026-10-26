@@ -6,6 +6,7 @@ use App\Http\Controllers\ControlledDocumentController;
 use App\Http\Controllers\CurrentUserController;
 use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DocumentMasterDataController;
+use App\Http\Controllers\DocumentSearchController;
 use App\Http\Controllers\DocumentStorageController;
 use App\Http\Controllers\IncomingCorrespondenceController;
 use App\Http\Controllers\IncomingOperationController;
@@ -54,6 +55,7 @@ Route::middleware(['auth:web', EnsureActiveUserSession::class])->group(function 
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
     Route::get('/api/v1/user', CurrentUserController::class)->name('api.v1.user');
     Route::prefix('api/v1')->name('api.v1.')->group(function (): void {
+        Route::get('document-search', [DocumentSearchController::class, 'index'])->name('document-search');
         Route::get('dashboard', DashboardController::class)->name('dashboard');
         Route::get('controlled-documents/contexts', [ControlledDocumentController::class, 'contexts'])->name('controlled.contexts');
         Route::get('controlled-documents/lookups', [ControlledDocumentController::class, 'lookups'])->name('controlled.lookups');
