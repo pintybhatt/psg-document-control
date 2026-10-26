@@ -1,4 +1,5 @@
 <script setup>
+import DocumentStorage from './DocumentStorage.vue';
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { formatDate, formatDateTime } from '../utilities/dates.js';
 import StatusBadge from './ui/StatusBadge.vue';
@@ -195,6 +196,7 @@ onBeforeUnmount(() => controller?.abort());
             </dl></details>
             <p v-if="detail.status === 'registered'" class="text-sm text-slate-600">{{ t('incomingImmutable') }}</p>
             <IncomingOperations v-if="detail.status === 'registered'" :key="detail.id" :record="detail" :scope="scope" :endpoint="endpoint" :csrf-token="csrfToken" :history="handling?.history ?? []" :related="handling?.related ?? []" :responsible-user="handling?.responsible_user" :responsible-department="handling?.responsible_department" @failure="fail" @saved="operationSaved" @open-related="show" />
+            <DocumentStorage v-if="detail.storage_url" :key="detail.id" :endpoint="detail.storage_url" :scope="scope" :csrf-token="csrfToken" @failure="fail" />
             <h3 class="font-semibold">{{ t('incomingHistory') }}</h3>
             <ul class="flex flex-col gap-2"><li v-for="audit in audits" :key="audit.id">{{ t(`incomingAudit-${audit.action}`) }} · {{ formatDateTime(audit.created_at) }} · {{ t('incomingActor') }} {{ audit.actor_id }}</li></ul>
         </section>

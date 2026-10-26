@@ -1,4 +1,5 @@
 <script setup>
+import DocumentStorage from './DocumentStorage.vue';
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { formatDate, formatDateTime } from '../utilities/dates.js';
 import { createJsonClient } from '../utilities/jsonClient.js';
@@ -182,7 +183,7 @@ onBeforeUnmount(() => controller?.abort());
                 </fieldset>
                 <div class="flex gap-3"><UiButton type="submit" :loading="saving" :disabled="loading">{{ t('uiConfirm') }}</UiButton><UiButton variant="secondary" :disabled="saving" @click="action = ''">{{ t('uiCancel') }}</UiButton></div>
             </form>
-            <p class="text-sm text-slate-600">{{ t('controlledFilesDeferred') }}</p>
+            <DocumentStorage v-if="detail.storage_url" :key="detail.id" :endpoint="detail.storage_url" :scope="scope" :csrf-token="csrfToken" :revisions="detail.revisions" :authoritative-revision="detail.authoritative_revision_id" @failure="fail" />
             <h3 class="font-semibold">{{ t('controlledHistory') }}</h3>
             <details v-for="revision in detail.revisions.toReversed()" :key="revision.id" :open="revision.id === detail.authoritative_revision_id || (!authoritative && revision.status === 'draft')" class="rounded-xl border border-slate-200 p-4">
                 <summary class="cursor-pointer font-semibold">{{ t('controlledRevision') }} {{ revision.identifier }} · {{ t(`controlledStatus-${revision.status}`) }} · {{ language === 'lo' ? revision.title_lo || revision.title_en : revision.title_en }}</summary>

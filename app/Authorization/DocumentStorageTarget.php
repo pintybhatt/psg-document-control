@@ -12,7 +12,7 @@ use Illuminate\Validation\ValidationException;
 
 class DocumentStorageTarget
 {
-    public function __construct(private ManageIncomingCorrespondence $incoming, private ManageOutgoingCorrespondence $outgoing, private ManageControlledDocuments $controlled, private AccessControl $roles, private DocumentAccess $access) {}
+    public function __construct(private ManageIncomingCorrespondence $incoming, private ManageOutgoingCorrespondence $outgoing, private ManageControlledDocuments $controlled, private DocumentAccess $access) {}
 
     public function find(User $actor, DocumentScope $scope, string $type, string $id, ?string $permission = null, bool $lock = false): Model
     {
@@ -28,9 +28,14 @@ class DocumentStorageTarget
         return $manager->find($actor, $scope, $id, $lock);
     }
 
+    public function canContent(User $actor, Model $record, DocumentOperation $operation): bool
+    {
+        return $this->access->allows($actor, DocumentSecurityDescriptor::fromProfile($record->profile), $operation);
+    }
+
     public function content(User $actor, Model $record, DocumentOperation $operation): void
     {
-        abort_unless($this->access->allows($actor, DocumentSecurityDescriptor::fromProfile($record->profile), $operation), 404);
+        abort_unless($this->canContent($actor, $record, $operation), 404);
     }
 
     public function revision(Model $record, ?int $id, bool $writable = false): ?ControlledRevision

@@ -97,7 +97,7 @@ class AttachmentFiles
     }
 
     /** @return resource */
-    public function verifiedStream(AttachmentVersion $version)
+    public function verifiedStream(AttachmentVersion $version): mixed
     {
         $stream = Storage::disk('documents')->readStream($this->key($version->id));
         if (! is_resource($stream)) {

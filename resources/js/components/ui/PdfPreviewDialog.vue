@@ -4,7 +4,7 @@ import { useLocalization } from '../../localization/index.js';
 import { createJsonClient } from '../../utilities/jsonClient.js';
 import UiButton from './UiButton.vue';
 
-const props = defineProps({ url: { type: String, required: true }, csrfToken: { type: String, required: true }, filename: { type: String, required: true }, title: { type: String, required: true } });
+const props = defineProps({ allowDownload: { type: Boolean, default: true }, url: { type: String, required: true }, csrfToken: { type: String, required: true }, filename: { type: String, required: true }, title: { type: String, required: true } });
 const open = defineModel({ type: Boolean, default: false });
 const emit = defineEmits(['failure']);
 const { t } = useLocalization();
@@ -28,7 +28,7 @@ function restoreFocus() { if (previousFocus?.isConnected) { previousFocus.focus(
 function close() { open.value = false; }
 function handleClose() { open.value = false; release(); restoreFocus(); }
 function download() {
-    if (!objectUrl.value) { return; }
+    if (!props.allowDownload || !objectUrl.value) { return; }
     const link = document.createElement('a');
     link.href = objectUrl.value; link.download = props.filename;
     document.body.append(link); link.click(); link.remove();
@@ -64,7 +64,7 @@ onBeforeUnmount(() => { release(); dialog.value?.close(); restoreFocus(); });
         <div class="flex h-full min-h-0 flex-col">
             <header class="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 py-3">
                 <h2 :id="`${dialogId}-title`" class="text-base font-semibold">{{ title }}</h2>
-                <div class="flex flex-wrap gap-2"><UiButton :disabled="!objectUrl" @click="download">{{ t('reportDownloadPdf') }}</UiButton><UiButton data-close variant="secondary" @click="close">{{ t('reportClose') }}</UiButton></div>
+                <div class="flex flex-wrap gap-2"><UiButton v-if="allowDownload" :disabled="!objectUrl" @click="download">{{ t('reportDownloadPdf') }}</UiButton><UiButton data-close variant="secondary" @click="close">{{ t('reportClose') }}</UiButton></div>
             </header>
             <nav :aria-label="t('reportPreviewControls')" class="flex flex-wrap items-center justify-center gap-3 border-b border-slate-200 bg-white px-4 py-2">
                 <UiButton variant="secondary" :disabled="!objectUrl || page <= 1" @click="page--">{{ t('uiPrevious') }}</UiButton>

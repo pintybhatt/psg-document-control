@@ -13,6 +13,7 @@ class ControlledDocumentResource extends JsonResource
         $this->resource->loadMissing(['profile', 'type.category', 'currentRevision', 'revisions.owner', 'revisions.custodian']);
 
         return $this->resource->only(['id', 'document_code', 'internal_number', 'status', 'type_id', 'lock_version', 'registered_by']) + [
+            'storage_url' => route('api.v1.storage.index', ['type' => 'controlled', 'record' => $this->id], false),
             'company_id' => $this->profile->company_id, 'site_id' => $this->profile->site_id, 'department_id' => $this->profile->department_id,
             'classification' => $this->profile->classification->value, 'type' => $this->type->only(['id', 'name_en', 'name_lo']),
             'category' => $this->type->category->only(['id', 'name_en', 'name_lo']), 'registered_at' => $this->registered_at?->toISOString(),

@@ -15,13 +15,16 @@ use App\Models\Role;
 use App\Models\Site;
 use App\Models\User;
 use App\Models\UserRoleAssignment;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\ParallelTesting;
 use Illuminate\Support\Facades\Storage;
 
 trait InteractsWithDocumentStorage
 {
     private function fixture(string $resource = 'incoming', string $classification = 'normal'): array
     {
+        ParallelTesting::resolveTokenUsing(fn (): string => (string) getmypid());
         Storage::fake('documents');
         $this->definitions();
         config(['app.debug' => false]);
@@ -56,7 +59,7 @@ trait InteractsWithDocumentStorage
         return [$record, $actor, $role];
     }
 
-    private function url($record, string $suffix = 'attachments', string $type = 'incoming', array $extra = []): string
+    private function url(Model $record, string $suffix = 'attachments', string $type = 'incoming', array $extra = []): string
     {
         return '/api/v1/document-storage/'.$type.'/'.$record->id.'/'.$suffix.'?'.http_build_query($extra + ['company_id' => $record->profile->company_id, 'site_id' => $record->profile->site_id]);
     }

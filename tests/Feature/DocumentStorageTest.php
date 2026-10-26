@@ -37,7 +37,7 @@ class DocumentStorageTest extends TestCase
         $this->assertSame(hash('sha256', "%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF"), $version->sha256);
         Storage::disk('documents')->assertExists(app(AttachmentFiles::class)->key($version->id));
         $this->assertDatabaseHas('storage_events', ['action' => 'attachment.uploaded', 'subject_id' => $version->id]);
-        $this->getJson($this->url($record))->assertOk()->assertJsonCount(1, 'data');
+        $this->getJson($this->url($record))->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('capabilities.preview', true)->assertJsonPath('capabilities.download', true);
         $this->get('/storage/objects/'.$version->id)->assertNotFound();
     }
 
@@ -118,7 +118,7 @@ class DocumentStorageTest extends TestCase
         $this->getJson($preview)->assertOk();
         $role->permissions()->detach(Permission::where('key', 'documents.content.preview')->value('id'));
         $this->getJson($preview)->assertNotFound();
-        $this->getJson($this->url($record))->assertOk()->assertJsonCount(1, 'data');
+        $this->getJson($this->url($record))->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('capabilities.preview', false)->assertJsonPath('capabilities.download', false);
         $this->assertDatabaseHas('storage_events', ['action' => 'attachment.preview', 'subject_id' => $version->id]);
         $this->assertDatabaseHas('storage_events', ['action' => 'attachment.download', 'subject_id' => $version->id]);
         $this->assertDatabaseHas('document_security_audits', ['event' => 'access.denied', 'operation' => 'download']);
@@ -213,21 +213,81 @@ class DocumentStorageTest extends TestCase
     public function test_failed_private_file_write_rolls_back_database_state(): void
     {
         [$record] = $this->fixture();
+        config(['app.debug' => true]);
         Storage::disk('documents')->put('unchanged', 'Existing file');
         Storage::partialMock()->shouldReceive('disk')->with('documents')->andReturn(new class
         {
-            public function put(...$arguments): bool
+            public function put(mixed ...$arguments): bool
             {
                 throw new \RuntimeException('Disk full');
             }
 
-            public function delete(...$arguments): bool
+            public function delete(mixed ...$arguments): bool
             {
                 return true;
             }
         });
-        $this->postJson($this->url($record), ['file' => $this->pdf(), 'reason' => 'Storage failure'])->assertInternalServerError();
+        $this->postJson($this->url($record), ['file' => $this->pdf(), 'reason' => 'Storage failure'])->assertInternalServerError()->assertJsonPath('message', 'rbacRequestFailed')->assertJsonMissingPath('exception')->assertDontSee('Disk full');
         $this->assertDatabaseCount('document_attachments', 0);
         $this->assertDatabaseCount('attachment_versions', 0);
+    }
+
+    public function test_guest_denial_is_logged_without_disclosing_document_metadata(): void
+    {
+        $this->getJson('/api/v1/document-storage/incoming/999/attachments?company_id=1&site_id=1')->assertUnauthorized()->assertDontSee('original_name');
+        $this->assertDatabaseHas('storage_events', ['action' => 'request.denied', 'reason' => '401', 'actor_id' => null]);
+    }
+
+    public function test_sql_replace_cannot_rewrite_attachment_identities_or_access_history(): void
+    {
+        [$record] = $this->fixture();
+        $this->postJson($this->url($record), ['file' => $this->pdf(), 'reason' => 'Original'])->assertCreated();
+        foreach (['document_attachments', 'attachment_versions', 'storage_events'] as $table) {
+            $original = (array) DB::table($table)->first();
+            try {
+                $grammar = DB::connection()->getQueryGrammar();
+                $columns = implode(', ', array_map(fn (string $column): string => $grammar->wrap($column), array_keys($original)));
+                $placeholders = implode(', ', array_fill(0, count($original), '?'));
+                $verb = DB::getDriverName() === 'sqlite' ? 'INSERT OR REPLACE' : 'REPLACE';
+                DB::statement($verb.' INTO '.$grammar->wrapTable($table).' ('.$columns.') VALUES ('.$placeholders.')', array_values($original));
+                $this->fail('Stored history was replaced.');
+            } catch (QueryException) {
+            }
+            $this->assertSame($original, (array) DB::table($table)->where('id', $original['id'])->first());
+        }
+    }
+
+    #[TestWith(['docx', 'word/document.xml'])]
+    #[TestWith(['xlsx', 'xl/workbook.xml'])]
+    public function test_macro_free_office_packages_are_downloadable_but_macro_payloads_are_rejected(string $extension, string $mainPart): void
+    {
+        [$record] = $this->fixture();
+        $path = tempnam(sys_get_temp_dir(), 'dcms-office-');
+        try {
+            $archive = new \ZipArchive;
+            $this->assertTrue($archive->open($path, \ZipArchive::OVERWRITE) === true);
+            $archive->addFromString('[Content_Types].xml', '<?xml version="1.0"?><Types/>');
+            $archive->addFromString($mainPart, '<?xml version="1.0"?><document/>');
+            $archive->close();
+            $this->postJson($this->url($record), ['file' => UploadedFile::fake()->createWithContent('document.'.$extension, file_get_contents($path)), 'reason' => 'Office attachment'])->assertCreated()->assertJsonPath('data.versions.0.previewable', false);
+            $archive->open($path);
+            $archive->addFromString('word/vbaProject.bin', 'Prohibited macro');
+            $archive->close();
+            $this->postJson($this->url($record), ['file' => UploadedFile::fake()->createWithContent('macro.'.$extension, file_get_contents($path)), 'reason' => 'Invalid macro'])->assertUnprocessable();
+            $this->assertDatabaseCount('attachment_versions', 1);
+        } finally {
+            unlink($path);
+        }
+    }
+
+    public function test_raster_preview_stream_returns_the_verified_image_bytes(): void
+    {
+        [$record] = $this->fixture();
+        $file = UploadedFile::fake()->image('scan.png', 20, 20);
+        $original = file_get_contents($file->getRealPath());
+        $this->postJson($this->url($record), ['file' => $file, 'reason' => 'Scan'])->assertCreated();
+        $version = AttachmentVersion::sole();
+        $response = $this->getJson($this->url($record, 'versions/'.$version->id.'/preview'))->assertOk()->assertHeader('Content-Type', 'image/png');
+        $this->assertSame($original, $response->streamedContent());
     }
 }

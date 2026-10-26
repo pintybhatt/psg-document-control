@@ -11,7 +11,7 @@ class IncomingCorrespondenceResource extends JsonResource
     public function toArray(Request $request): array
     {
         return [
-            'id' => $this->id, 'company_id' => $this->profile->company_id, 'site_id' => $this->profile->site_id,
+            'id' => $this->id, 'storage_url' => route('api.v1.storage.index', ['type' => 'incoming', 'record' => $this->id], false), 'company_id' => $this->profile->company_id, 'site_id' => $this->profile->site_id,
             'department_id' => $this->profile->department_id, 'classification' => $this->profile->classification->value,
             'category' => $this->type->category->only(['id', 'name_en', 'name_lo']),
             'type' => $this->type->only(['id', 'name_en', 'name_lo']), 'type_id' => $this->type_id,

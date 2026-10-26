@@ -83,7 +83,7 @@ it('releases the reviewed draft with a reason and hides direct editing of releas
     expect(body).toMatchObject({ lock_version: 2, revision_id: 11, reason: 'Authorized issue' });
     expect(wrapper.findAll('button').some(item => item.text() === en.controlledEdit)).toBe(false);
     expect(wrapper.text()).toContain(en['controlledAction-revisions']);
-    expect(wrapper.text()).toContain(en.controlledFilesDeferred);
+    expect(wrapper.text()).not.toContain(en.controlledFilesDeferred);
 });
 it('prepares the next revision without resubmitting released metadata and preserves current authority', async () => {
     const fetch = server({ released: true }); const wrapper = await render(); await show(wrapper);

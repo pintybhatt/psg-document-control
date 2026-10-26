@@ -7,6 +7,7 @@ use App\Models\Permission;
 use App\Models\PhysicalCopy;
 use App\Models\StorageEvent;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -18,12 +19,12 @@ class PhysicalCustodyTest extends TestCase
 {
     use InteractsWithDocumentStorage, InteractsWithRbac, LazilyRefreshDatabase;
 
-    private function location($record, string $room = 'Archive'): int
+    private function location(Model $record, string $room = 'Archive'): int
     {
         return $this->postJson($this->url($record, 'locations'), ['room' => $room, 'cabinet' => 'A', 'shelf' => '2', 'box' => '001'])->assertCreated()->json('data.id');
     }
 
-    private function copy($record, int $location): array
+    private function copy(Model $record, int $location): array
     {
         return $this->postJson($this->url($record, 'copies'), ['identifier' => 'ORIGINAL-001', 'kind' => 'original', 'location_id' => $location, 'reason' => 'Archive original'])->assertCreated()->json('data');
     }
@@ -127,5 +128,24 @@ class PhysicalCustodyTest extends TestCase
         $role->permissions()->detach(Permission::where('key', 'documents.custody.manage')->value('id'));
         $this->postJson($url, ['action' => 'return', 'lock_version' => 1, 'reason' => 'Unauthorized'])->assertForbidden();
         $this->assertDatabaseHas('storage_events', ['action' => 'request.denied']);
+    }
+
+    public function test_sql_replace_cannot_reset_custody_or_rewrite_location_identities(): void
+    {
+        [$record] = $this->fixture();
+        $copy = $this->copy($record, $this->location($record));
+        foreach (['physical_copies', 'storage_locations'] as $table) {
+            $original = (array) DB::table($table)->first();
+            try {
+                $grammar = DB::connection()->getQueryGrammar();
+                $columns = implode(', ', array_map(fn (string $column): string => $grammar->wrap($column), array_keys($original)));
+                $placeholders = implode(', ', array_fill(0, count($original), '?'));
+                $verb = DB::getDriverName() === 'sqlite' ? 'INSERT OR REPLACE' : 'REPLACE';
+                DB::statement($verb.' INTO '.$grammar->wrapTable($table).' ('.$columns.') VALUES ('.$placeholders.')', array_values($original));
+                $this->fail('Physical identity was replaced.');
+            } catch (QueryException) {
+            }
+            $this->assertSame($original, (array) DB::table($table)->where('id', $original['id'])->first());
+        }
     }
 }

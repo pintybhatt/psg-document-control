@@ -55,7 +55,7 @@ class ManagePhysicalCustody
             }
             $copy = new PhysicalCopy(array_diff_key($validated, ['reason' => true]) + ['id' => (string) Str::uuid(), 'profile_id' => $record->profile_id, 'revision_id' => $revisionId, 'site_id' => $scope->siteId, 'status' => 'stored', 'lock_version' => 1]);
             $this->persist($copy);
-            $this->audit($actor, $record, 'copy.created', $copy->id, $validated['reason'], null, $copy->getAttributes());
+            $this->audit($actor, $record, 'copy.created', $copy->id, $validated['reason'], null, $this->snapshot($copy));
 
             return $copy;
         });
@@ -81,7 +81,7 @@ class ManagePhysicalCustody
             if ($copy->lock_version !== (int) $validated['lock_version']) {
                 throw ValidationException::withMessages(['storage' => 'storageStale']);
             }
-            $before = $copy->getAttributes();
+            $before = $this->snapshot($copy);
             $action = $validated['action'];
             if ($action === 'inventory') {
                 $this->audit($actor, $record, 'custody.inventory', $copy->id, $validated['reason'], $before, $before + ['observation' => $validated['observation']]);
@@ -122,7 +122,7 @@ class ManagePhysicalCustody
             }
             $copy->lock_version++;
             $this->persist($copy);
-            $after = $copy->getAttributes();
+            $after = $this->snapshot($copy);
             if ($action === 'correct') {
                 $after['correction_event_id'] = $validated['correction_event_id'];
             }
@@ -130,6 +130,13 @@ class ManagePhysicalCustody
 
             return $copy;
         }, 1);
+    }
+
+    /** @return array<string, mixed> */
+    private function snapshot(PhysicalCopy $copy): array
+    {
+        return $copy->getAttributes() + ['custodian_name' => $copy->custodian_id ? User::query()->whereKey($copy->custodian_id)->value('name') : null,
+            'location_label' => StorageLocation::findOrFail($copy->location_id)->label()];
     }
 
     private function validLocation(DocumentScope $scope, int $id): void

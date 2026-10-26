@@ -1,4 +1,5 @@
 <script setup>
+import DocumentStorage from './DocumentStorage.vue';
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { formatDate, formatDateTime } from '../utilities/dates.js';
 import StatusBadge from './ui/StatusBadge.vue';
@@ -196,6 +197,7 @@ onBeforeUnmount(() => controller?.abort());
             <ul class="flex flex-col gap-3"><li v-for="(recipient, index) in detail.recipients" :key="index" class="rounded-xl border border-slate-200 p-3"><p class="font-medium">{{ t(`outgoingRecipient-${recipient.kind}`) }} · {{ recipient.organization }}</p><p v-for="field in recipientFields.filter(field => field !== 'organization' && recipient[field])" :key="field" class="whitespace-pre-wrap wrap-anywhere">{{ t(`outgoingRecipient-${field}`) }}: {{ recipient[field] }}</p></li></ul>
             <p v-if="detail.status === 'registered'" class="text-sm text-slate-600">{{ t('outgoingImmutable') }}</p>
             <OutgoingDispatch v-if="detail.status === 'registered'" :key="detail.id" :record="detail" :scope="scope" :endpoint="endpoint" :incoming-endpoint="incomingEndpoint" :csrf-token="csrfToken" :history="handling?.history ?? []" :related-incoming="handling?.related_incoming ?? []" @failure="fail" @saved="operationSaved" />
+            <DocumentStorage v-if="detail.storage_url" :key="detail.id" :endpoint="detail.storage_url" :scope="scope" :csrf-token="csrfToken" @failure="fail" />
             <h3 class="font-semibold">{{ t('outgoingHistory') }}</h3>
             <ul class="flex flex-col gap-2"><li v-for="audit in audits" :key="audit.id">{{ t(`outgoingAudit-${audit.action}`) }} · {{ formatDateTime(audit.created_at) }} · {{ t('outgoingActor') }} {{ audit.actor_id }}</li></ul>
         </section>

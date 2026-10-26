@@ -125,6 +125,7 @@ Route::prefix('api/v1/document-storage/{type}/{record}')->whereIn('type', ['inco
         Route::post('copies', [PhysicalCustodyController::class, 'createCopy'])->name('copies.store');
         Route::post('copies/{copy}/events', [PhysicalCustodyController::class, 'change'])->whereUuid('copy')->name('copies.change');
         Route::post('locations', [PhysicalCustodyController::class, 'createLocation'])->name('locations.store');
+        Route::get('/', [DocumentStorageController::class, 'index'])->name('index');
         Route::get('attachments', [DocumentStorageController::class, 'index'])->name('attachments.index');
         Route::post('attachments', [DocumentStorageController::class, 'store'])->name('attachments.store');
     });

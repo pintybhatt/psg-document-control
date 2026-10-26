@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\AuditDocumentStorageRequests;
 use App\Http\Middleware\EnsureDevelopmentEnvironment;
 use Illuminate\Contracts\Auth\Middleware\AuthenticatesRequests;
 use Illuminate\Foundation\Application;
@@ -15,6 +16,7 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->prependToPriorityList(AuthenticatesRequests::class, EnsureDevelopmentEnvironment::class);
+        $middleware->prependToPriorityList(AuthenticatesRequests::class, AuditDocumentStorageRequests::class);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(

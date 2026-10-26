@@ -5,6 +5,7 @@ import PdfPreviewDialog from '../../resources/js/components/ui/PdfPreviewDialog.
 import LanguageSwitcher from '../../resources/js/components/LanguageSwitcher.vue';
 import { createLocalization, useLocalization } from '../../resources/js/localization/index.js';
 import lo from '../../resources/js/localization/lo.js';
+import en from '../../resources/js/localization/en.js';
 
 const descriptors = Object.getOwnPropertyDescriptors(HTMLDialogElement.prototype);
 enableAutoUnmount(afterEach);
@@ -67,4 +68,12 @@ it('aborts old scope requests and ignores late PDF responses after closing', asy
     expect(signal.aborted).toBe(true);
     finish(); await flushPromises();
     expect(URL.createObjectURL).not.toHaveBeenCalled(); expect(wrapper.find('iframe').exists()).toBe(false);
+});
+
+it('renders attachment previews without offering the report blob download action', async () => {
+    const wrapper = mount(PdfPreviewDialog, { props: { modelValue: true, allowDownload: false, url: '/storage/versions/file/preview', csrfToken: 'token', filename: 'scan.pdf', title: 'Scan' }, attachTo: document.body, global: { plugins: [createLocalization()] } });
+    await flushPromises();
+    expect(wrapper.find('iframe').exists()).toBe(true);
+    expect(wrapper.findAll('button').some(button => button.text() === en.reportDownloadPdf)).toBe(false);
+    wrapper.unmount();
 });

@@ -25,7 +25,7 @@ class DocumentStorageController extends Controller
         $revision = $targets->revision($record, $revisionId);
         $rows = DocumentAttachment::query()->where('profile_id', $record->profile_id)->where('revision_id', $revisionId)->with('versions')->orderBy('created_at')->orderBy('id')->get();
 
-        return response()->json(['data' => AttachmentResource::collection($rows), 'writable' => $revision === null || ($revision->released_at === null && in_array($record->status, ['draft', 'current'], true)), 'max_upload_kb' => config('document_storage.max_upload_kb')]);
+        return response()->json(['data' => AttachmentResource::collection($rows), 'capabilities' => ['preview' => $targets->canContent($request->user(), $record, DocumentOperation::Preview), 'download' => $targets->canContent($request->user(), $record, DocumentOperation::Download)], 'writable' => $revision === null || ($revision->released_at === null && in_array($record->status, ['draft', 'current'], true)), 'max_upload_kb' => config('document_storage.max_upload_kb')]);
     }
 
     public function store(DocumentStorageRequest $request, ManageAttachments $attachments): AttachmentResource
