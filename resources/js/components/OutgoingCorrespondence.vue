@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { formatDate, formatDateTime } from '../utilities/dates.js';
 import StatusBadge from './ui/StatusBadge.vue';
+import PdfPreviewDialog from './ui/PdfPreviewDialog.vue';
 import UiButton from './ui/UiButton.vue';
 import OutgoingDispatch from './OutgoingDispatch.vue';
 import TextInput from './ui/TextInput.vue';
@@ -27,6 +28,10 @@ const loading = ref(false);
 const saving = ref(false);
 const error = ref('');
 const fields = ref({});
+const previewOpen = ref(false);
+const previewPath = ref('/export');
+const previewUrl = computed(() => reportUrl('pdf', previewPath.value));
+const previewFilename = computed(() => previewPath.value === '/export' ? 'outgoing-correspondence.pdf' : 'outgoing-correspondence-' + detail.value?.id + '.pdf');
 const listError = ref('');
 const detail = ref(null);
 const audits = ref([]);
@@ -54,6 +59,11 @@ const displayRows = computed(() => rows.value.map(item => ({ ...item, internal_n
 async function backToList() { editing.value = false; detail.value = null; error.value = ''; await nextTick(); document.getElementById('outgoing-list-title')?.focus(); }
 function scopeData() { return { company_id: props.scope.company_id, site_id: props.scope.site_id, department_id: props.scope.department_id }; }
 function url(path = '') { return `${props.endpoint}${path}?${new URLSearchParams(Object.entries({ ...scopeData(), page: page.value, search: path ? undefined : search.value }).filter(([, value]) => value != null))}`; }
+function reportUrl(format, path = '/export') {
+    const data = { ...scopeData(), language: language.value, ...(path === '/export' ? { search: search.value } : {}), format };
+    return `${props.endpoint}${path}?${new URLSearchParams(Object.entries(data).filter(([, value]) => value != null))}`;
+}
+function preview(path = '/export') { previewPath.value = path; previewOpen.value = true; }
 function fail(failure) {
     if (failure.name === 'AbortError') { return; }
     fields.value = failure.fields ?? {};
@@ -72,7 +82,7 @@ async function load(signal = controller.signal) {
 }
 async function reset() {
     controller?.abort(); controller = new AbortController(); const signal = controller.signal;
-    rows.value = []; types.value = []; detail.value = null; audits.value = []; handling.value = null; editing.value = false; confirmation.value = false; error.value = ''; listError.value = ''; fields.value = {}; page.value = 1; total.value = 0; saving.value = false;
+    previewOpen.value = false; rows.value = []; types.value = []; detail.value = null; audits.value = []; handling.value = null; editing.value = false; confirmation.value = false; error.value = ''; listError.value = ''; fields.value = {}; page.value = 1; total.value = 0; saving.value = false;
     await load(signal);
     if (signal.aborted) { return; }
     try { const result = await request(url('/lookups'), { signal }); if (!signal.aborted) { types.value = result.data; } }
@@ -133,6 +143,7 @@ onBeforeUnmount(() => controller?.abort());
         <UiButton v-if="editing || detail" variant="secondary" class="self-start" :disabled="saving" @click="backToList">{{ t('backToRegister') }} · {{ t('outgoingTitle') }}</UiButton>
         <p v-if="error" role="alert" class="rounded-xl bg-red-50 p-4 text-red-800">{{ t(error) }}</p>
         <form v-if="!editing && !detail" class="flex flex-wrap items-end gap-3" @submit.prevent="page = 1; load()"><TextInput id="outgoing-search" v-model="search" :label="t('outgoingSearch')" maxlength="200" class="grow" /><UiButton type="submit" variant="secondary" :disabled="loading">{{ t('incomingApplyFilters') }}</UiButton></form>
+        <div v-if="!editing && !detail" class="flex flex-wrap gap-2"><a :href="reportUrl('xlsx')" class="inline-flex min-h-10 items-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100">{{ t('reportDownloadXlsx') }}</a><UiButton variant="secondary" :disabled="loading || saving" @click="preview()">{{ t('reportPreviewPdf') }}</UiButton></div>
         <DataTable v-if="!editing && !detail" v-model:page="page" :error="listError" :rows="displayRows" :columns="columns" :caption="t('outgoingTitle')" :loading="loading" server-side :total="total" :per-page="10" @change="load()">
             <template #cell-subject="{ row }"><button type="button" class="text-left font-semibold text-teal-800 hover:underline disabled:opacity-50" :disabled="saving || loading" @click="show(row)">{{ row.subject }}</button><span class="mt-1 block max-w-64 font-mono text-xs wrap-anywhere text-slate-500">{{ row.internal_number }}<span v-if="row.official_number !== '—'" class="block">{{ row.official_number }}</span></span></template>
             <template #cell-status_label="{ row }"><StatusBadge :status="row.operations?.status ?? row.status" :label="row.status_label" /></template>
@@ -166,6 +177,7 @@ onBeforeUnmount(() => controller?.abort());
         </form>
         <section v-else-if="detail" class="flex flex-col gap-5 rounded-2xl border border-slate-200 bg-white p-5" aria-labelledby="outgoing-detail-title">
             <div class="flex flex-wrap items-center justify-between gap-3"><h2 id="outgoing-detail-title" tabindex="-1" class="text-lg font-semibold">{{ detail.subject }}</h2><div v-if="detail.status === 'draft'" class="flex gap-3"><UiButton v-if="canManage" variant="secondary" :disabled="saving || loading" @click="edit()">{{ t('outgoingEdit') }}</UiButton><UiButton v-if="canRegister" :disabled="saving || loading" @click="confirmation = true">{{ t('outgoingRegister') }}</UiButton></div></div>
+            <div><UiButton variant="secondary" :disabled="loading || saving" @click="preview(`/${detail.id}/pdf`)">{{ t('reportPreviewDetailPdf') }}</UiButton></div>
             <dl class="grid gap-4 md:grid-cols-2">
                 <div><dt class="text-sm text-slate-600">{{ t('outgoingNumber') }}</dt><dd class="font-mono">{{ detail.internal_number ?? '—' }}</dd></div>
                 <div><dt class="text-sm text-slate-600">{{ t('outgoingOfficialNumber') }}</dt><dd class="font-mono">{{ detail.official_number ?? '—' }}</dd></div>
@@ -187,6 +199,7 @@ onBeforeUnmount(() => controller?.abort());
             <h3 class="font-semibold">{{ t('outgoingHistory') }}</h3>
             <ul class="flex flex-col gap-2"><li v-for="audit in audits" :key="audit.id">{{ t(`outgoingAudit-${audit.action}`) }} · {{ formatDateTime(audit.created_at) }} · {{ t('outgoingActor') }} {{ audit.actor_id }}</li></ul>
         </section>
+        <PdfPreviewDialog v-if="previewOpen" v-model="previewOpen" :url="previewUrl" :filename="previewFilename" :title="previewPath === '/export' ? t('outgoingTitle') : detail?.subject || t('reportPreviewDetailPdf')" :csrf-token="csrfToken" @failure="fail" />
         <ConfirmDialog v-model="confirmation" :title="t('outgoingRegister')" :message="t('outgoingRegisterConfirm')" :loading="saving" @confirm="register" />
         <ToastNotifications :items="items" @dismiss="dismiss" />
     </section>

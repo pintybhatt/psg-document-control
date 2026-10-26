@@ -6,6 +6,7 @@ use App\Authorization\DocumentScope;
 use App\Authorization\ManageOutgoingCorrespondence;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rule;
 
 class OutgoingCorrespondenceRequest extends FormRequest
 {
@@ -37,7 +38,9 @@ class OutgoingCorrespondenceRequest extends FormRequest
     public function rules(): array
     {
         $rules = ['company_id' => ['required', 'integer'], 'site_id' => ['required', 'integer'], 'department_id' => ['nullable', 'integer'],
-            'page' => ['sometimes', 'integer', 'min:1'], 'per_page' => ['sometimes', 'integer', 'min:1', 'max:50'], 'search' => ['sometimes', 'nullable', 'string', 'max:200']];
+            'page' => ['sometimes', 'integer', 'min:1'], 'per_page' => ['sometimes', 'integer', 'min:1', 'max:50'], 'language' => ['sometimes', Rule::in(['en', 'lo'])],
+            'format' => ['sometimes', Rule::in(['xlsx', 'pdf'])],
+            'search' => ['sometimes', 'nullable', 'string', 'max:200']];
         if ($this->route()->getActionMethod() === 'register') {
             foreach (array_diff(array_keys($this->all()), ['company_id', 'site_id', 'department_id', 'page', 'per_page']) as $field) {
                 $rules[$field] = ['prohibited'];

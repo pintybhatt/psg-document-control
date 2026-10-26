@@ -39,6 +39,7 @@ class IncomingCorrespondenceRequest extends FormRequest
     {
         $rules = ['company_id' => ['required', 'integer'], 'site_id' => ['required', 'integer'], 'department_id' => ['nullable', 'integer'],
             'page' => ['sometimes', 'integer', 'min:1'], 'per_page' => ['sometimes', 'integer', 'min:1', 'max:50'],
+            'format' => ['sometimes', Rule::in(['xlsx', 'pdf'])],
             'search' => ['sometimes', 'nullable', 'string', 'max:200'],
             'language' => ['sometimes', Rule::in(['en', 'lo'])],
             'filter_status' => ['sometimes', 'nullable', Rule::in(['draft', 'received', 'assigned', 'in_progress', 'responded', 'closed'])],

@@ -54,9 +54,8 @@ function button(wrapper, text) { const found = wrapper.findAll('button').find(it
 async function openDetail(wrapper) { await button(wrapper, 'Details').trigger('click'); await flushPromises(); }
 
 describe('incoming correspondence', () => {
-    it('filters the register, exports the selected filters and prints the visible page', async () => {
+    it('filters the register and supplies native report downloads with the selected scope and filters', async () => {
         const fetch = server(); const wrapper = await render();
-        const print = vi.fn(); vi.stubGlobal('print', print);
         await wrapper.get('#incoming-filter-search').setValue('Example');
         await wrapper.get('#incoming-filter-status').setValue('in_progress');
         await wrapper.get('#incoming-filter-channel').setValue('email');
@@ -64,8 +63,9 @@ describe('incoming correspondence', () => {
         expect(fetch.mock.calls.at(-1)[0]).toContain('filter_status=in_progress');
         expect(fetch.mock.calls.at(-1)[0]).toContain('filter_channel=email');
         expect(wrapper.get('a[href*="/export"]').attributes('href')).toContain('search=Example');
-        await button(wrapper, 'Print visible page / detail').trigger('click');
-        expect(print).toHaveBeenCalledOnce();
+        expect(wrapper.get('a[href*="/export"]').attributes('href')).toContain('format=xlsx');
+        expect(button(wrapper, 'Preview PDF')).toBeDefined();
+        expect(wrapper.find('a[target="_blank"]').exists()).toBe(false);
     });
     it('loads exact scope, renders escaped metadata and opens authorized detail', async () => {
         const fetch = server(); const wrapper = await render();

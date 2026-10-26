@@ -5,13 +5,16 @@ namespace App\Http\Controllers;
 use App\Authorization\CorrespondenceContexts;
 use App\Authorization\ManageOutgoingCorrespondence;
 use App\Authorization\ManageOutgoingOperations;
+use App\CorrespondenceReport;
 use App\Http\Requests\OutgoingCorrespondenceRequest;
 use App\Http\Resources\OutgoingCorrespondenceResource;
 use App\Models\DocumentType;
+use App\Models\OutgoingCorrespondence;
 use App\Models\RegisterConfiguration;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 
 class OutgoingCorrespondenceController extends Controller
 {
@@ -26,10 +29,7 @@ class OutgoingCorrespondenceController extends Controller
         $perPage = $request->integer('per_page', 10);
         $rows = [];
         $total = 0;
-        foreach ($outgoing->query($request->documentScope())->with(['profile', 'type.category', 'recipients.delivery', 'operation'])->when($request->filled('search'), function (Builder $query) use ($request): void {
-            $term = '%'.$request->input('search').'%';
-            $query->where(fn (Builder $query): Builder => $query->where('subject', 'like', $term)->orWhere('internal_number', 'like', $term)->orWhere('official_number', 'like', $term)->orWhereHas('recipients', fn (Builder $query): Builder => $query->where('organization', 'like', $term)));
-        })->orderByDesc('id')->lazy() as $record) {
+        foreach ($this->filtered($request, $outgoing)->lazy() as $record) {
             if ($outgoing->canRead($request->user(), $record)) {
                 if ($total >= ($page - 1) * $perPage && count($rows) < $perPage) {
                     $rows[] = $record;
@@ -39,6 +39,15 @@ class OutgoingCorrespondenceController extends Controller
         }
 
         return response()->json(['data' => OutgoingCorrespondenceResource::collection($rows), 'meta' => ['total' => $total, 'current_page' => $page, 'per_page' => $perPage]]);
+    }
+
+    /** @return Builder<OutgoingCorrespondence> */
+    private function filtered(OutgoingCorrespondenceRequest $request, ManageOutgoingCorrespondence $outgoing): Builder
+    {
+        return $outgoing->query($request->documentScope())->with(['profile', 'type.category', 'recipients.delivery', 'operation'])->when($request->filled('search'), function (Builder $query) use ($request): void {
+            $term = '%'.$request->input('search').'%';
+            $query->where(fn (Builder $query): Builder => $query->where('subject', 'like', $term)->orWhere('internal_number', 'like', $term)->orWhere('official_number', 'like', $term)->orWhereHas('recipients', fn (Builder $query): Builder => $query->where('organization', 'like', $term)));
+        })->orderByDesc('id');
     }
 
     public function lookups(OutgoingCorrespondenceRequest $request): JsonResponse
@@ -57,6 +66,23 @@ class OutgoingCorrespondenceController extends Controller
         $model = $outgoing->find($request->user(), $request->documentScope(), $record);
 
         return response()->json(['data' => new OutgoingCorrespondenceResource($model), 'audits' => $model->audits()->get(['id', 'actor_id', 'action', 'changed_fields', 'created_at'])] + $operations->details($request->user(), $model));
+    }
+
+    public function export(OutgoingCorrespondenceRequest $request, ManageOutgoingCorrespondence $manager, CorrespondenceReport $report): Response
+    {
+        $records = $this->filtered($request, $manager)->lazy()->filter(fn (OutgoingCorrespondence $record): bool => $manager->canRead($request->user(), $record));
+
+        return $report->register($request, 'outgoing', $records);
+    }
+
+    public function detailPdf(OutgoingCorrespondenceRequest $request, string $record, ManageOutgoingCorrespondence $manager, ManageOutgoingOperations $operations, CorrespondenceReport $report): Response
+    {
+        $model = $manager->find($request->user(), $request->documentScope(), $record);
+        $model->loadMissing(['type.category', 'operation', 'recipients.delivery']);
+        $details = $operations->details($request->user(), $model);
+        $audits = $model->audits()->orderBy('id')->get();
+
+        return $report->detail($request, 'outgoing', (new OutgoingCorrespondenceResource($model))->resolve($request), $details, $audits);
     }
 
     public function store(OutgoingCorrespondenceRequest $request, ManageOutgoingCorrespondence $outgoing): OutgoingCorrespondenceResource

@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Authorization\CorrespondenceContexts;
 use App\Authorization\ManageIncomingCorrespondence;
 use App\Authorization\ManageIncomingOperations;
+use App\CorrespondenceReport;
 use App\Http\Requests\IncomingCorrespondenceRequest;
 use App\Http\Resources\IncomingCorrespondenceResource;
 use App\Models\DocumentType;
@@ -14,7 +15,7 @@ use App\Models\RegisterConfiguration;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Symfony\Component\HttpFoundation\StreamedResponse;
+use Illuminate\Http\Response;
 
 class IncomingCorrespondenceController extends Controller
 {
@@ -60,32 +61,6 @@ class IncomingCorrespondenceController extends Controller
         return response()->json(['data' => new IncomingCorrespondenceResource($model), 'audits' => IncomingCorrespondenceAudit::query()->where('correspondence_id', $model->id)->orderBy('id')->get(['id', 'actor_id', 'action', 'changed_fields', 'created_at'])] + $operations->details($request->user(), $model));
     }
 
-    public function export(IncomingCorrespondenceRequest $request, ManageIncomingCorrespondence $incoming): StreamedResponse
-    {
-        return response()->streamDownload(function () use ($request, $incoming): void {
-            $stream = fopen('php://output', 'w');
-            fwrite($stream, "\xEF\xBB\xBF");
-            $lao = $request->input('language', $request->user()->preferred_language) === 'lo';
-            fputcsv($stream, $lao ? ['ເລກທະບຽນ', 'ຫົວຂໍ້', 'ຜູ້ສົ່ງ', 'ວັນທີຮັບ', 'ຊ່ອງທາງ', 'ສະຖານະ', 'ວັນຄົບກຳນົດ', 'ຕ້ອງຕອບ', 'ຕອບແລ້ວ'] : ['Internal number', 'Subject', 'Sender', 'Received date', 'Channel', 'Status', 'Due date', 'Response required', 'Response completed'], escape: '');
-            $statuses = ['draft' => 'ຮ່າງ', 'received' => 'ໄດ້ຮັບແລ້ວ', 'assigned' => 'ມອບໝາຍແລ້ວ', 'in_progress' => 'ກຳລັງດຳເນີນ', 'responded' => 'ຕອບແລ້ວ', 'closed' => 'ປິດແລ້ວ'];
-            $channels = ['email' => 'ອີເມວ', 'courier' => 'ຂົນສົ່ງດ່ວນ', 'hand_delivery' => 'ສົ່ງດ້ວຍຕົນເອງ', 'post' => 'ໄປສະນີ', 'other' => 'ອື່ນໆ'];
-            foreach ($this->filtered($request, $incoming)->lazy() as $record) {
-                if (! $incoming->canRead($request->user(), $record)) {
-                    continue;
-                }
-                $state = $record->operation;
-                $status = $record->status === 'draft' ? 'draft' : ($state?->status ?? 'received');
-                $yes = $lao ? 'ແມ່ນ' : 'Yes';
-                $no = $lao ? 'ບໍ່' : 'No';
-                $row = [$record->internal_number, $record->subject, $record->sender_organization, $record->received_date->format('d/m/Y'),
-                    $lao ? ($channels[$record->channel] ?? '') : str_replace('_', ' ', $record->channel ?? ''),
-                    $lao ? $statuses[$status] : ucfirst(str_replace('_', ' ', $status)), $state?->due_date?->format('d/m/Y'), $state?->response_required ? $yes : $no, $state?->response_completed_at ? $yes : $no];
-                fputcsv($stream, array_map(fn (mixed $value): string => preg_match('/^[\s]*[=+@\-]/u', (string) $value) ? "'".$value : (string) $value, $row), escape: '');
-            }
-            fclose($stream);
-        }, 'incoming-correspondence.csv', ['Content-Type' => 'text/csv; charset=UTF-8', 'Cache-Control' => 'no-store']);
-    }
-
     /** @return Builder<IncomingCorrespondence> */
     private function filtered(IncomingCorrespondenceRequest $request, ManageIncomingCorrespondence $incoming): Builder
     {
@@ -114,6 +89,23 @@ class IncomingCorrespondenceController extends Controller
         }
 
         return $query;
+    }
+
+    public function export(IncomingCorrespondenceRequest $request, ManageIncomingCorrespondence $manager, CorrespondenceReport $report): Response
+    {
+        $records = $this->filtered($request, $manager)->lazy()->filter(fn (IncomingCorrespondence $record): bool => $manager->canRead($request->user(), $record));
+
+        return $report->register($request, 'incoming', $records);
+    }
+
+    public function detailPdf(IncomingCorrespondenceRequest $request, string $record, ManageIncomingCorrespondence $manager, ManageIncomingOperations $operations, CorrespondenceReport $report): Response
+    {
+        $model = $manager->find($request->user(), $request->documentScope(), $record);
+        $model->loadMissing(['type.category', 'operation']);
+        $details = $operations->details($request->user(), $model);
+        $audits = IncomingCorrespondenceAudit::query()->where('correspondence_id', $model->id)->orderBy('id')->get();
+
+        return $report->detail($request, 'incoming', (new IncomingCorrespondenceResource($model))->resolve($request), $details, $audits);
     }
 
     public function store(IncomingCorrespondenceRequest $request, ManageIncomingCorrespondence $incoming): IncomingCorrespondenceResource

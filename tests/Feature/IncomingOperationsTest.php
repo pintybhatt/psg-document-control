@@ -21,6 +21,7 @@ use App\Models\UserRoleAssignment;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use PhpOffice\PhpSpreadsheet\IOFactory;
 use PHPUnit\Framework\Attributes\TestWith;
 use Tests\Concerns\InteractsWithRbac;
 use Tests\TestCase;
@@ -214,7 +215,7 @@ class IncomingOperationsTest extends TestCase
         $this->assertDatabaseHas('incoming_operation_audits', ['action' => 'unlinked', 'actor_id' => $actor->id]);
     }
 
-    public function test_register_filters_and_csv_export_enforce_confidentiality_and_escape_spreadsheet_formulas(): void
+    public function test_register_filters_and_xlsx_export_enforce_confidentiality_and_preserve_safe_text(): void
     {
         [, $scope, $record] = $this->fixture();
         $other = $this->anotherRecord($record);
@@ -222,11 +223,21 @@ class IncomingOperationsTest extends TestCase
         $this->postJson($this->url($scope, $record), ['action' => 'update', 'revision' => 0, 'status' => 'in_progress', 'due_date' => today()->subDay()->toDateString(), 'response_required' => true])->assertOk();
         $query = http_build_query(['company_id' => $scope->company_id, 'site_id' => $scope->site_id, 'search' => 'Synthetic', 'filter_status' => 'in_progress', 'filter_channel' => 'courier', 'filter_due' => 'overdue', 'filter_response' => 'pending']);
         $this->getJson('/api/v1/incoming-correspondence?'.$query)->assertOk()->assertJsonPath('meta.total', 1)->assertJsonPath('data.0.id', $record->id);
-        $csv = $this->get('/api/v1/incoming-correspondence/export?'.$query)->assertOk()->streamedContent();
-        $this->assertStringContainsString("'=Synthetic subject", $csv);
-        $this->assertStringNotContainsString('Related example', $csv);
-        $this->assertStringContainsString('26/10/2026', $csv);
-        $this->assertStringContainsString('25/10/2026', $csv);
+        $bytes = $this->get('/api/v1/incoming-correspondence/export?'.$query)->assertOk()->getContent();
+        $path = tempnam(sys_get_temp_dir(), 'dcms-filtered-export-');
+        try {
+            file_put_contents($path, $bytes);
+            $book = IOFactory::load($path);
+            $sheet = $book->getActiveSheet();
+            $this->assertSame(8, $sheet->getHighestDataRow());
+            $this->assertSame('=Synthetic subject', $sheet->getCell('B8')->getValue());
+            $this->assertSame('s', $sheet->getCell('B8')->getDataType());
+            $this->assertSame('26/10/2026', $sheet->getCell('D8')->getFormattedValue());
+            $this->assertSame('25/10/2026', $sheet->getCell('G8')->getFormattedValue());
+            $book->disconnectWorksheets();
+        } finally {
+            unlink($path);
+        }
         $this->getJson('/api/v1/incoming-correspondence?company_id='.$scope->company_id.'&site_id='.$scope->site_id.'&filter_status=received')->assertOk()->assertJsonPath('meta.total', 0);
     }
 

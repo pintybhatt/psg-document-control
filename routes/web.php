@@ -54,6 +54,8 @@ Route::middleware(['auth:web', EnsureActiveUserSession::class])->group(function 
         Route::get('outgoing-correspondence/{record}/operation-options', [OutgoingOperationController::class, 'options'])->name('outgoing.operation-options');
         Route::post('outgoing-correspondence/{record}/operations', [OutgoingOperationController::class, 'operate'])->name('outgoing.operations');
         Route::get('outgoing-correspondence/contexts', [OutgoingCorrespondenceController::class, 'contexts'])->name('outgoing.contexts');
+        Route::get('outgoing-correspondence/export', [OutgoingCorrespondenceController::class, 'export'])->name('outgoing.export');
+        Route::get('outgoing-correspondence/{record}/pdf', [OutgoingCorrespondenceController::class, 'detailPdf'])->name('outgoing.detail-pdf');
         Route::get('outgoing-correspondence/lookups', [OutgoingCorrespondenceController::class, 'lookups'])->name('outgoing.lookups');
         Route::get('outgoing-correspondence', [OutgoingCorrespondenceController::class, 'index'])->name('outgoing.index');
         Route::post('outgoing-correspondence', [OutgoingCorrespondenceController::class, 'store'])->name('outgoing.store');
@@ -62,6 +64,7 @@ Route::middleware(['auth:web', EnsureActiveUserSession::class])->group(function 
         Route::post('outgoing-correspondence/{record}/register', [OutgoingCorrespondenceController::class, 'register'])->name('outgoing.register');
         Route::get('incoming-correspondence/contexts', [IncomingCorrespondenceController::class, 'contexts'])->name('incoming.contexts');
         Route::get('incoming-correspondence/lookups', [IncomingCorrespondenceController::class, 'lookups'])->name('incoming.lookups');
+        Route::get('incoming-correspondence/{record}/pdf', [IncomingCorrespondenceController::class, 'detailPdf'])->name('incoming.detail-pdf');
         Route::get('incoming-correspondence/export', [IncomingCorrespondenceController::class, 'export'])->name('incoming.export');
         Route::get('incoming-correspondence', [IncomingCorrespondenceController::class, 'index'])->name('incoming.index');
         Route::post('incoming-correspondence', [IncomingCorrespondenceController::class, 'store'])->name('incoming.store');

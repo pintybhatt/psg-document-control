@@ -1,5 +1,5 @@
 export function createJsonClient(csrfToken) {
-    return async (url, { method = 'GET', body, signal } = {}) => {
+    return async (url, { method = 'GET', body, signal, responseType = 'json' } = {}) => {
         const response = await fetch(url, {
             method, signal, credentials: 'same-origin', cache: 'no-store',
             headers: { Accept: 'application/json', 'Content-Type': 'application/json', 'X-CSRF-TOKEN': csrfToken },
@@ -7,6 +7,9 @@ export function createJsonClient(csrfToken) {
         });
         if (response.status === 204) {
             return null;
+        }
+        if (response.ok && responseType === 'blob') {
+            return { blob: await response.blob(), pages: Number(response.headers.get('X-PDF-Pages')) };
         }
         const data = await response.json();
         if (!response.ok) {
