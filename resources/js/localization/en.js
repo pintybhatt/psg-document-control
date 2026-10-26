@@ -1,4 +1,6 @@
 export default {
+    storageControlledDraftHelp: "Save the draft first, then open “Files and physical custody” in its details, select the draft revision and upload attachments.",
+    storageDraftHelp: "Save the draft first, then open “Files and physical custody” in its details to upload attachments.",
     storageSave: 'Save',
     "storageTitle": "Files and physical custody",
     "storageAttachments": "Electronic attachments",

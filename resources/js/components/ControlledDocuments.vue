@@ -146,6 +146,7 @@ onBeforeUnmount(() => controller?.abort());
         <form v-if="editing" id="controlled-draft-form" ref="editor" class="flex flex-col gap-5 rounded-2xl border border-slate-200 bg-white p-5" @submit.prevent="save">
             <h2 tabindex="-1" class="text-lg font-semibold">{{ t(detail ? 'controlledEdit' : 'controlledCreate') }}</h2>
             <p class="text-sm text-slate-600">{{ t('controlledDraftHelp') }}</p>
+            <p v-if="scope.permissions.includes('documents.attachments.manage')" class="text-sm text-slate-600">{{ t('storageControlledDraftHelp') }}</p>
             <fieldset :disabled="saving" class="grid gap-4 md:grid-cols-2"><legend class="mb-3 font-semibold">{{ t('documentInformation') }}</legend>
                 <template v-if="!detail?.registered_at"><TextInput id="controlled-document_code" v-model="form.document_code" :label="t('controlled-document_code')" :error-key="fields.document_code?.[0]" maxlength="100" required /><SelectInput id="controlled-type" v-model="form.type_id" :label="t('controlledType')" :options="typeOptions" :error-key="fields.type_id?.[0]" required /></template>
                 <SelectInput v-if="!detail" id="controlled-classification" v-model="form.classification" :label="t('outgoingClassification')" :options="classificationOptions" :error-key="fields.classification?.[0]" required />

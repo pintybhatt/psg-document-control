@@ -153,6 +153,7 @@ onBeforeUnmount(() => controller?.abort());
         <form id="outgoing-draft-form" v-if="editing" ref="editorElement" class="flex flex-col gap-5 rounded-2xl border border-slate-200 bg-white p-5" @submit.prevent="save">
             <h2 tabindex="-1" class="text-lg font-semibold">{{ t(detail ? 'outgoingEdit' : 'outgoingCreate') }}</h2>
             <p class="text-sm text-slate-600">{{ t('outgoingDraftRules') }}</p>
+            <p v-if="scope.permissions.includes('documents.attachments.manage')" class="text-sm text-slate-600">{{ t('storageDraftHelp') }}</p>
             <fieldset :disabled="saving" class="grid gap-4 md:grid-cols-2"><legend class="mb-3 font-semibold">{{ t('documentInformation') }}</legend>
                 <SelectInput id="outgoing-type" v-model="form.type_id" :label="t('outgoingType')" :options="typeOptions" :error-key="fields.type_id?.[0]" required />
                 <SelectInput v-if="!detail" id="outgoing-classification" v-model="form.classification" :label="t('outgoingClassification')" :options="classificationOptions" :helper="t(`confidentiality-${form.classification}-description`)" :error-key="fields.classification?.[0]" required />

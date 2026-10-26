@@ -8,6 +8,8 @@ import CheckboxInput from '../../resources/js/components/ui/CheckboxInput.vue';
 import FormField from '../../resources/js/components/ui/FormField.vue';
 import StatusBadge from '../../resources/js/components/ui/StatusBadge.vue';
 import LanguageSwitcher from '../../resources/js/components/LanguageSwitcher.vue';
+import en from '../../resources/js/localization/en.js';
+import lo from '../../resources/js/localization/lo.js';
 import { createLocalization } from '../../resources/js/localization/index.js';
 
 enableAutoUnmount(afterEach);
@@ -129,19 +131,27 @@ describe('status badges', () => {
     });
 });
 
-it('uses explicit accessible dd/mm/yyyy date input and emits only an unambiguous ISO date for valid entry', async () => {
+it.each(['en', 'lo'])('keeps date labels, placeholders and validation without redundant format help in %s', async language => {
+    localStorage.setItem('dcms.language', language);
     const wrapper = render(TextInput, { props: { label: 'Date', type: 'date', modelValue: '2026-04-03' } });
     const input = wrapper.get('input');
     expect(input.element.value).toBe('03/04/2026');
     expect(input.attributes('type')).toBe('text');
-    expect(input.attributes('aria-describedby')).toBeTruthy();
+    expect(wrapper.get('label').text()).toContain('Date');
+    expect(input.attributes('placeholder')).toBe('dd/mm/yyyy');
+    expect(input.attributes('aria-describedby')).toBeUndefined();
+    expect(wrapper.text()).not.toContain((language === 'lo' ? lo : en).dateFormatHelp);
     await input.setValue('12/11/2026');
     expect(wrapper.emitted('update:modelValue').at(-1)).toEqual(['2026-11-12']);
     await input.setValue('31/04/2026'); await input.trigger('blur');
     expect(input.element.checkValidity()).toBe(false);
     expect(input.attributes('aria-invalid')).toBe('true');
-    expect(wrapper.get('[role="alert"]').text()).toContain('dd/mm/yyyy');
+    expect(wrapper.get('[role="alert"]').text()).toBe((language === 'lo' ? lo : en).dateInvalid);
+    expect(input.attributes('aria-describedby')).toContain('-error');
     await input.setValue('30/04/2026');
     expect(input.element.checkValidity()).toBe(true);
     expect(wrapper.emitted('update:modelValue').at(-1)).toEqual(['2026-04-30']);
+    await wrapper.setProps({ helper: 'Use the recipient’s actual delivery date.' });
+    expect(wrapper.text()).toContain('Use the recipient’s actual delivery date.');
+    expect(input.attributes('aria-describedby')).toContain('-help');
 });

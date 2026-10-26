@@ -23,8 +23,8 @@ function updateDate(event) {
 </script>
 
 <template>
-    <FormField :id="id" :label="label" :helper="type === 'date' ? (helper || t('dateFormatHelp')) : helper" :error="error" :error-key="errorKey || (invalidDate ? 'dateInvalid' : '')" :required="required" v-slot="{ controlAttrs }">
-        <input v-if="type === 'date'" :value="displayedDate" v-bind="{ ...$attrs, ...controlAttrs }" type="text" inputmode="numeric" placeholder="dd/mm/yyyy" pattern="[0-9]{2}/[0-9]{2}/[0-9]{4}" :title="t('dateFormatHelp')" class="ui-control tabular-nums" @input="updateDate" @blur="invalidDate = !!displayedDate && !parseDisplayDate(displayedDate)" />
+    <FormField :id="id" :label="label" :helper="helper" :error="error" :error-key="errorKey || (invalidDate ? 'dateInvalid' : '')" :required="required" v-slot="{ controlAttrs }">
+        <input v-if="type === 'date'" :value="displayedDate" v-bind="{ ...$attrs, ...controlAttrs }" type="text" inputmode="numeric" placeholder="dd/mm/yyyy" pattern="[0-9]{2}/[0-9]{2}/[0-9]{4}" class="ui-control tabular-nums" @input="updateDate" @blur="invalidDate = !!displayedDate && !parseDisplayDate(displayedDate)" />
         <input v-else v-model="model" v-bind="{ ...$attrs, ...controlAttrs }" :type="type" class="ui-control" />
     </FormField>
 </template>
