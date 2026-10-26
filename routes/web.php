@@ -118,6 +118,8 @@ Route::middleware(['auth:web', EnsureActiveUserSession::class])->group(function 
 
 Route::prefix('api/v1/document-storage/{type}/{record}')->whereIn('type', ['incoming', 'outgoing', 'controlled'])
     ->middleware([AuditDocumentStorageRequests::class, 'auth:web', EnsureActiveUserSession::class])->name('api.v1.storage.')->group(function (): void {
+        Route::get('versions/{version}/preview', [DocumentStorageController::class, 'preview'])->whereUuid('version')->name('attachments.preview');
+        Route::get('versions/{version}/download', [DocumentStorageController::class, 'download'])->whereUuid('version')->name('attachments.download');
         Route::get('attachments', [DocumentStorageController::class, 'index'])->name('attachments.index');
         Route::post('attachments', [DocumentStorageController::class, 'store'])->name('attachments.store');
     });
