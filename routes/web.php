@@ -14,6 +14,7 @@ use App\Http\Controllers\IncomingOperationController;
 use App\Http\Controllers\ManagementReportController;
 use App\Http\Controllers\MembershipController;
 use App\Http\Controllers\NumberingController;
+use App\Http\Controllers\OrganizationController;
 use App\Http\Controllers\OutgoingCorrespondenceController;
 use App\Http\Controllers\OutgoingOperationController;
 use App\Http\Controllers\PhysicalCustodyController;
@@ -112,6 +113,9 @@ Route::middleware(['auth:web', EnsureActiveUserSession::class])->group(function 
         Route::post('memberships', [MembershipController::class, 'store'])->name('memberships.store');
         Route::patch('memberships/{membership}', [MembershipController::class, 'update'])->name('memberships.update');
         Route::delete('memberships/{membership}', [MembershipController::class, 'destroy'])->name('memberships.destroy');
+        Route::get('organization/{kind}', [OrganizationController::class, 'index'])->whereIn('kind', ['companies', 'sites', 'departments'])->name('organization.index');
+        Route::post('organization/{kind}', [OrganizationController::class, 'store'])->whereIn('kind', ['companies', 'sites', 'departments'])->name('organization.store');
+        Route::patch('organization/{kind}/{record}', [OrganizationController::class, 'update'])->whereIn('kind', ['companies', 'sites', 'departments'])->name('organization.update');
         Route::get('administration/history', AdministrationHistoryController::class)->name('administration.history');
         Route::get('authorization/contexts', [AuthorizationContextController::class, 'index'])->name('authorization.contexts');
         Route::get('role-assignment-users', [AuthorizationContextController::class, 'users'])->name('assignment-users');

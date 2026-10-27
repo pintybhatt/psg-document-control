@@ -9,14 +9,16 @@ use Illuminate\Support\Facades\DB;
 
 class AdministrationHistory
 {
-    public const SOURCES = ['master-data' => 'master-data.view', 'numbering' => 'numbering.view', 'roles' => 'roles.view', 'assignments' => 'assignments.view', 'memberships' => 'memberships.view'];
+    public const SOURCES = ['master-data' => 'master-data.view', 'numbering' => 'numbering.view', 'roles' => 'roles.view', 'assignments' => 'assignments.view', 'memberships' => 'memberships.view', 'organization' => 'security.audit.view'];
 
     public function __construct(private AccessControl $access) {}
 
     /** @return list<string> */
     public function sources(User $actor, AuthorizationScope $scope): array
     {
-        return array_keys(array_filter(self::SOURCES, fn (string $permission, string $source): bool => ($scope->scope_type !== 'global' || in_array($source, ['roles', 'assignments'], true)) && $this->access->allows($actor, $permission, $scope), ARRAY_FILTER_USE_BOTH));
+        return array_keys(array_filter(self::SOURCES, fn (string $permission, string $source): bool => $source === 'organization'
+            ? $scope->scope_type === 'global' && $this->access->isSystemAdministrator($actor)
+            : ($scope->scope_type !== 'global' || in_array($source, ['roles', 'assignments'], true)) && $this->access->allows($actor, $permission, $scope), ARRAY_FILTER_USE_BOTH));
     }
 
     public function query(User $actor, AuthorizationScope $scope, string $source): Builder
@@ -27,6 +29,8 @@ class AdministrationHistory
 
         $query = match ($source) {
             'master-data' => DB::table('master_data_audits as e')->where('e.scope_id', $scope->id)
+                ->select(['e.id', 'e.created_at', 'e.actor_id', 'e.subject_type', 'e.subject_id', 'e.action', 'e.before', 'e.after']),
+            'organization' => DB::table('rbac_audits as e')->where('e.scope_id', $scope->id)->whereIn('e.subject_type', ['company', 'site', 'department'])
                 ->select(['e.id', 'e.created_at', 'e.actor_id', 'e.subject_type', 'e.subject_id', 'e.action', 'e.before', 'e.after']),
             'roles', 'assignments' => DB::table('rbac_audits as e')->where('e.scope_id', $scope->id)->where('e.subject_type', $source === 'roles' ? 'role' : 'assignment')
                 ->select(['e.id', 'e.created_at', 'e.actor_id', 'e.subject_type', 'e.subject_id', 'e.action', 'e.before', 'e.after']),

@@ -35,6 +35,7 @@
             'outgoing' => ['incoming' => route('api.v1.incoming.index', [], false), 'endpoint' => route('api.v1.outgoing.index', [], false), 'contexts' => route('api.v1.outgoing.contexts', [], false)],
             'incoming' => ['endpoint' => route('api.v1.incoming.index', [], false), 'contexts' => route('api.v1.incoming.contexts', [], false)],
             'administration' => [
+                'organization' => route('api.v1.organization.index', ['kind' => 'companies'], false),
                 'history' => route('api.v1.administration.history', [], false),
                 'numbering' => route('api.v1.numbering.index', [], false),
                 'contexts' => route('api.v1.authorization.contexts', [], false),

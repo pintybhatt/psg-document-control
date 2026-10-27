@@ -6,12 +6,12 @@ import { useLocalization } from '../localization/index.js';
 import { createJsonClient } from '../utilities/jsonClient.js';
 import { formatDateTime } from '../utilities/dates.js';
 
-const props = defineProps({ scope: { type: Object, required: true }, endpoint: { type: String, required: true }, csrfToken: { type: String, required: true } });
+const props = defineProps({ scope: { type: Object, required: true }, endpoint: { type: String, required: true }, csrfToken: { type: String, required: true }, canManageOrganization: { type: Boolean, default: false } });
 const emit = defineEmits(['unauthorized']);
 const { t } = useLocalization();
 const request = createJsonClient(props.csrfToken);
-const permissions = { 'master-data': 'master-data.view', numbering: 'numbering.view', roles: 'roles.view', assignments: 'assignments.view', memberships: 'memberships.view' };
-const sources = computed(() => Object.keys(permissions).filter(key => (props.scope.scope_type !== 'global' || ['roles', 'assignments'].includes(key)) && props.scope.permissions.includes(permissions[key])));
+const permissions = { 'master-data': 'master-data.view', numbering: 'numbering.view', roles: 'roles.view', assignments: 'assignments.view', memberships: 'memberships.view', organization: 'security.audit.view' };
+const sources = computed(() => Object.keys(permissions).filter(key => (props.scope.scope_type !== 'global' || ['roles', 'assignments', 'organization'].includes(key)) && (key !== 'organization' || (props.scope.scope_type === 'global' && props.canManageOrganization)) && props.scope.permissions.includes(permissions[key])));
 const options = computed(() => sources.value.map(value => ({ value, label: t(`adminSource-${value}`) })));
 const source = ref('');
 const rows = ref([]);

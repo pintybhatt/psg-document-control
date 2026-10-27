@@ -18,7 +18,7 @@ class AuthorizationContextController extends Controller
                 'company' => $scope->company?->only(['name_en', 'name_lo']), 'site' => $scope->site?->only(['name_en', 'name_lo']),
                 'permissions' => $access->permissions($request->user(), $scope),
             ];
-        })]);
+        })] + ($access->isSystemAdministrator($request->user()) ? ['can_manage_organization' => true] : []));
     }
 
     public function users(RbacScopeRequest $request, AccessControl $access): JsonResponse

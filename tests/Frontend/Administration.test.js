@@ -7,7 +7,7 @@ import LanguageSwitcher from '../../resources/js/components/LanguageSwitcher.vue
 import App from '../../resources/js/App.vue';
 import { createLocalization } from '../../resources/js/localization/index.js';
 
-const endpoints = { contexts: '/api/v1/authorization/contexts', roles: '/api/v1/roles', permissions: '/api/v1/permissions', users: '/api/v1/role-assignment-users', assignments: '/api/v1/role-assignments' };
+const endpoints = { organization: '/api/v1/organization/companies', contexts: '/api/v1/authorization/contexts', roles: '/api/v1/roles', permissions: '/api/v1/permissions', users: '/api/v1/role-assignment-users', assignments: '/api/v1/role-assignments' };
 const allKeys = ['users.view', 'roles.view', 'roles.manage', 'assignments.view', 'assignments.manage'];
 const globalScope = { scope_key: 'global', scope_type: 'global', company_id: null, site_id: null, company: null, site: null, permissions: allKeys };
 const permissionRows = [
@@ -37,14 +37,15 @@ afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals(); });
 
 function response(data, status = 200) { return { ok: status < 400, status, json: async () => structuredClone(data) }; }
 
-function server({ contexts = [globalScope], roles = [sampleRole], assignments = [], mutationError = null } = {}) {
+function server({ contexts = [globalScope], roles = [sampleRole], assignments = [], mutationError = null, canManageOrganization = false } = {}) {
     const roleState = structuredClone(roles);
     const assignmentState = structuredClone(assignments);
     const fetch = vi.fn(async (url, options = {}) => {
         const path = new URL(url, 'http://localhost').pathname;
         const method = options.method ?? 'GET';
         if (method !== 'GET' && mutationError) { return response(mutationError.body, mutationError.status); }
-        if (path === endpoints.contexts) { return response({ data: contexts }); }
+        if (path === endpoints.contexts) { return response({ data: contexts, can_manage_organization: canManageOrganization }); }
+        if (path === endpoints.organization) { return response({ data: [], meta: { total: 0 } }); }
         if (path === endpoints.permissions) { return response({ data: permissionRows }); }
         if (path === endpoints.users) { return response({ data: [sampleAssignment.user], total: 1 }); }
         if (path === endpoints.roles && method === 'GET') { return response({ data: roleState, meta: { total: roleState.length } }); }
@@ -382,6 +383,22 @@ describe('scoped role administration', () => {
         workspace.selected.value = { company_id: 999, site_id: 999 };
         await flushPromises();
         expect(control(wrapper, 'Authorization scope').element.value).toBe('site:10');
+    });
+
+    it('shows structural navigation only for confirmed System Administrator authority in global scope', async () => {
+        server();
+        const denied = await render();
+        expect(denied.text()).not.toContain('Organization structure');
+        denied.unmount();
+        const companyScope = { ...globalScope, scope_key: 'company:7', scope_type: 'company', company_id: 7, company: { name_en: 'Example Company', name_lo: 'ຕົວຢ່າງ' } };
+        server({ contexts: [globalScope, companyScope], canManageOrganization: true });
+        const wrapper = await render();
+        await button(wrapper, 'Organization structure').trigger('click');
+        await flushPromises();
+        expect(wrapper.text()).toContain('Global System Administrators maintain structure here.');
+        await control(wrapper, 'Authorization scope').setValue('company:7');
+        await flushPromises();
+        expect(wrapper.text()).not.toContain('Organization structure');
     });
 
 });

@@ -109,7 +109,7 @@ class AdministrationHistoryTest extends TestCase
         $global = AuthorizationScope::context('global');
         RbacAudit::query()->create(['actor_id' => $actor->id, 'source' => 'web', 'scope_id' => $global->id, 'subject_type' => 'role', 'subject_id' => 1, 'action' => 'role.saved', 'after' => ['active' => true]]);
         RbacAudit::query()->create(['actor_id' => $actor->id, 'source' => 'web', 'scope_id' => $global->id, 'subject_type' => 'assignment', 'subject_id' => 1, 'action' => 'assignment.granted', 'after' => ['active' => true]]);
-        $this->getJson($this->url($global, 'roles'))->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.subject_type', 'role')->assertJsonPath('sources', ['roles', 'assignments']);
+        $this->getJson($this->url($global, 'roles'))->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.subject_type', 'role')->assertJsonPath('sources', ['roles', 'assignments', 'organization']);
         $this->getJson($this->url($global, 'assignments'))->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.subject_type', 'assignment');
     }
 

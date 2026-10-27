@@ -10,6 +10,7 @@ import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
 import ToastNotifications from '../components/ui/ToastNotifications.vue';
 import MembershipManagement from '../components/MembershipManagement.vue';
 import DocumentMasterDataManagement from '../components/DocumentMasterDataManagement.vue';
+import OrganizationManagement from '../components/OrganizationManagement.vue';
 import AdministrationHistory from '../components/AdministrationHistory.vue';
 import { useWorkspace } from '../utilities/workspace.js';
 import NumberingManagement from '../components/NumberingManagement.vue';
@@ -23,11 +24,13 @@ const request = createJsonClient(props.csrfToken);
 const { items, notify, dismiss } = useNotifications();
 const workspace = useWorkspace();
 const contexts = ref([]);
+const canManageOrganization = ref(false);
 const selectedKey = ref('');
 const section = ref('people');
 const selected = computed(() => contexts.value.find(scope => scope.scope_key === selectedKey.value));
 const can = permission => selected.value?.permissions.includes(permission) ?? false;
 const sections = computed(() => [
+    { key: 'organization', label: 'orgTitle', available: !!props.endpoints.organization && canManageOrganization.value && selected.value?.scope_type === 'global' },
     { key: 'people', label: 'adminPeople', available: can('memberships.view') },
     { key: 'documents', label: 'adminDocuments', available: selected.value?.scope_type !== 'global' && can('master-data.view') },
     { key: 'numbering', label: 'adminNumbering', available: selected.value?.scope_type !== 'global' && can('numbering.view') },
@@ -106,6 +109,7 @@ function handleError(error) {
     const known = Object.values(fields.value).flat().find(message => typeof message === 'string' && message.startsWith('rbac'));
     errorKey.value = known ?? (error.message.startsWith('rbac') ? error.message : 'rbacRequestFailed');
     if ([401, 403, 419].includes(error.status)) {
+        canManageOrganization.value = false;
         scopeController?.abort();
         loading.value = false; searchLoading.value = false;
         roles.value = []; assignments.value = []; users.value = []; permissions.value = []; roleOptions.value = [];
@@ -153,6 +157,7 @@ async function loadContexts() {
         const response = await request(props.endpoints.contexts);
         if (disposed) { return; }
         contexts.value = response.data;
+        canManageOrganization.value = response.can_manage_organization === true;
         selectWorkspaceScope();
         if (!selectedKey.value) { selectedKey.value = contexts.value[0]?.scope_key ?? ''; }
         if (!selectedKey.value) { loading.value = false; }
@@ -250,9 +255,20 @@ async function changeAssignmentPage() {
     finally { if (!signal?.aborted) { loading.value = false; } }
 }
 
+async function organizationSaved() {
+    notify({ type: 'success', messageKey: 'orgSaved' });
+    try {
+        const response = await request(props.endpoints.contexts);
+        if (disposed) { return; }
+        contexts.value = response.data;
+        canManageOrganization.value = response.can_manage_organization === true;
+        await workspace?.refresh();
+    } catch (error) { handleError(error); }
+}
+
 function selectWorkspaceScope() {
     const unit = workspace?.selected.value;
-    if (!unit || saving.value || confirmationOpen.value || editorOpen.value) { return; }
+    if (section.value === 'organization' || !unit || saving.value || confirmationOpen.value || editorOpen.value) { return; }
     const match = contexts.value.find(scope => scope.scope_type === 'site' && scope.company_id === unit.company_id && scope.site_id === unit.site_id);
     if (match) { selectedKey.value = match.scope_key; }
 }
@@ -273,7 +289,8 @@ onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
             <div class="rounded-xl border border-slate-200 bg-white p-5"><SelectInput v-model="selectedKey" :label="t('rbacScope')" :options="scopeOptions" :disabled="saving || confirmationOpen" /><p class="mt-3 text-xs leading-6 text-slate-500">{{ t(selected?.scope_type === 'global' ? 'rbacGlobalWarning' : 'rbacScopeNotice') }}</p></div>
 
             <nav :aria-label="t('administration')" class="flex flex-wrap gap-2 border-b border-slate-200 pb-3"><UiButton v-for="item in sections" :key="item.key" :variant="section === item.key ? 'primary' : 'secondary'" :aria-pressed="section === item.key" @click="section = item.key">{{ t(item.label) }}</UiButton></nav>
-            <AdministrationHistory v-if="section === 'history' && selected && can('security.audit.view')" :scope="selected" :endpoint="endpoints.history" :csrf-token="csrfToken" @unauthorized="handleError" />
+            <OrganizationManagement v-if="section === 'organization' && canManageOrganization && selected?.scope_type === 'global'" :endpoint="endpoints.organization" :csrf-token="csrfToken" @saved="organizationSaved" @unauthorized="handleError" />
+            <AdministrationHistory v-if="section === 'history' && selected && can('security.audit.view')" :scope="selected" :endpoint="endpoints.history" :can-manage-organization="canManageOrganization" :csrf-token="csrfToken" @unauthorized="handleError" />
             <MembershipManagement v-show="section === 'people'" v-if="selected && can('memberships.view')" :scope="selected" :endpoints="endpoints" :csrf-token="csrfToken" @unauthorized="handleError" />
             <DocumentMasterDataManagement v-show="section === 'documents'" v-if="selected && selected.scope_type !== 'global' && can('master-data.view')" :scope="selected" :endpoints="endpoints.masterData" :csrf-token="csrfToken" @unauthorized="handleError" />
             <NumberingManagement v-show="section === 'numbering'" v-if="selected && selected.scope_type !== 'global' && can('numbering.view')" :scope="selected" :endpoint="endpoints.numbering" :csrf-token="csrfToken" @unauthorized="handleError" />
