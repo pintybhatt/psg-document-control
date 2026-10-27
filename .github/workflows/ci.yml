@@ -65,9 +65,20 @@ jobs:
           DCMS_MYSQL_TESTING=1 php tests/mysql-artisan.php migrate --no-interaction
           DCMS_MYSQL_TESTING=1 vendor/bin/phpunit --configuration phpunit.mysql.xml
       - name: Release image build and disposable smoke
+        id: docker_smoke
         run: |
           docker build --build-arg SOURCE_COMMIT="$(git rev-parse HEAD)" -t dcms-ci:validation .
           DCMS_DISPOSABLE_SMOKE=1 DCMS_SMOKE_CLEANUP=1 sh docker/smoke.sh "$(docker image inspect --format '{{.Id}}' dcms-ci:validation)"
+      - name: Preserve redacted smoke failure evidence
+        if: failure() && steps.docker_smoke.outcome == 'failure'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: smoke-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            /tmp/dcms-smoke-*/summary.json
+            /tmp/dcms-smoke-*/runtime.log
+          if-no-files-found: warn
+          retention-days: 3
       - name: Dispose runner-only MySQL resources
         if: always()
         run: docker compose -f compose.mysql-testing.yaml down --volumes
