@@ -29,6 +29,7 @@
                 'email' => old('email', ''),
                 'errors' => collect($errors->messages())->map(fn (array $messages): string => $messages[0]),
             ],
+            'reports' => ['endpoint' => route('api.v1.reports.index', [], false)],
             'search' => ['endpoint' => route('api.v1.document-search', [], false)],
             'controlled' => ['endpoint' => route('api.v1.controlled.index', [], false), 'contexts' => route('api.v1.controlled.contexts', [], false)],
             'outgoing' => ['incoming' => route('api.v1.incoming.index', [], false), 'endpoint' => route('api.v1.outgoing.index', [], false), 'contexts' => route('api.v1.outgoing.contexts', [], false)],

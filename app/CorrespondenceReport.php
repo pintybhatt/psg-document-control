@@ -90,6 +90,16 @@ class CorrespondenceReport
         return $value instanceof DateTimeInterface ? $value->format('d/m/Y') : ($value === null || $value === '' ? '—' : (string) $value);
     }
 
+    /** Shared XLSX/PDF renderer for already-authorized tabular reports.
+     * @param  array<string, mixed>  $data
+     */
+    public function exportTable(array $data, string $format, string $filename): Response
+    {
+        $pdf = $format === 'pdf' ? $this->pdf($data) : null;
+
+        return $this->download($pdf['content'] ?? $this->xlsx($data), $filename.'.'.$format, $format, $pdf['pages'] ?? null);
+    }
+
     /** @param iterable<IncomingCorrespondence|OutgoingCorrespondence> $records */
     public function register(Request $request, string $kind, iterable $records): Response
     {
@@ -251,7 +261,7 @@ class CorrespondenceReport
             $book->getProperties()->setCreator('XPPL DCMS')->setTitle($data['title']);
             $book->getDefaultStyle()->getFont()->setName('Noto Sans Lao')->setSize(11);
             $sheet = $book->getActiveSheet();
-            $sheet->setTitle('Correspondence');
+            $sheet->setTitle($data['sheet'] ?? 'Correspondence');
             $lastColumn = Coordinate::stringFromColumnIndex(count($data['columns']));
             $metadata = [$data['title'], $data['workspace'], $this->label('generated', $data['language']).': '.$data['generated'], $this->label('filters', $data['language']).': '.$data['filters'], $this->label('total', $data['language']).': '.count($data['rows'])];
             foreach ($metadata as $index => $value) {

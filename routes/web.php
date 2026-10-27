@@ -10,6 +10,7 @@ use App\Http\Controllers\DocumentSearchController;
 use App\Http\Controllers\DocumentStorageController;
 use App\Http\Controllers\IncomingCorrespondenceController;
 use App\Http\Controllers\IncomingOperationController;
+use App\Http\Controllers\ManagementReportController;
 use App\Http\Controllers\MembershipController;
 use App\Http\Controllers\NumberingController;
 use App\Http\Controllers\OutgoingCorrespondenceController;
@@ -57,6 +58,9 @@ Route::middleware(['auth:web', EnsureActiveUserSession::class])->group(function 
     Route::prefix('api/v1')->name('api.v1.')->group(function (): void {
         Route::get('document-search/lookups', [DocumentSearchController::class, 'lookups'])->name('document-search.lookups');
         Route::get('document-search', [DocumentSearchController::class, 'index'])->name('document-search');
+        Route::get('reports/lookups', [ManagementReportController::class, 'lookups'])->name('reports.lookups');
+        Route::get('reports/export', [ManagementReportController::class, 'export'])->name('reports.export');
+        Route::get('reports', [ManagementReportController::class, 'index'])->name('reports.index');
         Route::get('dashboard', DashboardController::class)->name('dashboard');
         Route::get('controlled-documents/contexts', [ControlledDocumentController::class, 'contexts'])->name('controlled.contexts');
         Route::get('controlled-documents/lookups', [ControlledDocumentController::class, 'lookups'])->name('controlled.lookups');

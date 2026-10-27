@@ -22,6 +22,9 @@ class PermissionCatalog
     public static function definitions(): array
     {
         return [
+            'reports.view' => ['area' => 'reports', 'name_en' => 'View and export operational reports', 'name_lo' => 'ເບິ່ງ ແລະ ສົ່ງອອກລາຍງານການດຳເນີນງານ', 'available' => true],
+            'documents.audit.view' => ['area' => 'reports', 'name_en' => 'View document operational audit reports', 'name_lo' => 'ເບິ່ງລາຍງານປະຫວັດການດຳເນີນງານເອກະສານ', 'available' => true],
+            'security.audit.view' => ['area' => 'document-security', 'name_en' => 'View protected security-event reports', 'name_lo' => 'ເບິ່ງລາຍງານເຫດການຄວາມປອດໄພ', 'available' => true],
             'documents.attachments.manage' => ['area' => 'documents', 'name_en' => 'Upload and replace document attachments', 'name_lo' => 'ອັບໂຫຼດ ແລະ ທົດແທນໄຟລ໌ແນບ', 'available' => true],
             'documents.custody.manage' => ['area' => 'documents', 'name_en' => 'Manage physical document custody', 'name_lo' => 'ຈັດການການຄອບຄອງເອກະສານ', 'available' => true],
             'storage-locations.manage' => ['area' => 'master-data', 'name_en' => 'Manage physical storage locations', 'name_lo' => 'ຈັດການສະຖານທີ່ເກັບເອກະສານ', 'available' => true],

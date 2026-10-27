@@ -7,11 +7,16 @@ use App\Authorization\ManageIncomingCorrespondence;
 use App\Authorization\ManageNumbering;
 use App\Authorization\ManagePhysicalCustody;
 use App\Models\ConfidentialityClearance;
+use App\Models\Department;
 use App\Models\DocumentAccessGrant;
+use App\Models\DocumentSecurityAudit;
 use App\Models\OrganizationMembership;
 use App\Models\Site;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use PhpOffice\PhpSpreadsheet\Cell\DataType;
+use PhpOffice\PhpSpreadsheet\IOFactory;
+use PHPUnit\Framework\Attributes\TestWith;
 use Tests\Concerns\InteractsWithDocumentStorage;
 use Tests\Concerns\InteractsWithRbac;
 use Tests\TestCase;
@@ -80,6 +85,7 @@ class DocumentReportingTest extends TestCase
     {
         [$record, $actor] = $this->fixture('controlled');
         $this->travelTo('2026-10-30 12:00:00');
+        $this->grant($actor, $record->profile->documentScope()->authorizationScope(), ['reports.view']);
         $scope = $record->profile->documentScope();
         $manager = app(ManageControlledDocuments::class);
         $record->revisions->first()->update(['review_date' => '2026-10-29']);
@@ -88,9 +94,111 @@ class DocumentReportingTest extends TestCase
         $record = $manager->release($actor, $scope, (string) $record->id, ['lock_version' => $record->lock_version, 'revision_id' => $record->revisions->first()->id, 'reason' => 'Synthetic release']);
         $record = $manager->revise($actor, $scope, (string) $record->id, ['lock_version' => $record->lock_version, 'revision_reason' => 'Synthetic annual review', 'change_description' => 'Prepare future review']);
         $record->revisions->last()->update(['review_date' => '2027-10-30']);
+        $this->getJson($this->reportUrl($record, 'reports', ['view' => 'revisions', 'register' => 'controlled']))->assertOk()->assertJsonPath('meta.total', 2)->assertJsonPath('summary.total', 1)->assertJsonPath('summary.draft_revisions', 1);
 
         $this->getJson($this->reportUrl($record))->assertOk()->assertJsonPath('totals.controlled', 1)->assertJsonPath('totals.authoritative', 1)->assertJsonPath('totals.draft_documents', 1)->assertJsonPath('totals.review_overdue', 1)->assertJsonPath('totals.review_soon', 0)->assertJsonCount(1, 'reviews');
         $record = $manager->release($actor, $scope, (string) $record->id, ['lock_version' => $record->lock_version, 'revision_id' => $record->revisions->last()->id, 'reason' => 'Release reviewed procedure']);
         $this->getJson($this->reportUrl($record))->assertOk()->assertJsonPath('totals.controlled', 1)->assertJsonPath('totals.authoritative', 1)->assertJsonPath('totals.draft_documents', 0)->assertJsonPath('totals.review_overdue', 0);
+        $this->getJson($this->reportUrl($record, 'reports', ['view' => 'revisions', 'register' => 'controlled', 'revision_state' => 'superseded']))->assertOk()->assertJsonPath('meta.total', 1)->assertJsonPath('data.0.revision_identifier', '00')->assertJsonPath('data.0.revision_status', 'superseded');
+    }
+
+    public function test_report_access_is_explicit_and_totals_reconcile_with_dashboard(): void
+    {
+        [$record, $actor] = $this->fixture();
+        $this->getJson($this->reportUrl($record, 'reports'))->assertForbidden();
+        $this->grant($actor, $record->profile->documentScope()->authorizationScope(), ['reports.view']);
+        $report = $this->getJson($this->reportUrl($record, 'reports'))->assertOk()->assertJsonPath('meta.total', 1)->assertJsonPath('summary.total', 1)->assertJsonCount(1, 'data')->json();
+        $dashboard = $this->getJson($this->reportUrl($record))->assertOk()->json();
+        $this->assertSame($dashboard['totals']['incoming'], $report['summary']['incoming']);
+        $this->getJson($this->reportUrl($record, 'reports', ['date_from' => '2026-10-27']))->assertOk()->assertJsonPath('meta.total', 0)->assertJsonPath('summary.total', 0);
+        $this->getJson($this->reportUrl($record, 'reports', ['sort' => 'id; DROP TABLE users']))->assertUnprocessable();
+        $this->getJson($this->reportUrl($record, 'reports/export', ['format' => 'csv']))->assertUnprocessable();
+    }
+
+    #[TestWith(['en', 'xlsx'])]
+    #[TestWith(['lo', 'xlsx'])]
+    #[TestWith(['en', 'pdf'])]
+    #[TestWith(['lo', 'pdf'])]
+    public function test_authorized_management_exports_reuse_formats_and_record_access(string $language, string $format): void
+    {
+        [$record, $actor] = $this->fixture();
+        $record->update(['subject' => '=HYPERLINK("https://example.test", "Synthetic")']);
+        $this->grant($actor, $record->profile->documentScope()->authorizationScope(), ['reports.view']);
+        $response = $this->get($this->reportUrl($record, 'reports/export', ['format' => $format, 'language' => $language, 'register' => 'incoming', 'date_from' => '2026-10-01']))->assertOk()->assertHeader('Cache-Control', 'no-store, private');
+        if ($format === 'xlsx') {
+            $path = tempnam(sys_get_temp_dir(), 'dcms-report-');
+            try {
+                file_put_contents($path, $response->getContent());
+                $book = IOFactory::load($path);
+                $sheet = $book->getActiveSheet();
+                $this->assertSame('DCMS', $sheet->getTitle());
+                $this->assertSame($record->subject, $sheet->getCell('C8')->getValue());
+                $this->assertSame(DataType::TYPE_STRING, $sheet->getCell('C8')->getDataType());
+                $this->assertSame('dd/mm/yyyy', $sheet->getCell('D8')->getStyle()->getNumberFormat()->getFormatCode());
+                $this->assertNotEmpty($sheet->getAutoFilter()->getRange());
+                $book->disconnectWorksheets();
+            } finally {
+                unlink($path);
+            }
+        } else {
+            $this->assertStringStartsWith('%PDF-', $response->getContent());
+            $response->assertHeader('Content-Type', 'application/pdf');
+            $this->assertGreaterThanOrEqual(1, (int) $response->headers->get('X-PDF-Pages'));
+        }
+        $this->assertDatabaseHas('document_security_audits', ['actor_id' => $actor->id, 'profile_id' => $record->profile_id, 'event' => 'access.allowed', 'operation' => 'metadata']);
+        $this->assertTrue(DocumentSecurityAudit::query()->where('actor_id', $actor->id)->where('after->surface', 'report.export.'.$format)->exists());
+    }
+
+    public function test_physical_reports_use_copy_grain_and_latest_inventory_observation(): void
+    {
+        [$record, $actor] = $this->fixture();
+        $scope = $record->profile->documentScope();
+        $this->grant($actor, $scope->authorizationScope(), ['reports.view']);
+        $custody = app(ManagePhysicalCustody::class);
+        $location = $custody->location($actor, $scope, 'incoming', (string) $record->id, ['room' => 'Synthetic reporting room']);
+        $copy = $custody->create($actor, $scope, 'incoming', (string) $record->id, null, ['identifier' => 'REPORT/ORIGINAL', 'kind' => 'original', 'location_id' => $location->id, 'reason' => 'Synthetic fixture']);
+        $custody->change($actor, $scope, 'incoming', (string) $record->id, null, $copy->id, ['action' => 'inventory', 'lock_version' => 1, 'observation' => 'discrepancy', 'reason' => 'Synthetic discrepancy']);
+        $this->getJson($this->reportUrl($record, 'reports', ['view' => 'physical', 'metric' => 'inventory_discrepancy']))->assertOk()->assertJsonPath('meta.total', 1)->assertJsonPath('summary.total', 1)->assertJsonPath('summary.outstanding_discrepancies', 1)->assertJsonPath('data.0.room', 'Synthetic reporting room');
+        $custody->change($actor, $scope, 'incoming', (string) $record->id, null, $copy->id, ['action' => 'inventory', 'lock_version' => $copy->refresh()->lock_version, 'observation' => 'verified', 'reason' => 'Synthetic verified check']);
+        $this->getJson($this->reportUrl($record, 'reports', ['view' => 'physical', 'metric' => 'inventory_discrepancy']))->assertOk()->assertJsonPath('meta.total', 0)->assertJsonPath('summary.outstanding_discrepancies', 0);
+    }
+
+    #[TestWith(['incoming'])]
+    #[TestWith(['outgoing'])]
+    #[TestWith(['controlled'])]
+    public function test_report_rows_counts_groups_and_exports_do_not_reveal_restricted_documents(string $register): void
+    {
+        [$record] = $this->fixture($register, 'highly_confidential');
+        $reader = User::factory()->create();
+        $scope = $record->profile->documentScope();
+        OrganizationMembership::factory()->for($reader)->atSite(Site::findOrFail($scope->siteId))->create();
+        $this->grant($reader, $scope->authorizationScope(), ['documents.metadata.view', 'reports.view']);
+        $this->signIn($reader);
+        $result = $this->getJson($this->reportUrl($record, 'reports', ['all_sites' => 1, 'all_departments' => 1, 'search' => $record->document_code ?? $record->subject]))->assertOk()->assertJsonPath('meta.total', 0)->assertJsonPath('summary.total', 0)->assertJsonCount(0, 'data')->json();
+        $this->assertSame([], $result['trends']['category_en']);
+        $response = $this->get($this->reportUrl($record, 'reports/export', ['format' => 'xlsx']))->assertOk();
+        $path = tempnam(sys_get_temp_dir(), 'dcms-empty-report-');
+        try {
+            file_put_contents($path, $response->getContent());
+            $book = IOFactory::load($path);
+            $this->assertStringContainsString('0', $book->getActiveSheet()->getCell('A5')->getValue());
+            $this->assertSame('No authorized records match these filters.', $book->getActiveSheet()->getCell('A8')->getValue());
+            $book->disconnectWorksheets();
+        } finally {
+            unlink($path);
+        }
+    }
+
+    public function test_all_workspace_reporting_never_expands_beyond_exact_authorized_contexts(): void
+    {
+        [$record, $actor] = $this->fixture();
+        $this->grant($actor, $record->profile->documentScope()->authorizationScope(), ['reports.view']);
+        [$other] = $this->fixture('outgoing');
+        $this->signIn($actor);
+
+        $this->getJson($this->reportUrl($record, 'reports', ['all_sites' => 1, 'all_departments' => 1]))->assertOk()->assertJsonPath('summary.total', 1)->assertJsonPath('meta.total', 1)->assertJsonCount(1, 'scope');
+        $this->getJson($this->reportUrl($other, 'reports'))->assertForbidden();
+        $department = Department::factory()->create(['company_id' => $record->profile->company_id, 'site_id' => $record->profile->site_id]);
+        $this->getJson($this->reportUrl($record, 'reports', ['department_id' => $department->id]))->assertForbidden();
     }
 }

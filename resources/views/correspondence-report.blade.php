@@ -43,7 +43,7 @@
         @endforeach
     @else
         <table>
-            <thead><tr>@foreach ($columns as $column)<th width="{{ ($columns[0] === 'internal_number' && in_array('official_number', $columns) ? [12, 12, 22, 15, 9, 9, 9, 6, 6] : [12, 23, 14, 9, 8, 9, 9, 8, 8])[$loop->index] }}%">{{ $report->label($column, $language) }}</th>@endforeach</tr></thead>
+            <thead><tr>@foreach ($columns as $column)<th width="{{ $widths[$loop->index] ?? ($columns[0] === 'internal_number' && in_array('official_number', $columns) ? [12, 12, 22, 15, 9, 9, 9, 6, 6] : [12, 23, 14, 9, 8, 9, 9, 8, 8])[$loop->index] }}%">{{ $report->label($column, $language) }}</th>@endforeach</tr></thead>
             <tbody>
                 @forelse ($rows as $row)
                     <tr class="{{ $loop->even ? 'even' : '' }}">

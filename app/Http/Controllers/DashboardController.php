@@ -27,6 +27,13 @@ class DashboardController extends Controller
                 }
             }
         }
+        $links = [];
+        if (array_filter($contexts, fn (array $context): bool => in_array('reports.view', $context['permissions'], true))) {
+            $base = ['unit' => $contexts[0]['key'], 'all_departments' => $filters['all_departments'] ? 1 : 0];
+            foreach (['incoming' => ['register' => 'incoming'], 'outgoing' => ['register' => 'outgoing'], 'controlled' => ['register' => 'controlled'], 'open_incoming' => ['register' => 'incoming', 'metric' => 'open'], 'open_outgoing' => ['register' => 'outgoing', 'metric' => 'open'], 'closed' => ['metric' => 'closed'], 'pending_response' => ['metric' => 'pending_response'], 'due_soon' => ['metric' => 'due_soon'], 'overdue' => ['metric' => 'overdue'], 'review_soon' => ['register' => 'controlled', 'metric' => 'review_soon'], 'review_overdue' => ['register' => 'controlled', 'metric' => 'review_overdue'], 'checkout_overdue' => ['view' => 'physical', 'metric' => 'checkout_overdue']] as $key => $parameters) {
+                $links[$key] = route('dcms.reports', $parameters + $base, false);
+            }
+        }
         $format = function (object $row) use ($reports): array {
             $value = $reports->row($row);
 
@@ -36,6 +43,6 @@ class DashboardController extends Controller
         $reports->audit($request->user(), $contexts, $profileIds, 'dashboard.viewed');
 
         return response()->json(['totals' => $totals, 'recent' => $recent->map($format), 'due' => $due->map($format), 'reviews' => $reviews->map($format),
-            'trends' => $reports->trends(clone $documents), 'quick_actions' => array_values($quickActions)], headers: ['Cache-Control' => 'private, no-store']);
+            'links' => $links, 'trends' => $reports->trends(clone $documents), 'quick_actions' => array_values($quickActions)], headers: ['Cache-Control' => 'private, no-store']);
     }
 }

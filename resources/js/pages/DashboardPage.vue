@@ -43,13 +43,13 @@ onBeforeUnmount(() => controller?.abort());
     <p v-else-if="!current && !workspace?.loading.value" class="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-600">{{ t('workspaceNoContexts') }}</p>
     <template v-if="current">
         <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" :aria-busy="loading">
-            <section v-for="key in ['incoming', 'outgoing', ...(data?.totals.controlled !== undefined ? ['controlled'] : ['due_soon']), 'overdue']" :key="key" class="rounded-xl border border-slate-200 bg-white p-5">
+            <component :is="data?.links?.[key] ? 'a' : 'section'" :href="data?.links?.[key]" v-for="key in ['incoming', 'outgoing', ...(data?.totals.controlled !== undefined ? ['controlled'] : ['due_soon']), 'overdue']" :key="key" class="rounded-xl border border-slate-200 bg-white p-5">
                 <h3 class="text-sm font-medium text-slate-600">{{ t(`overview-${key}`) }}</h3><p class="mt-2 text-3xl font-semibold tabular-nums" :class="key === 'overdue' && data?.totals.overdue ? 'text-red-700' : 'text-slate-900'">{{ data ? data.totals[key] : '—' }}</p>
-            </section>
+            </component>
         </div>
         <section v-if="data?.totals.controlled !== undefined" class="rounded-xl border border-slate-200 bg-white p-5">
             <h2 class="mb-3 text-lg font-semibold">{{ t('reportOperational') }}</h2>
-            <dl class="grid gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-4"><div v-for="key in operational" :key="key" class="flex items-center justify-between gap-3 border-b border-slate-100 pb-2"><dt class="text-sm text-slate-600">{{ t(`metric-${key}`) }}</dt><dd class="font-semibold tabular-nums" :class="key.includes('overdue') && data.totals[key] ? 'text-red-700' : 'text-slate-900'">{{ data.totals[key] }}</dd></div></dl>
+            <dl class="grid gap-x-6 gap-y-3 sm:grid-cols-2 lg:grid-cols-4"><div v-for="key in operational" :key="key" class="flex items-center justify-between gap-3 border-b border-slate-100 pb-2"><dt class="text-sm text-slate-600">{{ t(`metric-${key}`) }}</dt><dd class="font-semibold tabular-nums" :class="key.includes('overdue') && data.totals[key] ? 'text-red-700' : 'text-slate-900'"><a v-if="data.links?.[key]" :href="data.links[key]" class="text-teal-800 hover:underline" :aria-label="t(`metric-${key}`)">{{ data.totals[key] }}</a><span v-else>{{ data.totals[key] }}</span></dd></div></dl>
         </section>
         <section v-if="data?.reviews?.length" class="rounded-xl border border-slate-200 bg-white p-5"><h2 class="mb-3 text-lg font-semibold">{{ t('reportReviewDates') }}</h2><ul class="grid gap-3 sm:grid-cols-2"><li v-for="row in data.reviews" :key="row.href"><a :href="row.href" class="font-semibold text-teal-800 hover:underline">{{ row.number }} · {{ language === 'lo' ? row.title_lo || row.title_en : row.title_en }}</a><p class="text-sm text-slate-600">{{ t('controlled-review_date') }}: {{ row.review_date?.split('-').reverse().join('/') }}</p></li></ul></section>
         <details v-if="data?.trends" class="rounded-xl border border-slate-200 bg-white p-5"><summary class="cursor-pointer font-semibold">{{ t('reportTrends') }}</summary><div class="mt-4 grid gap-5 lg:grid-cols-2">
