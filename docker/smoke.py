@@ -70,32 +70,48 @@ class SmokeRun:
         path.write_text(content)
         path.chmod(0o600)
 
-    def record(self, text):
+    def redact(self, text):
         for value in self.redactions:
             text = text.replace(value, '[REDACTED]')
+        return text
+
+    def record(self, text):
+        text = self.redact(text)
         with (self.directory/'runtime.log').open('a') as log:
             log.write(text+'\n')
         (self.directory/'runtime.log').chmod(0o600)
 
-    def docker(self, *arguments, log=False):
+    def docker(self, *arguments, log=False, operation=None):
+        operation = operation or ' '.join(arguments[:2])
+        if log:
+            self.record('Operation: '+operation)
+            print('Smoke operation: '+operation, flush=True)
         result = subprocess.run([self.executable, '--host', LOCAL_HOST, '--config', str(self.config_directory), *arguments],
                                 cwd=self.directory, env=self.environment, text=True, capture_output=True, timeout=300)
         # Never record rendered config or container environments. Command output is
         # private and synthetic values are redacted before logs are retained.
         if log or result.returncode:
             self.record(result.stdout+'\n'+result.stderr)
-        require(result.returncode == 0, 'Docker step failed: '+arguments[0]+' (see private runtime.log).')
+        if result.returncode:
+            failure = {'operation': operation, 'exit_code': result.returncode}
+            self.summary.setdefault('failure', failure)
+            # JSON-escape newlines/control characters so output cannot inject GitHub
+            # workflow commands. Redact before truncation, including split keys.
+            excerpt = self.redact(result.stdout+'\n'+result.stderr)[-6000:]
+            print('Smoke failure detail: '+json.dumps(excerpt, ensure_ascii=True), file=sys.stderr, flush=True)
+            raise RuntimeError('Docker step failed: '+operation+' (exit '+str(result.returncode)+'; see private runtime.log).')
         return result.stdout
 
-    def compose(self, *arguments, log=False):
+    def compose(self, *arguments, log=False, operation=None):
         return self.docker('compose', '--project-name', self.project, '--project-directory', str(self.directory),
                            '--env-file', str(self.directory/'compose.env'), '-f', str(self.repository/'compose.release.yaml'),
-                           '-f', str(self.directory/'smoke.json'), *arguments, log=log)
+                           '-f', str(self.directory/'smoke.json'), *arguments, log=log,
+                           operation=operation or 'compose '+arguments[0])
 
     def prepare(self):
         password, root_password = secrets.token_hex(32), secrets.token_hex(32)
         key = 'base64:'+base64.b64encode(secrets.token_bytes(32)).decode()
-        self.redactions = [password, root_password, key]
+        self.redactions = [password, root_password, key, key.removeprefix('base64:')]
         self.write('password', password)
         self.write('root-password', root_password)
         self.write('app.env', '\n'.join([
@@ -193,10 +209,12 @@ class SmokeRun:
             require(not any(name.startswith(self.project+'-') or name.startswith(self.project+'_') for name in names),
                     'Pre-existing resource name collision; refusing reuse.')
         self.changed = True
-        self.compose('up', '-d', '--wait', '--wait-timeout', '180', 'db', log=True)
-        self.compose('run', '--rm', '--no-deps', 'app', 'php', 'artisan', 'migrate', '--force', '--no-interaction', log=True)
-        self.compose('up', '-d', '--wait', '--wait-timeout', '120', 'app', log=True)
-        self.compose('exec', '-T', 'app', 'php', 'artisan', 'migrate:status', '--no-interaction', log=True)
+        self.compose('up', '-d', '--wait', '--wait-timeout', '180', 'db', log=True, operation='start disposable database')
+        self.compose('run', '--rm', '--no-deps', 'app', 'php', 'artisan', 'migrate', '--force', '--no-interaction', log=True,
+                     operation='migrate disposable database')
+        self.compose('up', '-d', '--wait', '--wait-timeout', '120', 'app', log=True, operation='start application and await health')
+        self.compose('exec', '-T', 'app', 'php', 'artisan', 'migrate:status', '--no-interaction', log=True,
+                     operation='verify application database connectivity')
         self.compose('exec', '-T', 'app', 'sh', '-eu', '-c', '''
             test ! -e .env
             test ! -e public/storage
@@ -210,11 +228,13 @@ class SmokeRun:
             curl --fail --silent --output /dev/null http://127.0.0.1:8080/up
             code=$(curl --silent --output /dev/null --write-out "%{http_code}" http://127.0.0.1:8080/storage/smoke-probe)
             test "$code" = 403
-        ''', log=True)
-        self.compose('up', '-d', '--no-deps', '--force-recreate', '--wait', '--wait-timeout', '120', 'app', log=True)
+        ''', log=True, operation='verify non-root runtime and private storage denial')
+        self.compose('up', '-d', '--no-deps', '--force-recreate', '--wait', '--wait-timeout', '120', 'app', log=True,
+                     operation='recreate application and await health')
         self.compose('exec', '-T', 'app', 'sh', '-eu', '-c',
-                     'test "$(cat storage/app/document-vault/smoke-probe)" = disposable-private-probe; rm storage/app/document-vault/smoke-probe', log=True)
-        self.compose('stop', log=True)
+                     'test "$(cat storage/app/document-vault/smoke-probe)" = disposable-private-probe; rm storage/app/document-vault/smoke-probe',
+                     log=True, operation='verify document persistence after recreation')
+        self.compose('stop', log=True, operation='stop disposable stack')
         self.summary['result'] = 'passed'
 
     def finish(self, failed):

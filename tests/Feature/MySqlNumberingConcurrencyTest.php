@@ -256,14 +256,29 @@ class MySqlNumberingConcurrencyTest extends TestCase
         $this->assertSame('REPEATABLE-READ', $settings->isolation_level);
         $this->assertSame(['InnoDB'], array_values(array_unique(array_column(DB::select('SELECT ENGINE FROM information_schema.tables WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = "BASE TABLE"'), 'ENGINE'))));
 
-        $this->artisan('migrate:rollback', ['--step' => 7, '--force' => true, '--no-interaction' => true])->assertExitCode(0);
+        $firstPhaseThreeMigration = '2026_10_25_135202_create_document_master_data_tables';
+        $appliedMigrations = DB::table('migrations')->orderBy('migration')->pluck('migration')->all();
+        $this->assertContains($firstPhaseThreeMigration, $appliedMigrations);
+        $phaseTwoMigrations = array_values(array_filter($appliedMigrations,
+            fn (string $migration): bool => strcmp($migration, $firstPhaseThreeMigration) < 0));
+        $rollbackSteps = count($appliedMigrations) - count($phaseTwoMigrations);
+        $actorAttributes = $actor->refresh()->getAttributes();
+        $membershipAttributes = OrganizationMembership::query()->sole()->getAttributes();
+
+        $this->artisan('migrate:rollback', ['--step' => $rollbackSteps, '--force' => true, '--no-interaction' => true])->assertExitCode(0);
+        $this->assertSame($phaseTwoMigrations, DB::table('migrations')->orderBy('migration')->pluck('migration')->all());
         $this->assertFalse(Schema::hasTable('numbering_series'));
         $this->assertFalse(Schema::hasTable('document_types'));
         $this->assertModelExists($actor);
         $this->assertDatabaseCount('organization_memberships', 1);
+        $this->assertSame($actorAttributes, $actor->refresh()->getAttributes());
+        $this->assertSame($membershipAttributes, OrganizationMembership::query()->sole()->getAttributes());
         $this->artisan('migrate', ['--force' => true, '--no-interaction' => true])->assertExitCode(0);
+        $this->assertSame($appliedMigrations, DB::table('migrations')->orderBy('migration')->pluck('migration')->all());
         $this->assertTrue(Schema::hasTable('numbering_series'));
         $this->assertTrue(Schema::hasTable('document_types'));
         $this->assertDatabaseCount('organization_memberships', 1);
+        $this->assertSame($actorAttributes, $actor->refresh()->getAttributes());
+        $this->assertSame($membershipAttributes, OrganizationMembership::query()->sole()->getAttributes());
     }
 }

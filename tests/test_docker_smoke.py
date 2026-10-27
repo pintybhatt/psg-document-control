@@ -4,7 +4,9 @@ import importlib.util
 import io
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -140,10 +142,52 @@ class DockerSmokeSafetyTest(unittest.TestCase):
     def test_failed_docker_command_does_not_retry_another_endpoint(self):
         run = self.make_run()
         with patch.object(smoke.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, '', 'permission denied')) as call:
-            with self.assertRaisesRegex(RuntimeError, 'Docker step failed'):
-                run.docker('version')
+            with contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaisesRegex(RuntimeError, 'Docker step failed'):
+                    run.docker('version')
         self.assertEqual(call.call_count, 1)
         self.assertIn('permission denied', (run.directory/'runtime.log').read_text())
+
+    def test_failed_compose_reports_exact_operation_and_redacts_bounded_output(self):
+        run = self.make_run()
+        run.redactions = ['synthetic-password', 'base64:synthetic-key', 'synthetic-key']
+        output = 'x'*7000+' synthetic-password base64:synthetic-key synthetic-key\n::warning::untrusted-output'
+        result = subprocess.CompletedProcess([], 17, '', output)
+        errors = io.StringIO()
+        with patch.object(smoke.subprocess, 'run', return_value=result):
+            with contextlib.redirect_stderr(errors):
+                with self.assertRaisesRegex(RuntimeError, 'migrate disposable database \\(exit 17;'):
+                    run.compose('run', '--rm', 'app', operation='migrate disposable database')
+        self.assertEqual(run.summary['failure'], {'operation': 'migrate disposable database', 'exit_code': 17})
+        console = errors.getvalue()
+        self.assertEqual(len(console.splitlines()), 1)
+        excerpt = json.loads(console.removeprefix('Smoke failure detail: ').strip())
+        self.assertLessEqual(len(excerpt), 6000)
+        self.assertIn('[REDACTED]', excerpt)
+        for text in (console, (run.directory/'runtime.log').read_text(), json.dumps(run.summary)):
+            self.assertNotIn('synthetic-password', text)
+            self.assertNotIn('synthetic-key', text)
+        self.assertFalse(any(line.startswith('::') for line in console.splitlines()))
+
+    def test_later_cleanup_error_does_not_replace_primary_failure_identity(self):
+        run = self.make_run()
+        with patch.object(smoke.subprocess, 'run', return_value=subprocess.CompletedProcess([], 1, '', 'failure')):
+            with contextlib.redirect_stderr(io.StringIO()):
+                with self.assertRaises(RuntimeError):
+                    run.compose('up', 'app', operation='start application and await health')
+                with self.assertRaises(RuntimeError):
+                    run.docker('volume', 'rm', 'disposable-volume')
+        self.assertEqual(run.summary['failure']['operation'], 'start application and await health')
+
+    def test_operation_progress_does_not_print_command_payload_or_successful_config(self):
+        run = self.make_run()
+        output = io.StringIO()
+        with patch.object(smoke.subprocess, 'run', return_value=subprocess.CompletedProcess([], 0, 'private-rendered-config', '')):
+            with contextlib.redirect_stdout(output):
+                run.compose('config', '--format', 'json')
+                run.compose('exec', 'app', 'sh', '-c', 'private-command-payload', log=True, operation='verify storage')
+        self.assertEqual(output.getvalue(), 'Smoke operation: verify storage\n')
+        self.assertNotIn('private-command-payload', (run.directory/'runtime.log').read_text())
 
     def test_failed_smoke_returns_nonzero_even_after_successful_cleanup(self):
         run = self.make_run()
@@ -195,6 +239,27 @@ class DockerSmokeSafetyTest(unittest.TestCase):
             self.assertTrue(volume['name'].startswith(run.project+'_'))
         for secret in config['secrets'].values():
             self.assertEqual(Path(secret['file']).parent, run.directory)
+
+    def test_apache_pid_and_runtime_paths_use_nonroot_writable_tmpfs(self):
+        run = self.make_run()
+        run.prepare()
+        app = json.loads(run.compose('config', '--format', 'json'))['services']['app']
+        logical_lines = re.sub(r'\\\n', ' ', (ROOT/'Dockerfile').read_text()).splitlines()
+        image_environment = dict(assignment.split('=', 1)
+                                 for line in logical_lines if line.startswith('ENV ')
+                                 for assignment in shlex.split(line)[1:])
+        # Debian's PID-file default is independent of APACHE_RUN_DIR, as the
+        # failed startup artifact demonstrates. Both must target writable storage.
+        pid_file = PurePosixPath(image_environment.get('APACHE_PID_FILE', '/var/run/apache2/apache2.pid'))
+        self.assertEqual(pid_file.parent, PurePosixPath(image_environment['APACHE_RUN_DIR']))
+        writable_tmpfs = []
+        for mount in app['tmpfs']:
+            target, options = mount.split(':', 1)
+            if 'uid=33' in options.split(',') and 'gid=33' in options.split(',') and 'ro' not in options.split(','):
+                writable_tmpfs.append(PurePosixPath(target))
+        for path in (pid_file, PurePosixPath(image_environment['APACHE_RUN_DIR']), PurePosixPath(image_environment['APACHE_LOCK_DIR'])):
+            self.assertTrue(any(path.is_relative_to(mount) for mount in writable_tmpfs), str(path)+' is outside writable tmpfs')
+        self.assertTrue(app['read_only'])
 
     def test_missing_opt_in_refuses_before_docker_execution(self):
         environment = {key: value for key, value in os.environ.items() if not key.startswith('DCMS_')}

@@ -11,6 +11,7 @@
             <directory>tests/Feature</directory>
             <exclude>tests/Feature/NumberingConcurrencyTest.php</exclude>
             <exclude>tests/Feature/SetupPhaseThreeDemoTest.php</exclude>
+            <exclude>tests/Feature/ConfigureDemoDocumentsTest.php</exclude>
         </testsuite>
     </testsuites>
     <source>
