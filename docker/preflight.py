@@ -16,6 +16,8 @@ parser.add_argument('--project', required=True)
 parser.add_argument('--compose-env', type=Path, required=True)
 parser.add_argument('--manifest', type=Path, required=True)
 parser.add_argument('--probe-local', action='store_true', help='Read local daemon/image/current stack; never pull, start, migrate or deploy')
+parser.add_argument('--uat-profile', action='store_true', help='Validate shared-host UAT overlay; only dcms-uat-xppl is accepted')
+parser.add_argument('--localhost-verification', action='store_true', help='UAT profile only: permit HTTP loopback technical checks, never user access')
 args = parser.parse_args()
 
 def require(condition, message):
@@ -27,6 +29,8 @@ def protected_file(path):
     require(not stat.S_IMODE(path.stat().st_mode) & 0o077, 'Configuration/secret files must be owner-only (0600).')
 
 require(re.fullmatch(r'dcms-'+args.target+r'-[a-z0-9-]+', args.project), 'Use a distinct dcms-TARGET-NAME project.')
+require(not args.uat_profile or (args.target == 'uat' and args.project == 'dcms-uat-xppl'), 'UAT profile requires target uat and project dcms-uat-xppl.')
+require(not args.localhost_verification or args.uat_profile, 'Localhost verification requires the UAT profile.')
 protected_file(args.compose_env)
 manifest = json.loads(args.manifest.read_text())
 image = manifest.get('image', '')
@@ -40,6 +44,8 @@ environment['DOCKER_HOST'] = 'unix:///var/run/docker.sock'
 repository = Path(__file__).resolve().parent.parent
 compose = ['docker', '--host', 'unix:///var/run/docker.sock', 'compose', '--project-name', args.project,
            '--env-file', str(args.compose_env), '-f', str(repository/'compose.release.yaml')]
+if args.uat_profile:
+    compose += ['-f', str(repository/'compose.uat.yaml')]
 
 def run(command):
     result = subprocess.run(command, env=environment, text=True, capture_output=True)
@@ -57,13 +63,60 @@ require(app_env.get('DB_PASSWORD') and app_env.get('DB_USERNAME') != 'root', 'No
 require(app_env.get('SESSION_DRIVER') == 'database' and app_env.get('CACHE_STORE') == 'database'
         and app_env.get('QUEUE_CONNECTION') == 'sync', 'Reviewed session/cache/queue configuration required.')
 require(app_env.get('LOG_CHANNEL') == 'stderr', 'Use stderr logging with read-only runtime.')
-require(str(app_env.get('SESSION_SECURE_COOKIE')).lower() == 'true' and app_env.get('APP_URL', '').startswith('https://'), 'Approved HTTPS ingress required.')
+if args.localhost_verification:
+    require(app_env.get('APP_URL') == 'http://localhost:18084', 'Technical verification requires the documented loopback URL.')
+    require(str(app_env.get('SESSION_SECURE_COOKIE')).lower() == 'false', 'Technical HTTP sessions require temporary secure-cookie=false.')
+else:
+    require(str(app_env.get('SESSION_SECURE_COOKIE')).lower() == 'true' and app_env.get('APP_URL', '').startswith('https://'), 'Approved HTTPS ingress required.')
 require('*' not in app_env.get('TRUSTED_PROXIES', ''), 'Explicit ingress addresses required; wildcard proxies refused.')
+if args.uat_profile:
+    require(re.fullmatch(r'ghcr\.io/pintybhatt/psg-document-control@sha256:[a-f0-9]{64}', image), 'Only the approved DCMS repository image is accepted.')
+    require(app_env.get('DB_DATABASE') == 'dcms_uat' and app_env.get('DB_USERNAME') == 'dcms_uat', 'UAT database identity required.')
+    require(not app_env.get('DB_URL') and not app_env.get('DB_SOCKET') and str(app_env.get('DB_PORT')) == '3306', 'Database overrides refused.')
+    require(app_env.get('SESSION_COOKIE') == 'dcms_uat_session' and app_env.get('CACHE_PREFIX') == 'dcms_uat_', 'UAT session/cache isolation required.')
+    require(str(app_env.get('SESSION_ENCRYPT')).lower() == 'true' and app_env.get('FILESYSTEM_DISK') == 'local', 'Encrypted sessions and private local storage required.')
+    if not args.localhost_verification:
+        require(re.fullmatch(r'https://[a-z0-9]+(?:[.-][a-z0-9]+)*:8444', app_env.get('APP_URL', ''))
+                and app_env.get('TRUSTED_PROXIES', '').strip(), 'UAT requires the approved hostname on HTTPS 8444 and an explicit proxy address.')
+    require(set(config['services']) == {'app', 'db'}, 'Only UAT app and database services are allowed.')
+    ports = app.get('ports', [])
+    require(len(ports) == 1 and ports[0].get('host_ip') == '127.0.0.1' and ports[0]['target'] == 8080
+            and str(ports[0].get('published')) == '18084', 'Only documented loopback application port 18084 is allowed.')
+    require(not config['services']['db'].get('ports'), 'Database must not publish ports.')
+    require(set(app.get('networks', {})) == {'ingress', 'backend'}
+            and set(config['services']['db'].get('networks', {})) == {'backend'}
+            and config['networks']['backend'].get('internal'), 'Reviewed ingress/internal database network boundary required.')
+    expected_mounts = {
+        'app': {'/var/www/html/storage/app/document-vault': 'documents', '/var/www/html/storage/app/private': 'private',
+                '/var/www/html/storage/framework': 'framework', '/etc/apache2/conf-enabled/zz-dcms-uat.conf': None},
+        'db': {'/var/lib/mysql': 'database'},
+    }
+    for name, expected in expected_mounts.items():
+        mounts = config['services'][name].get('volumes', [])
+        require(len(mounts) == len(expected) and {mount['target'] for mount in mounts} == set(expected), 'Unexpected UAT storage mount.')
+        for mount in mounts:
+            source = expected[mount['target']]
+            if source is None:
+                require(mount['type'] == 'bind' and mount.get('read_only') and mount['source'] == str(repository/'docker/apache-uat.conf'), 'Only the reviewed read-only Apache file may be bind mounted.')
+            else:
+                require(mount['type'] == 'volume' and mount['source'] == source, 'Expected project-owned persistent volume.')
+    require(app.get('read_only') and 'ALL' in app.get('cap_drop', [])
+            and 'no-new-privileges:true' in app.get('security_opt', []), 'Application runtime protections required.')
+    for name, memory in [('app', 640*1024*1024), ('db', 768*1024*1024)]:
+        service = config['services'][name]
+        require(int(service.get('mem_limit', 0)) == memory and int(service.get('memswap_limit', 0)) == memory
+                and float(service.get('cpus', 0)) == 0.5, 'Reviewed UAT resource limits required.')
+        require(not service.get('privileged') and not service.get('network_mode') and not service.get('container_name'), 'Host/privileged/shared container settings refused.')
+    for kind in ('volumes', 'networks'):
+        for resource in config[kind].values():
+            require(not resource.get('external') and resource.get('name', '').startswith(args.project+'_'), 'Only project-owned storage/networks allowed.')
 # Protect all referenced files without displaying their content or rendered environment.
 for secret in config['secrets'].values():
     protected_file(Path(secret['file']))
 # Compose config resolves env_file content; recover its path from raw interpolation, never source shell code.
 variables = dict(line.split('=', 1) for line in args.compose_env.read_text().splitlines() if line and not line.startswith('#') and '=' in line)
+if args.uat_profile:
+    require(variables.get('DCMS_ENVIRONMENT') == 'uat', 'UAT environment selection required.')
 protected_file(Path(variables.get('DCMS_APP_ENV_FILE', '')))
 require(app_env['DB_PASSWORD'] == Path(variables['DCMS_DB_PASSWORD_FILE']).read_text().rstrip('\n'), 'Application and database passwords differ.')
 require(app_env['DB_DATABASE'] == variables['DCMS_DB_DATABASE'] and app_env['DB_USERNAME'] == variables['DCMS_DB_USERNAME'], 'Database identity mismatch.')
