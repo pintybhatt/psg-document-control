@@ -43,6 +43,7 @@ FROM php-runtime AS release
 ARG SOURCE_COMMIT=unknown
 LABEL org.opencontainers.image.revision=$SOURCE_COMMIT
 ENV APACHE_RUN_DIR=/tmp/apache2 APACHE_LOCK_DIR=/tmp/apache2 \
+    APACHE_PID_FILE=/tmp/apache2/apache2.pid \
     PHP_UPLOAD_MAX_FILESIZE=25M PHP_POST_MAX_SIZE=27M PHP_MEMORY_LIMIT=256M \
     HTTP_UPLOAD_LIMIT_BYTES=28311552 APP_ENV=production APP_DEBUG=false LOG_CHANNEL=stderr
 COPY --from=dependencies /var/www/html /var/www/html

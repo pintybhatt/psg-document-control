@@ -4,7 +4,9 @@ import importlib.util
 import io
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
+import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -237,6 +239,27 @@ class DockerSmokeSafetyTest(unittest.TestCase):
             self.assertTrue(volume['name'].startswith(run.project+'_'))
         for secret in config['secrets'].values():
             self.assertEqual(Path(secret['file']).parent, run.directory)
+
+    def test_apache_pid_and_runtime_paths_use_nonroot_writable_tmpfs(self):
+        run = self.make_run()
+        run.prepare()
+        app = json.loads(run.compose('config', '--format', 'json'))['services']['app']
+        logical_lines = re.sub(r'\\\n', ' ', (ROOT/'Dockerfile').read_text()).splitlines()
+        image_environment = dict(assignment.split('=', 1)
+                                 for line in logical_lines if line.startswith('ENV ')
+                                 for assignment in shlex.split(line)[1:])
+        # Debian's PID-file default is independent of APACHE_RUN_DIR, as the
+        # failed startup artifact demonstrates. Both must target writable storage.
+        pid_file = PurePosixPath(image_environment.get('APACHE_PID_FILE', '/var/run/apache2/apache2.pid'))
+        self.assertEqual(pid_file.parent, PurePosixPath(image_environment['APACHE_RUN_DIR']))
+        writable_tmpfs = []
+        for mount in app['tmpfs']:
+            target, options = mount.split(':', 1)
+            if 'uid=33' in options.split(',') and 'gid=33' in options.split(',') and 'ro' not in options.split(','):
+                writable_tmpfs.append(PurePosixPath(target))
+        for path in (pid_file, PurePosixPath(image_environment['APACHE_RUN_DIR']), PurePosixPath(image_environment['APACHE_LOCK_DIR'])):
+            self.assertTrue(any(path.is_relative_to(mount) for mount in writable_tmpfs), str(path)+' is outside writable tmpfs')
+        self.assertTrue(app['read_only'])
 
     def test_missing_opt_in_refuses_before_docker_execution(self):
         environment = {key: value for key, value in os.environ.items() if not key.startswith('DCMS_')}
