@@ -2,6 +2,12 @@
 
 27 October 2026. Local engineering only. This document and its commands are templates for a separately authorized operator. They do not authorize host access, registry publication, Phase 11 UAT execution or Production deployment. No operational server or other system was accessed.
 
+## Current UAT configuration preparation
+
+The [UAT runbook](uat.md) adds a shared-host UAT overlay, conservative resource bounds, loopback technical access, a separate inactive HTTPS 8444 Nginx template, guarded UAT plan validation and explicit operator approval gates. It starts from clean main `c91557c`; the owner supplied the host inventory and approved the initial 2 vCPU/4 GB sizing. No server access or changes are authorized by this preparation. Hostname/TLS/firewall, publication, accounts, backup/recovery and deployment execution still require separate approval. NetBox/Toll remain untouched; Production is excluded from this UAT profile.
+
+Full [CI run 40495568162](https://github.com/pintybhatt/psg-document-control/actions/runs/40495568162) now verifies the parallel workflow, MySQL and image smoke, superseding the performance phase's first-run uncertainty below. Image retention was skipped in that run: an authorized retained candidate/full run is still needed before private GHCR publication. The UAT overlay and host proxy/resource configuration have not been runtime-tested. Historical checkpoint/results below remain as evidence; use the new runbook for the current UAT procedure.
+
 ## Verified starting point
 
 Clean repository `/home/bipin/projects/psg-document-control`, branch `phase-10-administration-configuration`, HEAD `a3870d5` with `4844ca2` immediately preceding. Read `AGENTS.md`, the full [Phase 10 report](../security/phase-10-administration-configuration.md), existing deployment/testing assets and the Laravel/testing skills. `.ai/rules` is absent. Created local branch `deployment-preparation-ci-cd`; no history rewritten. Phases 1–10 source, migrations, authorization and integrity contracts are retained; only application change is explicit configurable proxy trust, with regression tests.
