@@ -158,6 +158,10 @@ class ManagementReport extends CorrespondenceReport
                 }
             }
 
+            if (! empty($row['event'])) {
+                $row['event'] .= isset($row['revision_identifier']) ? ' · '.$this->label('revision_identifier', $language).' '.$row['revision_identifier'] : '';
+                $row['event'] .= ! empty($row['physical_identifier']) ? ' · '.$row['physical_identifier'] : '';
+            }
             $row['changes_text'] = implode("\n", array_map(fn (array $change): string => $change['label_'.$language].': '.$this->changeValue($change['field'], $change['before'], $language).' → '.$this->changeValue($change['field'], $change['after'], $language), $row['changes'] ?? []));
             if (isset($row['timestamp'])) {
                 $row['timestamp'] = Carbon::parse($row['timestamp'])->timezone('Asia/Vientiane')->format('d/m/Y, H:i');

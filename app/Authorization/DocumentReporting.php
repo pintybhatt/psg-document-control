@@ -86,7 +86,6 @@ class DocumentReporting
             $query->where('copy.status', 'checked_out')->whereDate('copy.expected_return_date', '<', today());
         }
         if (($filters['metric'] ?? '') === 'inventory_discrepancy') {
-            $query->selectSub($this->discrepancies()->whereColumn('inventory.subject_id', 'copy.id')->selectRaw('1')->limit(1), 'inventory_discrepancy');
             $query->whereIn('copy.id', $this->discrepancies()->select('subject_id'));
         }
 
@@ -174,7 +173,7 @@ class DocumentReporting
             SUM(CASE WHEN register = 'incoming' AND registered = 1 THEN 1 ELSE 0 END) as registered_incoming,
             SUM(CASE WHEN register = 'outgoing' AND registered = 1 THEN 1 ELSE 0 END) as registered_outgoing", [$today, $today, $soon, $today, $today, $reviewSoon])->first();
         $totals = array_map(intval(...), (array) $row);
-        $physical = DB::query()->fromSub($this->physical(clone $documents, $filters), 'copies')->selectRaw("COUNT(*) as physical_copies, SUM(COALESCE(inventory_discrepancy, 0)) as outstanding_discrepancies, SUM(CASE WHEN kind = 'original' THEN 1 ELSE 0 END) as originals, SUM(CASE WHEN custody_status = 'stored' THEN 1 ELSE 0 END) as stored, SUM(CASE WHEN custody_status = 'checked_out' THEN 1 ELSE 0 END) as checked_out, SUM(CASE WHEN custody_status = 'checked_out' AND DATE(expected_return_date) < ? THEN 1 ELSE 0 END) as checkout_overdue", [$today]);
+        $physical = DB::query()->fromSub($this->physical(clone $documents, $filters), 'copies')->selectRaw("COUNT(*) as physical_copies, SUM(COALESCE(inventory_discrepancy, 0)) as outstanding_discrepancies, SUM(CASE WHEN kind = 'original' THEN 1 ELSE 0 END) as originals, SUM(CASE WHEN custody_status = 'stored' THEN 1 ELSE 0 END) as `stored`, SUM(CASE WHEN custody_status = 'checked_out' THEN 1 ELSE 0 END) as checked_out, SUM(CASE WHEN custody_status = 'checked_out' AND DATE(expected_return_date) < ? THEN 1 ELSE 0 END) as checkout_overdue", [$today]);
         $physical = $physical->first();
 
         return $totals + array_map(intval(...), (array) $physical);

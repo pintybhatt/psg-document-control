@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Authorization\ManageIncomingCorrespondence;
 use App\Authorization\ManageNumbering;
+use App\Authorization\ManagePhysicalCustody;
 use App\Models\OrganizationMembership;
 use App\Models\Site;
 use App\Models\StorageEvent;
@@ -110,5 +111,17 @@ class ReportAuditHistoryTest extends TestCase
             unlink($path);
         }
         $this->assertDatabaseHas('document_security_audits', ['actor_id' => $actor->id, 'event' => 'access.allowed', 'operation' => 'metadata']);
+    }
+
+    public function test_history_identifies_authorized_revision_and_physical_copy_without_raw_identifiers(): void
+    {
+        [$record, $actor] = $this->fixture('controlled');
+        $scope = $record->profile->documentScope();
+        $this->grant($actor, $scope->authorizationScope(), ['documents.audit.view']);
+        $this->getJson($this->report($record, ['event' => 'created']))->assertOk()->assertJsonPath('data.0.revision_identifier', '00');
+        $custody = app(ManagePhysicalCustody::class);
+        $location = $custody->location($actor, $scope, 'controlled', (string) $record->id, ['room' => 'Synthetic archive']);
+        $copy = $custody->create($actor, $scope, 'controlled', (string) $record->id, $record->revisions->first()->id, ['identifier' => 'AUDIT/ORIGINAL', 'kind' => 'original', 'location_id' => $location->id, 'reason' => 'Synthetic original']);
+        $this->getJson($this->report($record, ['event' => 'copy.created']))->assertOk()->assertJsonPath('data.0.physical_identifier', 'AUDIT/ORIGINAL')->assertDontSee($copy->id);
     }
 }

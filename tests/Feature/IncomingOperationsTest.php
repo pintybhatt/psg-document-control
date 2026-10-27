@@ -34,7 +34,7 @@ class IncomingOperationsTest extends TestCase
     /** @return array{User, AuthorizationScope, IncomingCorrespondence, Role} */
     private function fixture(): array
     {
-        $this->freezeTime();
+        $this->travelTo('2026-10-26 12:00:00');
         $this->definitions();
         config(['app.debug' => false]);
         $site = Site::factory()->create();

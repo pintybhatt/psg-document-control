@@ -114,6 +114,14 @@ class ReportAuditHistory
         } else {
             $query->selectRaw(implode(', ', array_map(fn (string $column): string => 'NULL as '.$column, self::DOCUMENT_COLUMNS)));
         }
+        if ($source === 'controlled') {
+            $query->leftJoin('controlled_revisions as event_revision', fn (JoinClause $join): JoinClause => $join->on('event_revision.id', '=', 'e.revision_id')->on('event_revision.document_id', '=', 'd.id'));
+        }
+        if ($source === 'storage') {
+            $query->leftJoin('physical_copies as event_copy', fn (JoinClause $join): JoinClause => $join->on('event_copy.id', '=', 'e.subject_id')->on('event_copy.profile_id', '=', 'd.profile_id'));
+        }
+        $query->selectRaw(($source === 'controlled' ? 'event_revision.revision_number' : 'NULL').' as event_revision_number');
+        $query->selectRaw(($source === 'storage' ? 'event_copy.identifier' : 'NULL').' as physical_identifier');
         $query->addSelect(['e.id as event_id', 'e.created_at as timestamp', 'actor.name as actor'])->selectRaw('? as source', [$source])->selectRaw($action.' as event_action');
         foreach (['reason' => $reason, 'before_json' => $before, 'after_json' => $after, 'issued_number' => $number, 'operation' => $operation] as $alias => $column) {
             if ($alias === 'operation' && ! $column && $route) {
@@ -132,6 +140,7 @@ class ReportAuditHistory
     public function row(object $row, string $language): array
     {
         $value = (array) $row;
+        $value['revision_identifier'] = $row->event_revision_number === null ? null : str_pad((string) $row->event_revision_number, 2, '0', STR_PAD_LEFT);
         $value['key'] = $row->source.':'.$row->event_id;
         $value['event_en'] = $this->labels->event($row->event_action, 'en');
         $value['event_lo'] = $this->labels->event($row->event_action, 'lo');
@@ -164,7 +173,7 @@ class ReportAuditHistory
                 $value['changes'][] = ['label_en' => $this->labels->field($field, 'en'), 'label_lo' => $this->labels->field($field, 'lo'), 'field' => $field, 'before' => $value['before'][$field] ?? null, 'after' => $value['after'][$field] ?? null];
             }
         }
-        unset($value['before_json'], $value['after_json'], $value['profile_id'], $value['event_route']);
+        unset($value['before_json'], $value['after_json'], $value['profile_id'], $value['event_route'], $value['event_revision_number']);
 
         return $value;
     }
@@ -176,7 +185,7 @@ class ReportAuditHistory
         if (! is_array($values)) {
             return [];
         }
-        $values = array_merge($values, is_array($values['details'] ?? null) ? $values['details'] : []);
+        $values = array_merge($values, is_array($values['details'] ?? null) ? $values['details'] : [], is_array($values['delivery'] ?? null) ? $values['delivery'] : []);
 
         return array_filter(array_intersect_key($values, array_flip(self::SAFE_VALUES)), fn (mixed $value): bool => is_scalar($value) || $value === null);
     }

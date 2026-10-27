@@ -5,12 +5,14 @@ namespace Tests\Feature;
 use App\Authorization\ManageControlledDocuments;
 use App\Authorization\ManageIncomingCorrespondence;
 use App\Authorization\ManageNumbering;
+use App\Authorization\ManageOutgoingCorrespondence;
 use App\Authorization\ManagePhysicalCustody;
 use App\Models\ConfidentialityClearance;
 use App\Models\Department;
 use App\Models\DocumentAccessGrant;
 use App\Models\DocumentSecurityAudit;
 use App\Models\OrganizationMembership;
+use App\Models\OutgoingRecipient;
 use App\Models\Site;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
@@ -142,6 +144,7 @@ class DocumentReportingTest extends TestCase
             }
         } else {
             $this->assertStringStartsWith('%PDF-', $response->getContent());
+            file_put_contents('/tmp/dcms-phase9-report-'.$language.'.pdf', $response->getContent());
             $response->assertHeader('Content-Type', 'application/pdf');
             $this->assertGreaterThanOrEqual(1, (int) $response->headers->get('X-PDF-Pages'));
         }
@@ -200,5 +203,26 @@ class DocumentReportingTest extends TestCase
         $this->getJson($this->reportUrl($other, 'reports'))->assertForbidden();
         $department = Department::factory()->create(['company_id' => $record->profile->company_id, 'site_id' => $record->profile->site_id]);
         $this->getJson($this->reportUrl($record, 'reports', ['department_id' => $department->id]))->assertForbidden();
+    }
+
+    public function test_outgoing_delivery_metrics_count_documents_once_across_primary_and_copy_recipients(): void
+    {
+        [$record, $actor] = $this->fixture('outgoing');
+        $scope = $record->profile->documentScope();
+        $this->grant($actor, $scope->authorizationScope(), ['reports.view', 'outgoing.register', 'outgoing.operations.manage']);
+        foreach (['internal_register' => 'REPORT/OUT', 'official_outgoing' => 'REPORT/OFFICIAL'] as $purpose => $prefix) {
+            app(ManageNumbering::class)->save($actor, $scope->authorizationScope(), ['register_id' => $record->register_id, 'purpose' => $purpose, 'reset_policy' => 'annual', 'prefix' => $prefix, 'padding' => 6, 'active' => true]);
+        }
+        OutgoingRecipient::create(['correspondence_id' => $record->id, 'kind' => 'primary', 'organization' => 'Second synthetic recipient']);
+        OutgoingRecipient::create(['correspondence_id' => $record->id, 'kind' => 'copy', 'organization' => 'Synthetic copy recipient']);
+        $record = app(ManageOutgoingCorrespondence::class)->register($actor, $scope, (string) $record->id);
+        $url = '/api/v1/outgoing-correspondence/'.$record->id.'/operations?'.http_build_query(['company_id' => $scope->companyId, 'site_id' => $scope->siteId]);
+        $this->postJson($url, ['action' => 'dispatch', 'revision' => 0, 'dispatch_date' => '2026-10-26', 'dispatch_channel' => 'email'])->assertOk();
+        $revision = 1;
+        foreach ($record->recipients()->where('kind', 'primary')->orderBy('id')->get() as $recipient) {
+            $this->postJson($url, ['action' => 'delivery', 'revision' => $revision++, 'recipient_id' => $recipient->id, 'delivery_date' => '2026-10-26', 'acknowledged_by' => 'Synthetic receiver', 'acknowledgment_date' => '2026-10-26'])->assertOk();
+            $this->getJson($this->reportUrl($record, 'reports'))->assertOk()->assertJsonPath('summary.total', 1)->assertJsonPath('summary.dispatched', 1)->assertJsonPath('summary.acknowledged', 1)->assertJsonPath('summary.delivered', $revision === 2 ? 0 : 1);
+        }
+        $this->getJson($this->reportUrl($record, 'reports', ['metric' => 'delivered']))->assertOk()->assertJsonPath('meta.total', 1);
     }
 }

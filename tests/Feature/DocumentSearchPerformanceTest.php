@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Authorization\DocumentReporting;
+use App\Authorization\ReportAuditHistory;
 use App\Authorization\SearchDocuments;
 use App\Models\ControlledDocument;
 use App\Models\ControlledRevision;
@@ -54,6 +56,7 @@ class DocumentSearchPerformanceTest extends TestCase
                     $attributes['subject'] = 'Synthetic benchmark ທົດສອບ '.$i;
                 }
                 $id = DB::table($prototype->getTable())->insertGetId($attributes);
+                DB::table('storage_events')->insert(['profile_id' => $profileId, 'actor_id' => $actor->id, 'action' => 'attachment.download', 'created_at' => now(), 'updated_at' => now()]);
                 $revisionId = null;
                 if ($key === 'controlled') {
                     $attributes = $revision->getAttributes();
@@ -112,6 +115,47 @@ class DocumentSearchPerformanceTest extends TestCase
         $this->getJson('/api/v1/document-search?'.http_build_query(['company_id' => $scope->companyId, 'site_id' => $scope->siteId, 'per_page' => 10]))->assertOk()->assertJsonPath('meta.total', 2253)->assertJsonCount(10, 'data');
         $measurements['http_page'] = ['ms' => round((hrtime(true) - $start) / 1e6, 3), 'queries' => count(DB::getQueryLog())];
         DB::disableQueryLog();
+        $this->grant($actor, $scope->authorizationScope(), ['reports.view', 'documents.audit.view', 'security.audit.view']);
+        $reports = app(DocumentReporting::class);
+        $filters = ['company_id' => $scope->companyId, 'site_id' => $scope->siteId];
+        $contexts = $reports->contexts($actor, $filters);
+        $documents = $reports->documents($actor, $filters, $contexts);
+        $reportMeasurements = [];
+        $scenarios = [
+            'dashboard_totals' => fn () => $reports->totals(clone $documents, []),
+            'dashboard_trends' => fn () => $reports->trends(clone $documents),
+            'document_page' => fn () => (clone $documents)->orderBy('register')->orderBy('id')->paginate(25, ['*'], 'page', 2),
+            'filtered_page' => fn () => $reports->documents($actor, $filters + ['type_id' => $type->id, 'classification' => 'normal'], $contexts)->orderBy('register')->orderBy('id')->paginate(25, ['*'], 'page', 2),
+            'revision_page' => fn () => $reports->revisions(clone $documents, [])->orderBy('id')->orderBy('revision_number')->paginate(25, ['*'], 'page', 2),
+            'physical_page' => fn () => $reports->physical(clone $documents, [])->orderBy('copy_id')->paginate(25, ['*'], 'page', 2),
+            'audit_page' => fn () => app(ReportAuditHistory::class)->query($actor, clone $documents, ['view' => 'audit'], $contexts)->paginate(25),
+            'security_page' => fn () => app(ReportAuditHistory::class)->query($actor, clone $documents, ['view' => 'security'], $contexts)->paginate(25),
+        ];
+        foreach ($scenarios as $name => $execute) {
+            $times = [];
+            for ($run = 0; $run < 3; $run++) {
+                $start = hrtime(true);
+                $result = $execute();
+                $times[] = (hrtime(true) - $start) / 1e6;
+                if ($name === 'dashboard_totals') {
+                    $this->assertSame(2253, $result['total']);
+                    $this->assertSame(300, $result['physical_copies']);
+                } elseif (in_array($name, ['audit_page', 'security_page'], true)) {
+                    $this->assertGreaterThanOrEqual(2250, $result->total());
+                    $this->assertCount(25, $result->items());
+                } elseif (in_array($name, ['document_page', 'filtered_page', 'revision_page', 'physical_page'], true)) {
+                    $this->assertSame(match ($name) {
+                        'revision_page' => 751, 'physical_page' => 300, default => 2253
+                    }, $result->total());
+                    $this->assertCount(25, $result->items());
+                }
+            }
+            sort($times);
+            $reportMeasurements[$name] = ['median_ms' => round($times[1], 3), 'max_ms' => round(max($times), 3)];
+        }
+        $inventory = $reports->physical(clone $documents, []);
+        $inventoryPlan = DB::select((DB::getDriverName() === 'mysql' ? 'EXPLAIN ' : 'EXPLAIN QUERY PLAN ').$inventory->toSql(), $inventory->getBindings());
+        file_put_contents('/tmp/dcms-phase9-performance-'.DB::getDriverName().'.json', json_encode(['documents' => 3003, 'restricted' => 750, 'revisions' => 1001, 'physical_copies' => 300, 'file_events' => 3000, 'runs' => 3, 'measurements' => $reportMeasurements, 'inventory_plan' => $inventoryPlan], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR));
         $query = $search->query($actor, $scope, ['physical' => 'Box C']);
         $plans = DB::select((DB::getDriverName() === 'mysql' ? 'EXPLAIN ' : 'EXPLAIN QUERY PLAN ').$query->toSql(), $query->getBindings());
         file_put_contents('/tmp/dcms-phase8-performance-'.DB::getDriverName().'.json', json_encode(['documents' => 3003, 'restricted' => 750, 'revisions' => 1001, 'physical_copies' => 300, 'runs' => 5, 'measurements' => $measurements, 'physical_query_plan' => $plans], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR));

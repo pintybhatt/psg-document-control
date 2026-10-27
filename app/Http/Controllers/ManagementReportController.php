@@ -99,7 +99,7 @@ class ManagementReportController extends Controller
         $query = match ($filters['view'] ?? 'documents') {
             'physical' => DB::query()->fromSub($reports->physical($documents, $filters), 'physical'),
             'revisions' => $reports->revisions($documents, $filters),
-            default => $documents,
+            default => clone $documents,
         };
         match ($filters['sort'] ?? 'recent') {
             'number' => $query->orderBy('number'), 'date' => $query->orderByDesc('document_date'), 'oldest' => $query->orderBy('created_at'), default => $query->orderByDesc('created_at'),
