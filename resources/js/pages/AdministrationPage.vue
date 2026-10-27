@@ -10,6 +10,8 @@ import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
 import ToastNotifications from '../components/ui/ToastNotifications.vue';
 import MembershipManagement from '../components/MembershipManagement.vue';
 import DocumentMasterDataManagement from '../components/DocumentMasterDataManagement.vue';
+import AdministrationHistory from '../components/AdministrationHistory.vue';
+import { useWorkspace } from '../utilities/workspace.js';
 import NumberingManagement from '../components/NumberingManagement.vue';
 import { useNotifications } from '../components/ui/useNotifications.js';
 import { useLocalization } from '../localization/index.js';
@@ -19,6 +21,7 @@ const props = defineProps({ endpoints: { type: Object, required: true }, csrfTok
 const { t, language } = useLocalization();
 const request = createJsonClient(props.csrfToken);
 const { items, notify, dismiss } = useNotifications();
+const workspace = useWorkspace();
 const contexts = ref([]);
 const selectedKey = ref('');
 const section = ref('people');
@@ -28,6 +31,7 @@ const sections = computed(() => [
     { key: 'people', label: 'adminPeople', available: can('memberships.view') },
     { key: 'documents', label: 'adminDocuments', available: selected.value?.scope_type !== 'global' && can('master-data.view') },
     { key: 'numbering', label: 'adminNumbering', available: selected.value?.scope_type !== 'global' && can('numbering.view') },
+    { key: 'history', label: 'adminHistory', available: !!props.endpoints.history && can('security.audit.view') },
     { key: 'roles', label: 'adminRoles', available: can('roles.view') || can('assignments.view') },
 ].filter(item => item.available));
 watch(sections, values => { if (!values.some(item => item.key === section.value)) { section.value = values[0]?.key ?? ''; } });
@@ -149,7 +153,8 @@ async function loadContexts() {
         const response = await request(props.endpoints.contexts);
         if (disposed) { return; }
         contexts.value = response.data;
-        selectedKey.value = contexts.value[0]?.scope_key ?? '';
+        selectWorkspaceScope();
+        if (!selectedKey.value) { selectedKey.value = contexts.value[0]?.scope_key ?? ''; }
         if (!selectedKey.value) { loading.value = false; }
     } catch (error) { handleError(error); loading.value = false; }
 }
@@ -245,6 +250,13 @@ async function changeAssignmentPage() {
     finally { if (!signal?.aborted) { loading.value = false; } }
 }
 
+function selectWorkspaceScope() {
+    const unit = workspace?.selected.value;
+    if (!unit || saving.value || confirmationOpen.value || editorOpen.value) { return; }
+    const match = contexts.value.find(scope => scope.scope_type === 'site' && scope.company_id === unit.company_id && scope.site_id === unit.site_id);
+    if (match) { selectedKey.value = match.scope_key; }
+}
+watch(() => workspace?.selected.value, selectWorkspaceScope);
 watch(selectedKey, loadScope);
 onMounted(loadContexts);
 onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
@@ -261,6 +273,7 @@ onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
             <div class="rounded-xl border border-slate-200 bg-white p-5"><SelectInput v-model="selectedKey" :label="t('rbacScope')" :options="scopeOptions" :disabled="saving || confirmationOpen" /><p class="mt-3 text-xs leading-6 text-slate-500">{{ t(selected?.scope_type === 'global' ? 'rbacGlobalWarning' : 'rbacScopeNotice') }}</p></div>
 
             <nav :aria-label="t('administration')" class="flex flex-wrap gap-2 border-b border-slate-200 pb-3"><UiButton v-for="item in sections" :key="item.key" :variant="section === item.key ? 'primary' : 'secondary'" :aria-pressed="section === item.key" @click="section = item.key">{{ t(item.label) }}</UiButton></nav>
+            <AdministrationHistory v-if="section === 'history' && selected && can('security.audit.view')" :scope="selected" :endpoint="endpoints.history" :csrf-token="csrfToken" @unauthorized="handleError" />
             <MembershipManagement v-show="section === 'people'" v-if="selected && can('memberships.view')" :scope="selected" :endpoints="endpoints" :csrf-token="csrfToken" @unauthorized="handleError" />
             <DocumentMasterDataManagement v-show="section === 'documents'" v-if="selected && selected.scope_type !== 'global' && can('master-data.view')" :scope="selected" :endpoints="endpoints.masterData" :csrf-token="csrfToken" @unauthorized="handleError" />
             <NumberingManagement v-show="section === 'numbering'" v-if="selected && selected.scope_type !== 'global' && can('numbering.view')" :scope="selected" :endpoint="endpoints.numbering" :csrf-token="csrfToken" @unauthorized="handleError" />

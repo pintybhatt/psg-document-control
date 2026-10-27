@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\AdministrationHistoryController;
 use App\Http\Controllers\AuthenticatedSessionController;
 use App\Http\Controllers\AuthorizationContextController;
 use App\Http\Controllers\ControlledDocumentController;
@@ -111,6 +112,7 @@ Route::middleware(['auth:web', EnsureActiveUserSession::class])->group(function 
         Route::post('memberships', [MembershipController::class, 'store'])->name('memberships.store');
         Route::patch('memberships/{membership}', [MembershipController::class, 'update'])->name('memberships.update');
         Route::delete('memberships/{membership}', [MembershipController::class, 'destroy'])->name('memberships.destroy');
+        Route::get('administration/history', AdministrationHistoryController::class)->name('administration.history');
         Route::get('authorization/contexts', [AuthorizationContextController::class, 'index'])->name('authorization.contexts');
         Route::get('role-assignment-users', [AuthorizationContextController::class, 'users'])->name('assignment-users');
         Route::get('permissions', [RoleController::class, 'permissions'])->name('permissions');

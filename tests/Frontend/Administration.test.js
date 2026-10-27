@@ -1,5 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
+import { ref } from 'vue';
+import { provideWorkspace } from '../../resources/js/utilities/workspace.js';
 import AdministrationPage from '../../resources/js/pages/AdministrationPage.vue';
 import LanguageSwitcher from '../../resources/js/components/LanguageSwitcher.vue';
 import App from '../../resources/js/App.vue';
@@ -67,10 +69,10 @@ function server({ contexts = [globalScope], roles = [sampleRole], assignments = 
     return fetch;
 }
 
-async function render() {
+async function render(workspace = null) {
     const wrapper = mount({
         components: { AdministrationPage, LanguageSwitcher },
-        setup: () => ({ endpoints }),
+        setup: () => { if (workspace) { provideWorkspace(workspace); } return { endpoints }; },
         template: '<div id="dcms-app"><LanguageSwitcher /><AdministrationPage :endpoints="endpoints" csrf-token="sample-csrf" /></div>',
     }, { attachTo: document.body, global: { plugins: [createLocalization()] } });
     await flushPromises();
@@ -367,4 +369,19 @@ describe('scoped role administration', () => {
         expect(fetch.mock.calls.some(([url]) => url.includes('scope_type=company') && url.includes('company_id=7'))).toBe(true);
         expect(wrapper.text()).not.toContain('Create role');
     });
+    it('selects only an authorized scope matching the shared workspace and follows workspace changes', async () => {
+        const first = { ...globalScope, scope_key: 'site:10', scope_type: 'site', company_id: 7, site_id: 10, company: { name_en: 'Example Company', name_lo: 'ຕົວຢ່າງ' }, site: { name_en: 'First site', name_lo: 'ສະຖານທີ່' } };
+        const second = { ...first, scope_key: 'site:11', site_id: 11 };
+        const workspace = { selected: ref({ company_id: 7, site_id: 11 }) };
+        server({ contexts: [globalScope, first, second] });
+        const wrapper = await render(workspace);
+        expect(control(wrapper, 'Authorization scope').element.value).toBe('site:11');
+        workspace.selected.value = { company_id: 7, site_id: 10 };
+        await flushPromises();
+        expect(control(wrapper, 'Authorization scope').element.value).toBe('site:10');
+        workspace.selected.value = { company_id: 999, site_id: 999 };
+        await flushPromises();
+        expect(control(wrapper, 'Authorization scope').element.value).toBe('site:10');
+    });
+
 });
