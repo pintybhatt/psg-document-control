@@ -2,6 +2,8 @@
 
 This is local preparation, **not permission to execute these commands**. No server was contacted. Starting main: `c91557c9d071427416f7ad4b50f34c8b03691677`. Full [CI run 40495568162](https://github.com/pintybhatt/psg-document-control/actions/runs/40495568162) passed; its image was not retained/published. A new explicitly retained candidate must pass full validation before any publication/deployment. These templates do not claim UAT load capacity or acceptance.
 
+Current release preparation starts from `bc300b079ce2b9e5dcb66344396faf488a85e010`; [full CI 40504238173](https://github.com/pintybhatt/psg-document-control/actions/runs/40504238173) passed without retained-image publication. Use the [GHCR/approval guide](releases.md) for archive integrity, private-package controls, GitHub plan limitations, registry credential custody and required release evidence. All server blocks below remain future operator instructions, not activated scripts.
+
 ## Architecture and boundaries
 
 Owner-supplied host inventory: Ubuntu 22.04.4 VMware VM, Docker 29.9.2/Compose 5.6.1, 2 vCPU/4 GB/100 GB disk (~73 GB free), operational NetBox/Nginx/PostgreSQL 14/Redis. Owner approved starting sizing, **not server changes in this phase**. Reconfirm inventory/capacity with the host owner before execution. NetBox availability takes priority.
@@ -66,6 +68,50 @@ Copy `docker/uat.compose.env.example` to `config/compose.env`, and `docker/app.e
 
 DBA provides a separate `config/migration.env` (0600) containing **only** `DB_USERNAME=dcms_uat_migrate` and its DB_PASSWORD for this same UAT database and a `config/backup.cnf` (0600) for database-specific backup privileges. The initial image creates `dcms_uat` with schema DDL privileges; before serving app, DBA must provision migration/backup accounts and reduce runtime permissions to reviewed DML/trigger execution. Do not start web traffic with root/DDL serving credentials. Account/trigger provisioning SQL is a separate DBA-reviewed operation, not automatically generated or run by this package. Store APP_KEY, config and recovery credentials with encrypted off-host recovery material.
 
+## Future host readiness and directory sequence
+
+Only after a separately approved host change, in an administrator-authenticated root Bash session **on UAT**. No SSH command is provided/executed here. First collect NetBox's host-owner-supplied health baseline (its exact service names/HTTPS identity are not assumed); preserve it through every change. Reconfirm host inventory, filesystem/cgroup support, clock, Docker root location/free space, current resource usage and GHCR connectivity. A capacity shortfall or existing use of 8444/18084 stops setup. The numeric port selection alone does not authorize opening it.
+
+```bash
+set -euo pipefail
+umask 077
+test "$(id -u)" = 0
+: "${APPROVAL_REFERENCE:?approved host-change reference}"
+test "${DCMS_UAT_EXECUTE:-}" = approved
+ip -4 -o address show | grep -Fq ' 192.168.0.228/'
+uname -a
+cat /etc/os-release
+date -u
+free -m
+vmstat 1 5
+df -h /srv
+df -i /srv
+test -z "$(ss -H -ltn '( sport = :8444 or sport = :18084 )')"
+/usr/bin/docker --host unix:///var/run/docker.sock version
+/usr/bin/docker --host unix:///var/run/docker.sock compose version
+/usr/bin/docker --host unix:///var/run/docker.sock info --format '{{.DockerRootDir}}'
+/usr/bin/docker --host unix:///var/run/docker.sock ps -a --format '{{.ID}} {{.Names}} {{.Status}}'
+# STOP for host-owner review of NetBox baseline, capacity, any existing resources and port ownership.
+# INITIAL DIRECTORY SETUP ONLY; an existing directory requires review, not overwrite.
+test ! -e /srv/dcms-uat
+install -d -m 0755 /srv/dcms-uat /srv/dcms-uat/release /srv/dcms-uat/release/docker
+install -d -m 0700 /srv/dcms-uat/config /srv/dcms-uat/history /srv/dcms-uat/backups /srv/dcms-uat/registry
+bundle=/APPROVED/STAGING/REVIEWED_CONFIG_BUNDLE
+test -d "$bundle"
+for file in compose.release.yaml compose.uat.yaml; do
+  install -m 0644 "$bundle/$file" "/srv/dcms-uat/release/$file"
+done
+for file in apache-uat.conf preflight.py verify-uat-release.py; do
+  install -m 0644 "$bundle/docker/$file" "/srv/dcms-uat/release/docker/$file"
+done
+install -m 0600 "$bundle/docker/uat.compose.env.example" /srv/dcms-uat/config/compose.env
+install -m 0600 "$bundle/docker/app.env.example" /srv/dcms-uat/config/app.env
+install -m 0600 "$bundle/docker/uat-approval.example.json" /srv/dcms-uat/config/approval.json
+# Placeholders/PENDING intentionally prevent release verification until owner review and secret injection.
+```
+
+The directory root/release path must allow UID 33 traversal for its one read-only Apache configuration mount; secrets/history/registry remain root-only. Validate the staging bundle against the reviewed configuration commit/checksums before installation. Never upload `.env`, document data or a source tree from DEV. Provision blank/example files only on initial setup; on later releases preserve existing secrets and stage/review config changes separately. Transfer approved manifest plus directly downloaded `release-run.json`, `release-jobs.json`, `release-artifacts.json`, and completed owner approval into config as 0600/root-owned. Retrieve private GHCR credentials only through the [credential procedure](releases.md#registry-retrieval-choose-a-dedicated-host-read-credential), then continue below. No host image build or container start happens in this readiness block.
+
 ## Operator session and first initialization — future authorized execution only
 
 The blocks below require an **administrator-authenticated root Bash session on the approved UAT host**, approved image publication/pull, protected files and a written authorization reference. Do not run from this local preparation task. Keep one shell and its lock through the complete window; no `set -x`. A nonempty reference records an organizational decision, not authentication of approval by software. Never change the fixed project to operate Production.
@@ -89,6 +135,13 @@ history="$ROOT/history/$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -m 700 "$history"
 printf '%s\n' "$APPROVAL_REFERENCE" > "$history/authorization.txt"
 cp "$CFG/release-manifest.json" "$history/candidate-manifest.json"
+for file in approval release-run release-jobs release-artifacts; do
+  cp "$CFG/$file.json" "$history/$file.json"
+done
+verify_release() { python3 "$RELEASE/docker/verify-uat-release.py" \
+  --manifest "$history/candidate-manifest.json" --approval "$history/approval.json" \
+  --run "$history/release-run.json" --jobs "$history/release-jobs.json" --artifacts "$history/release-artifacts.json"; }
+verify_release > "$history/release-evidence-check.txt"
 image=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["image"])' "$history/candidate-manifest.json")
 [[ "$image" =~ ^ghcr.io/pintybhatt/psg-document-control@sha256:[a-f0-9]{64}$ ]]
 env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/root python3 "$RELEASE/docker/preflight.py" \
@@ -96,13 +149,17 @@ env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/root python3 "$RELEASE/docker/pr
   --compose-env "$CFG/compose.env" --manifest "$history/candidate-manifest.json"
 # For an explicitly approved loopback technical stage ONLY, add --localhost-verification above.
 # Stop here until capacity, backup/restore, migration accounts and port checks are signed off.
+# Complete the separately approved GHCR stdin login using ld (now defined) before pulling.
+test "$(stat -c %a "$ROOT/registry/config.json")" = 600
 dc pull app db
 ld image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image" \
   > "$history/image-source.txt"
+ld image inspect --format '{{.Id}}' "$image" > "$history/image-id.txt"
 python3 - "$history" <<'PY'
 import json, pathlib, sys
 p = pathlib.Path(sys.argv[1])
 assert (p/'image-source.txt').read_text().strip() == json.loads((p/'candidate-manifest.json').read_text())['source_commit']
+assert (p/'image-id.txt').read_text().strip() == json.loads((p/'candidate-manifest.json').read_text())['tested_image_id']
 PY
 ```
 
@@ -166,6 +223,7 @@ For first initialization use the recorded empty-target recovery decision; for la
 
 ```bash
 # Same locked shell, after the explicit backup/initialization gate above.
+verify_release > "$history/pre-migration-evidence-check.txt"
 python3 - "$CFG/migration.env" <<'PY'
 import pathlib, stat, sys
 p = pathlib.Path(sys.argv[1])
@@ -178,6 +236,7 @@ dc run --rm --no-deps -T --entrypoint php --env-from-file "$CFG/migration.env" a
   artisan migrate --force --no-interaction > "$history/migrations.txt" 2>&1
 dc run --rm --no-deps -T --entrypoint php --env-from-file "$CFG/migration.env" app \
   artisan migrate:status --no-interaction > "$history/migrations-after.txt" 2>&1
+verify_release > "$history/pre-replacement-evidence-check.txt"
 dc up -d --no-deps --force-recreate --wait --wait-timeout 180 app
 dc exec -T app id > "$history/runtime-user.txt"
 dc exec -T app apache2ctl -t > "$history/apache-config.txt" 2>&1
@@ -187,6 +246,7 @@ dc exec -T app php artisan migrate:status --no-interaction > "$history/runtime-d
 dc ps > "$history/compose-status.txt"
 # Confirm UID 33, prefork, two workers, effective limits, healthy DB/app and writable private mounts.
 # Maintenance is still enabled after subsequent releases. Review internal evidence first.
+verify_release > "$history/pre-admission-evidence-check.txt"
 dc exec -T app php artisan up --no-interaction
 curl --fail --silent --show-error --output /dev/null http://127.0.0.1:18084/up
 code=$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' http://127.0.0.1:18084/storage/private-check)

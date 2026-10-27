@@ -1,0 +1,18 @@
+{
+  "target": "uat",
+  "project": "dcms-uat-xppl",
+  "decision": "pending",
+  "approval_reference": "REPLACE_WITH_CHANGE_REFERENCE",
+  "approved_by": "REPLACE_WITH_APPROVER",
+  "approved_at": "REPLACE_WITH_TIMEZONE_AWARE_ISO8601_TIME",
+  "expires_at": "REPLACE_WITH_APPROVED_WINDOW_END",
+  "image": "ghcr.io/pintybhatt/psg-document-control@sha256:REPLACE_WITH_APPROVED_DIGEST",
+  "source_commit": "REPLACE_WITH_FULL_SOURCE_SHA",
+  "manifest_sha256": "REPLACE_WITH_MANIFEST_FILE_SHA256",
+  "release_run_id": null,
+  "release_run_attempt": null,
+  "release_artifact_id": null,
+  "previous_image": null,
+  "recovery_reference": "REPLACE_WITH_BACKUP_OR_INITIAL_EMPTY_DB_DECISION",
+  "migration_review_reference": "REPLACE_WITH_SCHEMA_COMPATIBILITY_REVIEW"
+}
