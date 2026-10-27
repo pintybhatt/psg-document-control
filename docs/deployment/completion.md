@@ -70,3 +70,33 @@ Read-only upstream action-ref and vulnerability-feed lookups were the only exter
 - **Requires XPPL authorization:** UAT deployment approval and execution, formal acceptance of that exact image digest, separate Production release authorization and operational data initialization. Phase 11 and Production execution have not begun.
 
 Final working-tree status is checked after the documentation commit and reported with that commit in the delivery message. No push or merge follows this package.
+
+## Focused local Docker verification continuation — access blocked
+
+Continuation checkpoint: branch `deployment-preparation-ci-cd`, HEAD `069919c8ab2a29728303efc7d5e90b39b7210537`, immediately following `dcf82c1`. The working tree was clean before diagnostics. Read `AGENTS.md`, both deployment reports, Laravel/testing skill instructions and all requested Docker/Compose/helper/CI files. `.ai/rules` remains absent. This continuation did **not** meet the Docker verification completion criteria.
+
+Read-only diagnostics established:
+
+- Current WSL user is `bipin`, UID/GID 1000. Outside sandbox isolation its groups are `bipin`, `adm`, `cdrom`, `sudo`, `dip`, `plugdev` and `users`; it is **not** a member of `docker` (GID 986).
+- Docker CLI `/usr/bin/docker` is version 29.9.2; Docker Compose is 5.6.1. Selected context is `default`, endpoint `unix:///var/run/docker.sock`. No DOCKER_HOST or DOCKER_CONTEXT override was present. No remote endpoint was used.
+- Sandbox UID/GID mapping reports the socket as `nobody:nogroup`; outside the sandbox the actual socket ownership is `root:docker` (0:986), mode `0660`. The sandbox ownership display alone is not a daemon ownership defect.
+- Outside-sandbox `systemctl show docker` reports `ActiveState=active`, `SubState=running`, MainPID 293849. This confirms the local Engine service is running; Docker Desktop is not required to explain this blocker.
+- Ordinary and approved outside-sandbox Docker API checks both returned permission denied on that same Unix socket. Container list and inspection of `dcms-mysql84-tests` were denied too.
+- A separately requested elevated, read-only `sudo -n docker --host unix:///var/run/docker.sock version` check returned **`sudo: interactive authentication is required`**. Sandbox escalation retains the user identity and does not supply root authentication. The execution mechanism allowed the check; no automatic approval rejection occurred.
+
+Diagnosis: local Unix-socket authorization is unavailable to this process, even with the sandbox restriction removed. The daemon is running and context is local; changing contexts or installing another Docker implementation would not resolve the demonstrated user-permission boundary. No socket ownership/mode, daemon configuration, groups or user privileges were changed. No sudo password was requested, supplied or stored, and no alternative endpoint or privilege workaround was attempted.
+
+| Required evidence | Continuation result |
+| --- | --- |
+| Build / image ID, registry digest, size / extension and asset inspection | Not performed; no image artifact produced. |
+| Apache/PHP boot, health, MySQL connectivity and isolated migrations | Not performed; authorization blocked before resource creation. |
+| Login/session, bilingual UI, correspondence, controlled documents, attachments, authorization, dashboard/report integration | Not performed in containers. Prior package regressions above are historical evidence only, not rerun or container results. |
+| Runtime debug/secrets, read-only permissions, DB port isolation and private-file access denial | Definitions reviewed; no new runtime verification claimed. |
+| Document/DB/numbering persistence, restart recovery and scoped cleanup | Not performed; disposable smoke was not invoked with opt-in and no disposable resources were created. |
+| Existing `dcms-mysql84-tests` final state | **Unknown**; denied read-only inspection. No stop/restart/recreation/reset or volume access attempted. Prior restoration note remains unresolved. |
+| Existing Docker-resource preservation | No Docker mutation command executed. No images pulled/built, containers/networks/volumes created or removed, or cleanup/prune performed. A before/after inventory could not be obtained. |
+| Changes and checks | Only these two deployment reports updated. `git diff --check` passed. No packaging/application changes or repeated test suites; container blocker prevented required integration checks. |
+
+Next step requires an administrator-authenticated execution path for the **same local Unix Docker daemon**, explicitly approved for this development verification. Do not grant broad Docker access or change permissions automatically. An administrator must arrange the approved authentication/execution facility outside this agent's noninteractive session; do not send passwords through chat. Once available, resume with a fresh Git/access check and read-only Docker inventory, resolve the old MySQL container-state note safely, review smoke isolation against ambient environment overrides, then build/test using explicitly identified random disposable resources and record cleanup. No container test result or UAT readiness may be inferred from this blocked continuation.
+
+This evidence update is a separate local documentation commit. Its hash and final working-tree status are reported in the delivery message. No push, publication, workflow activation, remote host access, operational secret access, live migration or deployment occurred.
