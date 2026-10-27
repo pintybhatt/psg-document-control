@@ -78,3 +78,57 @@ Full-suite results precede the final small source-filter/canonicalization and la
 ## F. Completion gate
 
 The independently implementable navigation and configuration-history gaps are addressed. Existing document-master lifecycle rules and Phases 1–9 are preserved by the recorded regression evidence. **The unconditional Phase 10 completion gate is not claimed:** organization-maintenance scope/authority remains unresolved and visual browser verification is unavailable in this environment. Review these limitations and accept the documented policy deferrals before closing the phase. No Phase 11/12 work or operational approval is implied.
+
+## G. Organization completion pass — 27 October 2026
+
+This addendum preserves sections A–F as the earlier checkpoint chronology. It supersedes their organization-authority and browser-availability findings. The resumed repository matched the handoff: branch `phase-10-administration-configuration`, HEAD `e4ed7e8` (following implementation `88a747a`), ten modified tracked files and seven untracked implementation/test files, with nothing staged. All recovered work was retained. The completion implementation is committed locally as `4844ca2` (`feat(administration): complete global organization maintenance`). No reset, restoration, clean, development database refresh or fixture recreation was performed.
+
+### Approved authority and delivered behavior
+
+The supplied completion instruction explicitly approves structural maintenance **only by an active global `SECURITY_ADMINISTRATOR`**. `ManageOrganization` reuses the current persisted `AccessControl::isSystemAdministrator` contract, and repeats authorization inside the existing serialized `RbacMutation` transaction. `OrganizationRequest` independently enforces authority at the HTTP boundary. Company/site administrators, delegated global permission holders, scoped security-role assignments, inactive accounts/roles and revoked assignments cannot acquire this authority. No `SUPER_ADMIN`, new permission system or expanded delegated power was introduced.
+
+Company, site and department listing, creation and editing are available through authenticated GET/POST/PATCH organization endpoints and the bilingual Administration structure section. Navigation is available only with server-confirmed structural authority and an explicitly selected global scope. Sites are selected within a company; departments within that company's site. The existing workspace behavior is retained, and successful saves refresh authorization contexts and the workspace list while preserving the explicit organization section. Pagination is bounded; resources return an allowlist of identity, bilingual names, status and parents.
+
+Codes and parents are immutable through these operations. Codes are required, uppercase, bounded to 32 characters and unique globally for companies, per company for sites and per site for departments. Both names are required on creation. Parent existence and company/site consistency are checked again in the transaction; active children require active parents. New UI records start inactive until explicitly selected as active. Updates expose only bilingual names and permitted active status. There is no organization DELETE endpoint, reparenting or identity-renaming operation.
+
+Deactivation deliberately rejects dependent structure, even inactive memberships, document security profiles and clearances. Persisted authorization scopes protect configured companies/sites, and a configured site also protects its departments. Storage locations and site physical copies are protected; responsible-department references in incoming operations are protected. No cascade updates or deletion are performed. This is conservative: some unused departments in configured sites cannot be deactivated here. Historical references and operational records are preserved.
+
+Successful changes append `organization.created` or `organization.updated` to the existing RBAC audit with actor, global scope and before/after snapshots, atomically with the organization write. Cancelled audit persistence rolls back the change; unchanged saves add no event. Global organization history filters company/site/department subjects, retains the existing snapshot-field allowlist, and is restricted to global System Administrators. Existing exact-scope and source-permission restrictions remain for other history areas.
+
+The completion review found an empty-value validation defect: Laravel's `prohibited` rule permits null/empty input, allowing a null immutable code to reach a NOT NULL constraint and return HTTP 500. The organization request and mutation now require protected fields to be `missing`. Regression tests first reproduced the failure, then passed for null, empty string and empty array across company/site/department codes and parents, plus a direct-service null-code attempt. Existing nonempty immutable-field tests remain. Added direct HTTP history-denial assertions cover each unauthorized/inactive authority scenario. No unrelated behavior was changed.
+
+### Account-maintenance boundary
+
+Membership administration and role assignment already have delegated authorization contracts and remain in their existing interfaces. The account search is an eligible-identity lookup. Account identity creation, profile editing and account activation/deactivation authority are still insufficiently defined for a new account-maintenance UI. No account CRUD, new account power, authentication change or real user was introduced. XPPL must separately define identity ownership, onboarding, editable profile fields, activation authority and delegation before that UI can be implemented.
+
+### Recovered and final browser review
+
+The recovered `/tmp/dcms-phase10-completion-gAfLGl` directory contains the isolated synthetic SQLite database, restricted fixture credentials, CDP browser script, 42 recorded screenshots and `browser-findings.json`. The findings record English and Lao at 1440×1000 and 390×844, no page overflow, zero reported JavaScript exceptions, and interactions covering company/site/department creation, explicit activation, required-field focus, immutable codes, confirmation and Escape cancellation, protected deactivation, workspace scope, membership, eligible-account lookup and organization history. These are inherited interaction results; the entire sequence was not repeated.
+
+This pass visually inspected representative recovered English/Lao desktop/mobile Administration and organization screens, all three entity edit forms, company required-field errors, status confirmation, protected deactivation, workspace selection, configuration history and mobile navigation. Form spacing, focus indicators, labels, visible save/cancel controls and confirmation actions were reviewed. Mobile tables use internal horizontal scrolling to reach additional columns/actions; no page-level overflow was found. Long mobile workspace text is constrained by its select control. This review is not a screen-reader audit or native Lao editorial acceptance.
+
+The recovered screenshots predate the neutral code-label correction. A focused final CDP check reused the existing synthetic database and current production build, without organization writes or new users. It captured **12 additional screenshots**, covering company/site/department creation forms in both languages and both viewport sizes, checked the table/form labels `Code` / `ລະຫັດ`, initial field focus and page overflow, and reported **zero JavaScript exceptions**. Four representative final screenshots were also visually inspected. Results and captures remain under the same temporary directory as `final-label-findings.json` and `final-*.png`. The checker needed corrections for accessible required-field text and explicit navigation between viewports; these were verification-script issues, not application failures.
+
+### Verification evidence and limits
+
+| Evidence origin | Verification | Result |
+| --- | --- | --- |
+| Interrupted-session handoff | Full SQLite backend | **764 passed, 7 skipped, 0 failed; 4,806 assertions; 98.508 s** |
+| Interrupted-session handoff | Full frontend | **288 passed** |
+| Interrupted-session handoff | Focused MySQL | **110 passed; 563 assertions** |
+| Interrupted-session handoff | Production build and Pint | Passed; build repeated after code-label correction |
+| Resumed pass, final code | SQLite organization, history, System Administrator, membership administration and organization integrity | **100 passed; 804 assertions; 5.212 s**, using the configured disposable in-memory test harness |
+| Resumed pass | Frontend organization, Administration and history | **3 files, 26 passed; 2.25 s** |
+| Resumed pass | Production build | **Passed**, Vite 8.3.5, 58 modules |
+| Resumed pass | Browser label check | **12 captures; no page overflow; zero JavaScript exceptions** |
+| Resumed pass | Formatting / whitespace | `vendor/bin/pint --dirty --format agent` and `git diff --check` passed |
+
+The full-suite and MySQL figures above are explicitly inherited handoff evidence, not newly reproduced logs. The full suites were not rerun unnecessarily. Final focused SQLite tests cover the validation correction and added history denials. The initial new regression failed as expected against the recovered defect; an assertion setup was then corrected to compare refreshed persisted attributes, and final tests passed. There are no known remaining failures in the final checks. MySQL-specific verification of the new empty-input rejection was not run because Docker access is unavailable to this process.
+
+### Resource status and remaining gate
+
+The recovered synthetic PHP server (PID 423907, port 5310) and browser (PID 423919, debugging port 9440) were identified and stopped; process checks confirmed both exited. The new focused browser/server processes were terminated by the launcher's exit trap and checked as exited. The fixture database, credentials and screenshots were retained. The ordinary development server and other project resources were left alone.
+
+**Cleanup limitation:** the original state of `dcms-mysql84-tests` was stopped; the interrupted session reportedly started it. This pass could not inspect or stop it: Docker socket access returned permission denied, including after sandbox escalation, and noninteractive sudo required authentication. No other Docker resource was changed. The user was asked to stop this exact container and confirm its state. Until that confirmation is recorded, container restoration remains unverified and must not be reported as complete.
+
+The approved organization-maintenance implementation and focused technical/browser acceptance are complete for local review. The earlier organization-authority and unavailable-browser blockers are resolved. **Unconditional Phase 10 closure is not claimed** while container cleanup remains unverified and business-policy deferrals require acceptance. Remaining business decisions are account identity/activation authority, retention and legal holds, approved correspondence templates, operational numbering formats, notification requirements, any additional reference lists and native Lao editorial acceptance. No XPPL operational approval is claimed. No push, merge, PR, deployment, Phase 11/12 work, real XPPL record creation or operational infrastructure change is included.
