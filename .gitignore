@@ -35,3 +35,8 @@ Thumbs.db
 # Local credentials and secrets
 *.pem
 *.key
+
+# Deployment configuration and evidence stay outside version control.
+/docker/local/
+/release-manifest.json
+/image-reference.txt

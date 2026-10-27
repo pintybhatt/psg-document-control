@@ -1,0 +1,82 @@
+# INACTIVE: copy to .github/workflows only after explicit publishing authorization.
+name: Authorized release image
+on:
+  workflow_dispatch:
+    inputs:
+      source_commit:
+        description: Full reviewed source commit on main
+        required: true
+      baseline_commit:
+        description: Full source commit of previously approved release (initial release may use source_commit; inventory remains complete)
+        required: true
+      version:
+        description: Version such as v1.0.0-rc.1
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: release-image
+  cancel-in-progress: false
+jobs:
+  identity:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate identity and protected-main ancestry
+        env:
+          SOURCE: ${{ inputs.source_commit }}
+          BASELINE: ${{ inputs.baseline_commit }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          [[ "$SOURCE" =~ ^[a-f0-9]{40}$ && "$BASELINE" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]
+          git merge-base --is-ancestor "$SOURCE" origin/main
+          git merge-base --is-ancestor "$BASELINE" "$SOURCE"
+  ci:
+    needs: identity
+    uses: ./.github/workflows/ci.yml
+    with:
+      source_commit: ${{ inputs.source_commit }}
+  publish:
+    needs: ci
+    if: vars.ENABLE_IMAGE_PUBLISHING == 'true'
+    environment: release-image
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.source_commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Build authorized artifact and publish to private GHCR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE: ${{ inputs.source_commit }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          repository="ghcr.io/${GITHUB_REPOSITORY,,}"
+          image="$repository:$VERSION-$SOURCE"
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          trap 'docker logout ghcr.io' EXIT
+          docker build --build-arg SOURCE_COMMIT="$SOURCE" -t "$image" .
+          docker push "$image"
+          docker inspect --format '{{index .RepoDigests 0}}' "$image" > image-reference.txt
+      - name: Record digest, source, migration inventory and build identity
+        env:
+          SOURCE: ${{ inputs.source_commit }}
+          BASELINE: ${{ inputs.baseline_commit }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          python3 docker/release-manifest.py --image "$(cat image-reference.txt)" --source "$SOURCE" --baseline "$BASELINE" --version "$VERSION" > release-manifest.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-manifest-${{ inputs.version }}-${{ inputs.source_commit }}
+          path: release-manifest.json
+          if-no-files-found: error

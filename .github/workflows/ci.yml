@@ -1,0 +1,71 @@
+name: DCMS CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_call:
+    inputs:
+      source_commit:
+        type: string
+        required: true
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ inputs.source_commit }}
+  cancel-in-progress: true
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.source_commit || github.sha }}
+          persist-credentials: false
+      - uses: shivammathur/setup-php@bf6b4fbd49ca58e4608c9c89fba0b8d90bd2a39f # 2.35.5
+        with:
+          php-version: '8.5'
+          extensions: pdo_sqlite, pdo_mysql, gd, mbstring, zip, dom, xml, xmlreader, xmlwriter
+          coverage: none
+          tools: composer:v2
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ~/.cache/composer/files
+          key: composer-${{ runner.os }}-${{ hashFiles('composer.lock') }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Locked dependencies and security policy
+        run: |
+          composer validate --strict
+          composer install --prefer-dist --no-interaction --no-progress
+          composer check-platform-reqs
+          composer audit --locked
+          npm ci --ignore-scripts
+          npm audit --audit-level=high
+      - name: Frontend tests and production assets
+        run: |
+          npm test
+          npm run build
+      - name: PHP tests and formatting
+        run: |
+          cp .env.example .env
+          php artisan key:generate --no-interaction
+          php artisan test --compact
+          vendor/bin/pint --test
+          git diff --check
+      - name: MySQL 8.4 integrity regressions on the disposable runner
+        run: |
+          php tests/prepare-mysql.php
+          docker compose -f compose.mysql-testing.yaml up -d --wait --wait-timeout 180
+          sh tests/capture-mysql-identity.sh
+          DCMS_MYSQL_TESTING=1 php tests/mysql-artisan.php migrate --no-interaction
+          DCMS_MYSQL_TESTING=1 vendor/bin/phpunit --configuration phpunit.mysql.xml
+      - name: Release image build and disposable smoke
+        run: |
+          docker build --build-arg SOURCE_COMMIT="$(git rev-parse HEAD)" -t dcms-ci:validation .
+          DCMS_DISPOSABLE_SMOKE=1 sh docker/smoke.sh dcms-ci:validation
+      - name: Dispose runner-only MySQL resources
+        if: always()
+        run: docker compose -f compose.mysql-testing.yaml down --volumes
