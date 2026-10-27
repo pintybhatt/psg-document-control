@@ -158,7 +158,7 @@ source_commit="$(git rev-parse HEAD)"
 printf '%s\n' "$source_commit" > "$verification_dir/source-commit"
 printf 'Evidence directory: %s\n' "$verification_dir"
 local_docker() {
-  sudo env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/root \
+  sudo env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
     /usr/bin/docker --host unix:///var/run/docker.sock \
     --config "$verification_dir/docker-config" "$@"
 }
@@ -181,7 +181,7 @@ local_docker image inspect "$image_id" \
 3. Execute smoke **only after approving both resource creation and scoped deletion**. This creates fresh app/DB/one-off migration containers, two networks, four named volumes and synthetic temporary files. It may download the pinned MySQL image, never the application image. It migrates only its newly created synthetic database, tests health/private-path denial/persistence, recreates the disposable app and stops the stack. The explicit cleanup consent authorizes removal of only new resources that pass the ownership checks. It does not remove images/build cache or the protected regression container. Expected exit 0, `Result: passed; cleanup: verified-empty` and a private summary path. A failure must remain a failure even if cleanup succeeds.
 
 ```bash
-sudo env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/root \
+sudo env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
   DCMS_DISPOSABLE_SMOKE=1 DCMS_SMOKE_CLEANUP=1 \
   /bin/sh docker/smoke.sh "$image_id" 2>&1 | tee "$verification_dir/smoke.log"
 smoke_status=${PIPESTATUS[0]}
