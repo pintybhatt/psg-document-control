@@ -49,3 +49,12 @@ it('aborts a previous workspace request and ignores a late sensitive response', 
     expect(wrapper.text()).not.toContain('Stale secret');
     expect(wrapper.find('table').exists()).toBe(false);
 });
+it('shows controlled reviews and compact operational metrics with Lao labels', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ totals: { incoming: 3, outgoing: 2, controlled: 1, overdue: 1, open_incoming: 2, open_outgoing: 1, pending_response: 1, closed: 2, due_soon: 1, review_soon: 0, review_overdue: 1, checkout_overdue: 1 }, due: [], recent: [], reviews: [{ number: 'SOP/001', title_en: 'Safety', title_lo: 'ຄວາມປອດໄພ', review_date: '2026-10-26', href: '/controlled-documents?record=1' }], quick_actions: [], trends: { monthly: [], category_en: [{ category_en: 'Safety', category_lo: 'ຄວາມປອດໄພ', total: 1 }], department_en: [] } }) })));
+    const { wrapper } = render('lo'); await flushPromises();
+    expect(wrapper.text()).toContain(lo['overview-controlled']);
+    expect(wrapper.text()).toContain(lo['metric-review_overdue']);
+    expect(wrapper.text()).toContain('26/10/2026');
+    expect(wrapper.text()).toContain('ຄວາມປອດໄພ');
+    expect(wrapper.text()).not.toMatch(/metric-|reportReviewDates|overview-/);
+});

@@ -78,7 +78,7 @@ class DashboardTest extends TestCase
         [, $site] = $this->workspace();
         $this->reader($site);
 
-        $this->getJson($this->url($site))->assertOk()->assertJsonPath('totals', ['incoming' => 0, 'outgoing' => 0, 'due_soon' => 0, 'overdue' => 0])->assertJsonPath('recent', [])->assertJsonPath('due', [])->assertJsonPath('quick_actions', [])->assertHeader('Cache-Control', 'no-store, private');
+        $this->getJson($this->url($site))->assertOk()->assertJsonPath('totals.incoming', 0)->assertJsonPath('totals.outgoing', 0)->assertJsonPath('totals.due_soon', 0)->assertJsonPath('totals.overdue', 0)->assertJsonPath('totals.controlled', 0)->assertJsonPath('recent', [])->assertJsonPath('due', [])->assertJsonPath('quick_actions', [])->assertHeader('Cache-Control', 'no-store, private');
         foreach (['incoming', 'outgoing'] as $kind) {
             $this->getJson($this->url($site, $kind.'-correspondence'))->assertOk()->assertJsonPath('data', [])->assertJsonPath('meta.total', 0);
         }
