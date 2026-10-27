@@ -55,6 +55,8 @@ jobs:
           php artisan test --compact
           vendor/bin/pint --test
           git diff --check
+      - name: Smoke safety regressions without daemon access
+        run: python3 -B -m unittest discover -s tests -p test_docker_smoke.py -v
       - name: MySQL 8.4 integrity regressions on the disposable runner
         run: |
           php tests/prepare-mysql.php
@@ -65,7 +67,7 @@ jobs:
       - name: Release image build and disposable smoke
         run: |
           docker build --build-arg SOURCE_COMMIT="$(git rev-parse HEAD)" -t dcms-ci:validation .
-          DCMS_DISPOSABLE_SMOKE=1 sh docker/smoke.sh dcms-ci:validation
+          DCMS_DISPOSABLE_SMOKE=1 DCMS_SMOKE_CLEANUP=1 sh docker/smoke.sh "$(docker image inspect --format '{{.Id}}' dcms-ci:validation)"
       - name: Dispose runner-only MySQL resources
         if: always()
         run: docker compose -f compose.mysql-testing.yaml down --volumes

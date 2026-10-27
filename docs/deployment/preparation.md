@@ -128,3 +128,83 @@ References used for preparation: [official PHP image source](https://github.com/
 At continuation checkpoint `069919c`, the existing local Engine service was active, context `default` selected `unix:///var/run/docker.sock`, and Docker/Compose CLIs were available. Outside sandbox isolation the socket is `root:docker` mode `0660`, and user `bipin` is not in the Docker group. Approved sandbox escalation still received socket permission denied; the approved `sudo -n` read-only probe required interactive authentication. This is a local authorization blocker, not evidence of a remote-context or stopped-daemon problem. Do not install Docker Desktop, switch endpoints, alter the socket/groups or use privilege workarounds to bypass it.
 
 An administrator-authenticated local execution facility must be arranged before resuming Docker verification. No password should be sent through chat. Start resumed work with read-only inventory and verification of the old `dcms-mysql84-tests` state; its final state remains unknown. No Docker mutation or disposable run took place in this continuation. Image build/runtime and recovery evidence remain outstanding as detailed in [completion.md](completion.md). Before executing smoke, also confirm caller-provided DCMS/Compose environment variables cannot override its generated isolated settings. This prerequisite does not authorize any UAT/Production access or deployment.
+
+## Hardened disposable smoke and administrator execution handoff
+
+The administrator has reported successful local Docker 29.9.2/API 1.56/Compose 5.6.1 checks on Ubuntu 26.04 WSL2 AMD64, and `dcms-mysql84-tests` restored to `exited 0`, with storage intact. This user-confirmed observation resolves the earlier restoration report; Codex has not independently inspected it. Codex still cannot authenticate interactively. Do not restart or modify that container. The commands below are **for review only** and require separate confirmation before the administrator runs the build or smoke.
+
+`smoke.sh` now launches the standard-library `smoke.py` driver. A Python driver makes environment, subprocess and resource-identity checks testable without a shell cleanup framework. It does not call `preflight.py`. The release Compose architecture, application and entrypoint remain unchanged.
+
+- Both execution opt-in (`DCMS_DISPOSABLE_SMOKE=1`) and disposable-deletion consent (`DCMS_SMOKE_CLEANUP=1`) are required for a real run. `--plan` only renders configuration and does not need deletion consent or daemon access.
+- Nonlocal DOCKER_HOST, non-default DOCKER_CONTEXT, supplied DOCKER_CONFIG and Docker TLS overrides are rejected before invoking Docker. The launcher uses isolated Python mode; every Docker invocation uses the reviewed `/usr/bin/docker` binary, approved Unix host and a fresh private, empty client-config directory. No privilege escalation, context fallback or registry login exists in the driver.
+- Docker/Compose/DCMS and app/database selector environment variables are controlled in child processes, including future variables under those prefixes. Ordinary PATH, HOME, locale, proxy and certificate variables remain available. Caller Compose files/profiles/env files/project names cannot enter the generated configuration.
+- Input is an existing local `sha256:` image ID; tags, registry names, options and newline injection are refused. Application pull policy is `never`; only the pinned public MySQL image may be downloaded if absent. Synthetic DB/key files are mode 0600 in a mode 0700 directory, with fixed `dcms_smoke` database/user and `DB_HOST=db`. Ingress is explicitly loopback with an ephemeral port. No host data-directory bind mounts, shared/external names or caller volume overrides are allowed.
+- UUID project names and run labels cannot be supplied by callers. Before creation the driver inventories existing resource IDs/names and refuses namespace collisions. Cleanup first inspects **all** candidate containers/networks/volumes: they must be absent from the baseline, match both project and run labels, and match expected names/service identities. Only those exact IDs/names can be removed. No `compose down`, `--remove-orphans`, image deletion or prune command is used. It verifies the project has no remaining resources afterward. A failed identity check refuses deletion and retains evidence for review.
+- App recreation uses `--no-deps`, preserving the disposable DB container. Failure/interrupt returns nonzero, collects bounded redacted synthetic logs, attempts only approved cleanup, and retains private summary/log evidence. If cleanup fails, protected synthetic configuration is retained for diagnosis; never paste the whole directory. Successful cleanup removes credential/env files while retaining evidence. SIGKILL/host failure cannot be trapped; do not issue broad cleanup if interrupted that way.
+
+These controls are not a defense against a malicious Docker administrator concurrently tampering with resources. Run the test without another operator manipulating its random project. Container boot, permissions, health and real Docker cleanup remain pending actual execution.
+
+Run these **separate reviewed blocks in the same Bash terminal**, only after confirmation. Stop on any failed command. The build uses a fresh evidence/client-config directory and no tag, so it cannot overwrite an existing image tag. `local_docker` uses interactive sudo in the administrator terminal, an explicit Unix endpoint and a minimal reviewed CLI environment. It does not depend on Codex inheriting `sudo -v`. If approved network proxy/certificate settings are needed for the build, review their injection separately; do not change endpoint controls.
+
+1. Prepare local evidence and read-only confirmation. Creates local `/tmp` directories/files only; no downloads or Docker mutations. Expected existing container output: `/dcms-mysql84-tests exited 0`.
+
+```bash
+cd /home/bipin/projects/psg-document-control
+umask 077
+set -o pipefail
+verification_dir="$(mktemp -d /tmp/dcms-docker-review-XXXXXXXX)"
+mkdir "$verification_dir/docker-config"
+source_commit="$(git rev-parse HEAD)"
+printf '%s\n' "$source_commit" > "$verification_dir/source-commit"
+printf 'Evidence directory: %s\n' "$verification_dir"
+local_docker() {
+  sudo env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/root \
+    /usr/bin/docker --host unix:///var/run/docker.sock \
+    --config "$verification_dir/docker-config" "$@"
+}
+local_docker version
+local_docker inspect dcms-mysql84-tests \
+  --format '{{.Name}} {{.State.Status}} {{.State.ExitCode}}'
+git status --short
+```
+
+2. Build the current clean source. Downloads missing PHP/Node/Composer base images, APT packages, locked Composer/npm dependencies and build font assets as needed. Creates a local image and build cache; does not publish, start containers or delete existing resources. Expected exit code 0 and a `sha256:` image ID in `image-id`. The read-only inspect records size and source label; registry RepoDigests may be empty for an unpublished local build.
+
+```bash
+local_docker build --build-arg SOURCE_COMMIT="$source_commit" \
+  --iidfile "$verification_dir/image-id" . 2>&1 | tee "$verification_dir/build.log"
+image_id="$(cat "$verification_dir/image-id")"
+local_docker image inspect "$image_id" \
+  --format 'ID={{.Id}} bytes={{.Size}} source={{index .Config.Labels "org.opencontainers.image.revision"}} digests={{json .RepoDigests}}'
+```
+
+3. Execute smoke **only after approving both resource creation and scoped deletion**. This creates fresh app/DB/one-off migration containers, two networks, four named volumes and synthetic temporary files. It may download the pinned MySQL image, never the application image. It migrates only its newly created synthetic database, tests health/private-path denial/persistence, recreates the disposable app and stops the stack. The explicit cleanup consent authorizes removal of only new resources that pass the ownership checks. It does not remove images/build cache or the protected regression container. Expected exit 0, `Result: passed; cleanup: verified-empty` and a private summary path. A failure must remain a failure even if cleanup succeeds.
+
+```bash
+sudo env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/root \
+  DCMS_DISPOSABLE_SMOKE=1 DCMS_SMOKE_CLEANUP=1 \
+  /bin/sh docker/smoke.sh "$image_id" 2>&1 | tee "$verification_dir/smoke.log"
+smoke_status=${PIPESTATUS[0]}
+printf 'Smoke exit status: %s\n' "$smoke_status"
+test "$smoke_status" -eq 0
+```
+
+4. Inspect evidence and verify cleanup without modifying Docker resources. These commands do not download or delete anything. Expected summary is `passed` / `verified-empty`; the three project lists are empty; the original container still reports `exited 0`. On failure, review the private summary/log and stop for guidance; do not delete resources by broad prefix or rerun with weaker checks.
+
+```bash
+smoke_summary="$(sed -n 's/^Smoke evidence: //p' "$verification_dir/smoke.log" | tail -n 1)"
+case "$smoke_summary" in
+  /tmp/dcms-smoke-*/summary.json) ;;
+  *) printf '%s\n' 'No valid smoke summary; stop and review the log.'; false ;;
+esac
+sudo cat "$smoke_summary"
+smoke_project="$(sudo python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["project"])' "$smoke_summary")"
+[[ "$smoke_project" =~ ^dcms-smoke-[a-f0-9]{32}$ ]]
+local_docker container ls --all --filter "label=com.docker.compose.project=$smoke_project"
+local_docker network ls --filter "label=com.docker.compose.project=$smoke_project"
+local_docker volume ls --filter "label=com.docker.compose.project=$smoke_project"
+local_docker inspect dcms-mysql84-tests \
+  --format '{{.Name}} {{.State.Status}} {{.State.ExitCode}}'
+```
+
+Provide the build result, image inspect output, smoke exit/status summary, project-list outputs and protected-container state for review. Runtime testing stays pending until these results are supplied. Neither local success nor these commands authorize Phase 11, UAT or Production.
