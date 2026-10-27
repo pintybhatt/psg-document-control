@@ -40,6 +40,7 @@ jobs:
     uses: ./.github/workflows/ci.yml
     with:
       source_commit: ${{ inputs.source_commit }}
+      retain_image: true
   publish:
     needs: ci
     if: vars.ENABLE_IMAGE_PUBLISHING == 'true'
@@ -55,7 +56,11 @@ jobs:
           ref: ${{ inputs.source_commit }}
           fetch-depth: 0
           persist-credentials: false
-      - name: Build authorized artifact and publish to private GHCR
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ needs.ci.outputs.image_artifact }}
+          path: validated-image
+      - name: Publish the exact image already built and smoke tested
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SOURCE: ${{ inputs.source_commit }}
@@ -65,7 +70,12 @@ jobs:
           image="$repository:$VERSION-$SOURCE"
           printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
           trap 'docker logout ghcr.io' EXIT
-          docker build --build-arg SOURCE_COMMIT="$SOURCE" -t "$image" .
+          test "$(cat validated-image/source-commit.txt)" = "$SOURCE"
+          image_id="$(cat validated-image/image-id.txt)"
+          [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
+          docker image load --input validated-image/image.tar
+          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image_id")" = "$SOURCE"
+          docker tag "$image_id" "$image"
           docker push "$image"
           docker inspect --format '{{index .RepoDigests 0}}' "$image" > image-reference.txt
       - name: Record digest, source, migration inventory and build identity
