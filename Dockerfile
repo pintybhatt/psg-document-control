@@ -51,7 +51,8 @@ COPY public ./public
 COPY --from=frontend /build/public/build ./public/build
 COPY docker/apache.conf /etc/apache2/sites-available/000-default.conf
 COPY docker/php.ini /usr/local/etc/php/conf.d/dcms.ini
-COPY --chmod=755 docker/entrypoint.sh /usr/local/bin/dcms-entrypoint
+COPY docker/entrypoint.sh /usr/local/bin/dcms-entrypoint
+RUN chmod 755 /usr/local/bin/dcms-entrypoint
 RUN mkdir -p storage/app/document-vault storage/app/private storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs \
     && chmod 0755 /var/www/html \
     && chown -R www-data:www-data storage bootstrap/cache \
