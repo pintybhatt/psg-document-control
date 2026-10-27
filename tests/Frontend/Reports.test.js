@@ -56,3 +56,12 @@ it('shows validation failures without stale report totals or export links', asyn
     expect(wrapper.text()).toContain(en.reportValidation); expect(wrapper.text()).not.toContain('DEMO/IN/001');
     expect(wrapper.findAll('a')).toHaveLength(0);
 });
+
+it('offers audit-only users their explicitly permitted view without management or security reports', async () => {
+    const { wrapper, fetch } = await render('en', ['documents.audit.view']);
+    expect(wrapper.get('#report-view').element.value).toBe('audit');
+    const options = wrapper.get('#report-view').findAll('option').map(option => option.element.value);
+    expect(options).toEqual(['audit']);
+    expect(fetch.mock.calls.some(([url]) => url.includes('view=audit'))).toBe(true);
+    expect(wrapper.find('#report-outcome').exists()).toBe(false);
+});

@@ -12,6 +12,7 @@ use Illuminate\Support\Carbon;
 class ManagementReport extends CorrespondenceReport
 {
     private const LABELS = [
+        'changes_text' => ['Permitted changes', 'ຂໍ້ມູນປ່ຽນແປງທີ່ອະນຸຍາດ'], 'event' => ['Event', 'ເຫດການ'], 'actor' => ['Actor', 'ຜູ້ດຳເນີນການ'], 'timestamp' => ['Time (Laos)', 'ເວລາ (ລາວ)'], 'reason' => ['Reason / note', 'ເຫດຜົນ / ບັນທຶກ'], 'unattributed' => ['Unattributed event', 'ເຫດການບໍ່ລະບຸເອກະສານ'], 'administration' => ['Administrative activity', 'ກິດຈະກຳບໍລິຫານ'], 'issued_number' => ['Number issuance', 'ການອອກເລກທີ'], 'operation' => ['Access operation', 'ການເຂົ້າເຖິງ'], 'outcome' => ['Outcome', 'ຜົນການດຳເນີນງານ'], 'allowed' => ['Allowed', 'ອະນຸຍາດ'], 'denied' => ['Denied', 'ປະຕິເສດ'], 'activity' => ['Other activity', 'ກິດຈະກຳອື່ນ'],
         'view' => ['Report', 'ລາຍງານ'],
         'type_id' => ['Document type', 'ປະເພດເອກະສານ'],
         'category_id' => ['Category', 'ໝວດໝູ່'],
@@ -44,6 +45,67 @@ class ManagementReport extends CorrespondenceReport
         'empty' => ['No authorized records match these filters.', 'ບໍ່ມີລາຍການທີ່ມີສິດກົງກັບຕົວກອງ.'], 'scope' => ['Authorized workspaces', 'ຂອບເຂດທີ່ມີສິດ'],
     ];
 
+    public function event(string $event, string $language): string
+    {
+        $events = [
+            'created' => ['Draft created', 'ສ້າງຮ່າງ'], 'updated' => ['Metadata updated', 'ປັບປຸງຂໍ້ມູນ'], 'registered' => ['Formally registered', 'ລົງທະບຽນທາງການ'], 'number.issued' => ['Number issued', 'ອອກເລກທີ'],
+            'correct_details' => ['Metadata corrected', 'ແກ້ໄຂຂໍ້ມູນ'], 'update' => ['Assignment / handling updated', 'ປັບປຸງການມອບໝາຍ / ດຳເນີນງານ'], 'close' => ['Closed', 'ປິດແລ້ວ'], 'reopen' => ['Reopened', 'ເປີດຄືນ'], 'note' => ['Follow-up added', 'ເພີ່ມການຕິດຕາມ'],
+            'dispatch' => ['Dispatched', 'ສົ່ງອອກ'], 'correct_dispatch' => ['Dispatch corrected', 'ແກ້ໄຂການສົ່ງ'], 'delivery' => ['Delivery / acknowledgment updated', 'ປັບປຸງການສົ່ງ / ຢືນຢັນ'], 'link' => ['Document relationship added', 'ເພີ່ມການເຊື່ອມໂຍງ'], 'unlink' => ['Document relationship removed', 'ຍົກເລີກການເຊື່ອມໂຍງ'],
+            'revision_prepared' => ['Revision prepared', 'ກະກຽມສະບັບປັບປຸງ'], 'obsolete' => ['Document marked obsolete', 'ຍົກເລີກເອກະສານ'], 'superseded' => ['Document superseded', 'ທົດແທນເອກະສານ'], 'archived' => ['Document archived', 'ຈັດເກັບເອກະສານ'], 'released' => ['Revision released', 'ປະກາດໃຊ້ສະບັບປັບປຸງ'], 'status_changed' => ['Document status changed', 'ປ່ຽນສະຖານະເອກະສານ'],
+            'attachment.uploaded' => ['Attachment uploaded', 'ອັບໂຫຼດໄຟລ໌ແນບ'], 'attachment.replaced' => ['Attachment version added', 'ເພີ່ມສະບັບໄຟລ໌ແນບ'], 'attachment.preview' => ['Protected-file preview served', 'ໃຫ້ເບິ່ງໄຟລ໌ທີ່ປ້ອງກັນ'], 'attachment.download' => ['Protected-file download served', 'ໃຫ້ດາວໂຫຼດໄຟລ໌ທີ່ປ້ອງກັນ'], 'attachment.unavailable' => ['File retrieval unavailable', 'ບໍ່ສາມາດຮັບໄຟລ໌'],
+            'copy.created' => ['Physical copy registered', 'ລົງທະບຽນສຳເນົາເອກະສານ'], 'location.created' => ['Storage location created', 'ສ້າງບ່ອນເກັບ'], 'custody.checkout' => ['Physical copy checked out', 'ຢືມເອກະສານ'], 'custody.return' => ['Physical copy returned', 'ສົ່ງຄືນເອກະສານ'], 'custody.transfer' => ['Physical custody transferred', 'ໂອນການຄອບຄອງ'], 'custody.correct' => ['Custody corrected', 'ແກ້ໄຂການຄອບຄອງ'], 'custody.inventory' => ['Inventory check recorded', 'ບັນທຶກການກວດນັບ'],
+            'access.allowed' => ['Document access allowed', 'ອະນຸຍາດເຂົ້າເຖິງເອກະສານ'], 'access.denied' => ['Document access denied', 'ປະຕິເສດເຂົ້າເຖິງເອກະສານ'], 'request.denied.metadata' => ['Protected request denied', 'ປະຕິເສດຄຳຮ້ອງທີ່ປ້ອງກັນ'], 'request.denied.preview' => ['File preview denied', 'ປະຕິເສດເບິ່ງໄຟລ໌'], 'request.denied.download' => ['File download denied', 'ປະຕິເສດດາວໂຫຼດໄຟລ໌'],
+            'profile.registered' => ['Security profile registered', 'ລົງທະບຽນຂໍ້ກຳນົດຄວາມປອດໄພ'], 'profile.restricted' => ['Document access restricted', 'ຈຳກັດສິດເອກະສານ'], 'role.created' => ['Role created', 'ສ້າງບົດບາດ'], 'role.updated' => ['Role updated', 'ປັບປຸງບົດບາດ'], 'assignment.granted' => ['Role assigned', 'ມອບໝາຍບົດບາດ'], 'assignment.revoked' => ['Role assignment revoked', 'ຖອນການມອບໝາຍບົດບາດ'],
+            'clearance.granted' => ['Clearance granted', 'ອະນຸຍາດຊັ້ນຄວາມລັບ'], 'clearance.updated' => ['Clearance updated', 'ປັບປຸງຊັ້ນຄວາມລັບ'], 'clearance.revoked' => ['Clearance revoked', 'ຖອນການອະນຸຍາດຊັ້ນຄວາມລັບ'], 'grant.granted' => ['Document access granted', 'ອະນຸຍາດສິດເອກະສານ'], 'grant.updated' => ['Document access grant updated', 'ປັບປຸງສິດເອກະສານ'], 'grant.revoked' => ['Document access grant revoked', 'ຖອນສິດເອກະສານ'],
+        ];
+
+        return $events[$event][$language === 'lo' ? 1 : 0] ?? ($language === 'lo' ? 'ບັນທຶກກິດຈະກຳ' : 'Activity recorded');
+    }
+
+    public function securityReason(?string $reason, string $language): ?string
+    {
+        if ($reason === null) {
+            return null;
+        }
+        $reasons = ['permission_denied' => ['Permission denied', 'ບໍ່ມີສິດ'], 'membership_denied' => ['Organizational access denied', 'ບໍ່ມີສິດອົງກອນ'], 'clearance_denied' => ['Clearance required', 'ຕ້ອງມີການອະນຸຍາດຊັ້ນຄວາມລັບ'], 'restriction_denied' => ['Document grant required', 'ຕ້ອງມີສິດເອກະສານ'], 'system_administrator' => ['Privileged administrator access', 'ການເຂົ້າເຖິງຂອງຜູ້ດູແລພິເສດ']];
+        if (in_array($reason, ['401', '403', '404', '409', '419', '422', '429', '500', '503'], true)) {
+            return ($language === 'lo' ? 'ປະຕິເສດຄຳຮ້ອງ' : 'Request denied').' ('.$reason.')';
+        }
+
+        return $reasons[$reason][$language === 'lo' ? 1 : 0] ?? ($language === 'lo' ? 'ບັນທຶກເຫດການຄວາມປອດໄພ' : 'Security activity recorded');
+    }
+
+    public function source(string $source, string $language): string
+    {
+        $key = match ($source) {
+            'incoming', 'incoming-operations' => 'incoming', 'outgoing', 'outgoing-operations' => 'outgoing', 'controlled' => 'controlled', 'storage' => 'physical', 'numbering' => 'issued_number', 'security', 'security-storage', 'unattributed-security' => 'security', 'administration', 'global-administration' => 'administration', default => 'unattributed'
+        };
+
+        return $this->label($key, $language);
+    }
+
+    public function changeValue(string $field, mixed $value, string $language): string
+    {
+        if (is_bool($value)) {
+            return $this->label($value ? 'yes' : 'no', $language);
+        }
+        if ($value && str_ends_with($field, '_date')) {
+            return Carbon::parse($value)->format('d/m/Y');
+        }
+        if (is_string($value) && in_array($field, ['status', 'classification', 'observation'], true)) {
+            return $this->label($value, $language);
+        }
+
+        return $this->display($value);
+    }
+
+    public function field(string $field, string $language): string
+    {
+        $value = $this->label($field, $language);
+
+        return $value !== $field ? $value : ($language === 'lo' ? 'ຂໍ້ມູນທີ່ປັບປຸງ' : 'Updated value');
+    }
+
     public function label(string $key, string $language): string
     {
         return self::LABELS[$key][$language === 'lo' ? 1 : 0] ?? parent::label($key, $language);
@@ -60,7 +122,7 @@ class ManagementReport extends CorrespondenceReport
         $columns = match ($view) {
             'physical' => ['number', 'title', 'identifier', 'kind', 'custody_status', 'location', 'custodian', 'checkout_date', 'expected_return_date'],
             'revisions' => ['number', 'title', 'revision_identifier', 'revision_status', 'revision_owner', 'effective_date', 'revision_review_date'],
-            'audit', 'security' => ['number', 'title', 'event', 'actor', 'timestamp', 'reason'],
+            'audit', 'security' => ['number', 'title', 'event', 'actor', 'timestamp', 'reason', 'changes_text'],
             default => ($filters['register'] ?? '') ? (($filters['register'] === 'controlled') ? ['number', 'title', 'status', 'category', 'owner_name', 'review_date', 'department'] : ['number', 'official_number', 'title', 'document_date', 'status', 'category', 'department']) : ['register', 'number', 'official_number', 'title', 'document_date', 'status', 'category', 'department'],
         };
         $workspace = array_unique(array_map(fn (array $context): string => implode(' / ', array_filter([$context['company']['name_'.$language] ?: $context['company']['name_en'], $context['site']['name_'.$language] ?: $context['site']['name_en'], $context['department']['name_'.$language] ?? null])), $contexts));
@@ -94,6 +156,11 @@ class ManagementReport extends CorrespondenceReport
                 if (! empty($row[$key])) {
                     $row[$key] = Carbon::parse($row[$key]);
                 }
+            }
+
+            $row['changes_text'] = implode("\n", array_map(fn (array $change): string => $change['label_'.$language].': '.$this->changeValue($change['field'], $change['before'], $language).' → '.$this->changeValue($change['field'], $change['after'], $language), $row['changes'] ?? []));
+            if (isset($row['timestamp'])) {
+                $row['timestamp'] = Carbon::parse($row['timestamp'])->timezone('Asia/Vientiane')->format('d/m/Y, H:i');
             }
 
             return $row;

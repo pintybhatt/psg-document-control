@@ -75,7 +75,7 @@ class AuditDocumentStorageRequests
     private function record(Request $request, int $status): void
     {
         $audit = new StorageEvent(['actor_id' => $request->user()?->id, 'action' => 'request.denied', 'reason' => (string) $status,
-            'after' => ['route' => $request->route()?->getName(), 'record' => $request->route('record'), 'version' => $request->route('version')]]);
+            'after' => ['type' => $request->route('type'), 'route' => $request->route()?->getName(), 'record' => $request->route('record'), 'version' => $request->route('version')]]);
         if (! $audit->save()) {
             throw new \LogicException('Denied storage request audit persistence cancelled.');
         }
