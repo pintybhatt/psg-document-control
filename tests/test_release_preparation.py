@@ -233,7 +233,7 @@ if args[:2] == ['image', 'inspect']:
 if args[:3] == ['buildx', 'imagetools', 'inspect']: print(json.dumps({'digest': 'sha256:'+'c'*64}))
 ''')
         executable.chmod(0o755)
-        workflow = (ROOT/'.github/templates/release-image.yml.disabled').read_text()
+        workflow = (ROOT/'.github/workflows/release-image.yml').read_text()
         section = workflow.split('      - name: Publish the exact image already built and smoke tested\n')[1]
         self.script = textwrap.dedent(section.split('        run: |\n', 1)[1].split('      - name:', 1)[0])
 
@@ -272,15 +272,21 @@ if args[:3] == ['buildx', 'imagetools', 'inspect']: print(json.dumps({'digest': 
 
 
 class ReleaseConfigurationTests(unittest.TestCase):
-    def test_publication_stays_inactive_and_requires_main_manual_full_validation(self):
-        workflow = (ROOT/'.github/templates/release-image.yml.disabled').read_text()
+    def test_publication_requires_explicit_switch_main_manual_and_full_validation(self):
+        workflow = (ROOT/'.github/workflows/release-image.yml').read_text()
         publish = workflow.split('  publish:\n', 1)[1]
         self.assertRegex(publish, r'(?m)^    needs: ci$')
         self.assertRegex(publish, r"\n    if: .*workflow_dispatch.*refs/heads/main.*pintybhatt/psg-document-control.*ENABLE_IMAGE_PUBLISHING")
+        self.assertIn("vars.ENABLE_IMAGE_PUBLISHING == 'true'", publish)
+        self.assertEqual(workflow.count('packages: write'), 1)
         self.assertIn('    environment: release-image\n', publish)
-        self.assertFalse((ROOT/'.github/workflows/release-image.yml').exists())
+        self.assertIn('      retain_image: true\n', workflow)
+        self.assertIn('    needs: identity\n', workflow)
+        self.assertIn('  contents: read\n', workflow)
         for path in (ROOT/'.github/workflows').glob('*.yml'):
-            self.assertNotRegex(path.read_text(), r'packages:\s*write|pull_request_target:')
+            self.assertNotIn('pull_request_target:', path.read_text())
+            if path.name != 'release-image.yml':
+                self.assertNotRegex(path.read_text(), r'packages:\s*write')
         self.assertRegex(publish, r'\n      packages: write\n')
 
     def test_manifest_records_tested_identity_run_and_complete_migration_inventory(self):

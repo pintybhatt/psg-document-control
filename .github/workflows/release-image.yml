@@ -1,4 +1,4 @@
-# INACTIVE: copy to .github/workflows only after explicit publishing authorization.
+# Publication remains off until separately approved ENABLE_IMAGE_PUBLISHING=true.
 name: Authorized release image
 on:
   workflow_dispatch:

@@ -1,5 +1,8 @@
 # XPPL DCMS deployment preparation
 
+Current activation review: see [release readiness](releases.md) for candidate `a7e0a5ded145319c5c60fd7e122cc42e14599c10`. The former disabled publisher is now prepared at `.github/workflows/release-image.yml`, with publication off. The preparation history below describes the earlier inactive-template phase; it does not authorize publication or server access.
+
+
 27 October 2026. Local engineering only. This document and its commands are templates for a separately authorized operator. They do not authorize host access, registry publication, Phase 11 UAT execution or Production deployment. No operational server or other system was accessed.
 
 ## Current UAT configuration preparation
