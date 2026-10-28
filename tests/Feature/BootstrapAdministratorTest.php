@@ -92,26 +92,63 @@ class BootstrapAdministratorTest extends TestCase
         $this->assertDatabaseCount('departments', 0);
     }
 
-    #[TestWith(['testing', 8])]
-    #[TestWith(['testing', 15])]
-    #[TestWith(['staging', 8])]
-    #[TestWith(['staging', 15])]
-    #[TestWith(['production', 8])]
-    #[TestWith(['production', 15])]
-    #[TestWith(['development', 8])]
-    #[TestWith(['development', 15])]
-    #[TestWith(['', 15])]
-    public function test_nonlocal_bootstrap_rejects_passwords_below_sixteen_characters(string $environment, int $length): void
+    public function test_uat_bootstrap_accepts_eight_character_password(): void
     {
-        $this->app['env'] = $environment;
-        $password = str_repeat('x', $length);
+        $this->app['env'] = 'uat';
+        $password = 'abcdefgh';
 
         $this->artisan('user:bootstrap-admin', $this->identity())
-            ->expectsQuestion('Password', $password)->expectsQuestion('Confirm password', $password)
-            ->expectsOutputToContain('Password must be at least 16 characters')
+            ->expectsQuestion('Password', $password)
+            ->expectsQuestion('Confirm password', $password)
+            ->assertExitCode(0);
+
+        $this->assertTrue(Hash::check($password, User::query()->sole()->password));
+    }
+
+    public function test_uat_bootstrap_rejects_passwords_below_eight_characters(): void
+    {
+        $this->app['env'] = 'uat';
+        $password = 'abcdefg';
+
+        $this->artisan('user:bootstrap-admin', $this->identity())
+            ->expectsQuestion('Password', $password)
+            ->expectsQuestion('Confirm password', $password)
+            ->expectsOutputToContain('Password must be at least 8 characters')
             ->assertExitCode(1);
 
         $this->assertDatabaseCount('users', 0);
+    }
+
+    #[TestWith(['testing'])]
+    #[TestWith(['staging'])]
+    #[TestWith(['production'])]
+    #[TestWith(['development'])]
+    #[TestWith([''])]
+    public function test_all_environments_reject_passwords_below_eight_characters(string $environment): void
+    {
+        $this->app['env'] = $environment;
+        $password = 'abcdefg';
+
+        $this->artisan('user:bootstrap-admin', $this->identity())
+            ->expectsQuestion('Password', $password)
+            ->expectsQuestion('Confirm password', $password)
+            ->expectsOutputToContain('Password must be at least 8 characters')
+            ->assertExitCode(1);
+
+        $this->assertDatabaseCount('users', 0);
+    }
+
+    public function test_production_bootstrap_accepts_eight_character_password(): void
+    {
+        $this->app['env'] = 'production';
+        $password = 'abcdefgh';
+
+        $this->artisan('user:bootstrap-admin', $this->identity())
+            ->expectsQuestion('Password', $password)
+            ->expectsQuestion('Confirm password', $password)
+            ->assertExitCode(0);
+
+        $this->assertTrue(Hash::check($password, User::query()->sole()->password));
     }
 
     #[TestWith(['testing'])]
