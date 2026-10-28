@@ -14,6 +14,7 @@ class DocumentMasterDataResource extends JsonResource
         $data['scope_key'] = $this->scope->scope_key;
         $data['effective'] = $this->active && $this->scope->isActive();
         if ($this->resource instanceof DocumentType) {
+            $data += $this->resource->only(['review_enabled', 'review_interval_months', 'review_baseline']);
             $data['category'] = $this->category->only(['id', 'name_en', 'name_lo', 'active']);
             $data['register_ids'] = $this->registers->pluck('id')->all();
             $data['effective_registers'] = $data['effective'] && $this->category->active

@@ -41,6 +41,9 @@ class DocumentMasterDataRequest extends RbacScopeRequest
                 'register_key' => ['prohibited'],
             ];
             if ($kind === 'types') {
+                $rules['review_enabled'] = ['sometimes', 'boolean'];
+                $rules['review_interval_months'] = ['sometimes', 'nullable', 'integer', 'min:1', 'max:1200'];
+                $rules['review_baseline'] = ['sometimes', 'nullable', Rule::in(['completion_date'])];
                 $rules['category_id'] = $creating ? ['required', 'integer', Rule::exists('document_categories', 'id')->where('scope_id', $scope->id)] : ['prohibited'];
                 $rules['register_ids'] = [$required, 'array', 'min:1', 'max:3'];
                 $rules['register_ids.*'] = ['integer', 'distinct', Rule::exists('register_configurations', 'id')->where('scope_id', $scope->id)];

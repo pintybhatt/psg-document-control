@@ -30,7 +30,7 @@ const optionsLoading = ref(false);
 const revoked = ref(false);
 const editor = ref(null);
 const editorElement = ref(null);
-const form = reactive({ code: '', name_en: '', name_lo: '', description_en: '', description_lo: '', active: true, category_id: '', register_key: 'incoming', register_ids: [] });
+const form = reactive({ code: '', name_en: '', name_lo: '', description_en: '', description_lo: '', active: true, category_id: '', register_key: 'incoming', register_ids: [], review_enabled: false, review_interval_months: '', review_baseline: '' });
 const pending = ref(null);
 const confirmationOpen = ref(false);
 let controller;
@@ -97,7 +97,7 @@ async function allOptions(kind, signal) {
 }
 async function openEditor(kind, row = null) {
     fields.value = {}; errorKey.value = ''; editor.value = { kind, id: row?.id ?? null };
-    Object.assign(form, { code: row?.code ?? '', name_en: row?.name_en ?? '', name_lo: row?.name_lo ?? '', description_en: row?.description_en ?? '', description_lo: row?.description_lo ?? '', active: row?.active ?? true, category_id: row?.category_id ?? '', register_ids: [...(row?.register_ids ?? [])], register_key: row?.register_key ?? identities.find(key => !lists.registers.rows.some(item => item.register_key === key)) ?? 'incoming' });
+    Object.assign(form, { code: row?.code ?? '', name_en: row?.name_en ?? '', name_lo: row?.name_lo ?? '', description_en: row?.description_en ?? '', description_lo: row?.description_lo ?? '', active: row?.active ?? true, category_id: row?.category_id ?? '', register_ids: [...(row?.register_ids ?? [])], review_enabled: row?.review_enabled ?? false, review_interval_months: row?.review_interval_months ?? '', review_baseline: row?.review_baseline ?? '', register_key: row?.register_key ?? identities.find(key => !lists.registers.rows.some(item => item.register_key === key)) ?? 'incoming' });
     const signal = controller.signal;
     if (kind === 'types') {
         optionsLoading.value = true;
@@ -122,6 +122,7 @@ async function save() {
         if (!id) { body.code = form.code; }
         if (kind === 'types') {
             body.register_ids = [...form.register_ids];
+            Object.assign(body, { review_enabled: form.review_enabled, review_interval_months: form.review_interval_months === '' ? null : Number(form.review_interval_months), review_baseline: form.review_baseline || null });
             if (!id) { body.category_id = form.category_id; }
         }
     }
@@ -196,6 +197,13 @@ onBeforeUnmount(() => controller?.abort());
                     <span class="wrap-anywhere">{{ registerLabel(register.register_key) }} · {{ t(register.active ? 'rbacActive' : 'rbacInactive') }}</span>
                 </label>
                 <p v-if="fieldError('register_ids')" role="alert" class="mt-3 text-sm text-red-700">{{ t(fieldError('register_ids')) }}</p>
+            </fieldset>
+            <fieldset v-if="editor.kind === 'types'" :disabled="!canManage || saving" class="flex flex-col gap-4 rounded-lg border border-slate-200 p-4">
+                <legend class="px-2 text-sm font-semibold">{{ t('masterReviewPolicy') }}</legend>
+                <p class="text-sm text-slate-600">{{ t('masterReviewHelp') }}</p>
+                <CheckboxInput id="master-review-enabled" v-model="form.review_enabled" :label="t('masterReviewEnabled')" :error-key="fieldError('review_enabled')" />
+                <TextInput id="master-review-months" v-model="form.review_interval_months" type="number" min="1" max="1200" :label="t('masterReviewMonths')" :error-key="fieldError('review_interval_months')" />
+                <SelectInput id="master-review-baseline" v-model="form.review_baseline" :label="t('masterReviewBaseline')" :options="[{ value: '', label: t('uiChoose') }, { value: 'completion_date', label: t('masterReviewCompletionBaseline') }]" :error-key="fieldError('review_baseline')" />
             </fieldset>
             <div class="flex flex-wrap gap-3"><UiButton v-if="canManage" type="submit" :loading="saving" :disabled="optionsLoading">{{ t('masterSave') }}</UiButton><UiButton variant="secondary" :disabled="saving" @click="editor = null">{{ t('uiCancel') }}</UiButton></div>
         </form>

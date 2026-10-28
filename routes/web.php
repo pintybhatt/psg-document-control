@@ -78,6 +78,7 @@ Route::middleware(['auth:web', EnsureActiveUserSession::class])->group(function 
         Route::patch('controlled-documents/{record}', [ControlledDocumentController::class, 'update'])->name('controlled.update');
         Route::post('controlled-documents/{record}/register', [ControlledDocumentController::class, 'register'])->name('controlled.register');
         Route::post('controlled-documents/{record}/revisions', [ControlledDocumentController::class, 'revise'])->name('controlled.revise');
+        Route::post('controlled-documents/{record}/revisions/{revision}/reviews', [ControlledDocumentController::class, 'recordReview'])->name('controlled.reviews.record');
         Route::post('controlled-documents/{record}/revisions/{revision}/approvals', [ControlledDocumentController::class, 'recordApproval'])->name('controlled.approvals.record');
         Route::post('controlled-documents/{record}/release', [ControlledDocumentController::class, 'release'])->name('controlled.release');
         Route::post('controlled-documents/{record}/status', [ControlledDocumentController::class, 'changeStatus'])->name('controlled.changeStatus');

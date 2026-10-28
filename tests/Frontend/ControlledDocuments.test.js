@@ -14,9 +14,10 @@ enableAutoUnmount(afterEach);
 beforeEach(() => localStorage.clear());
 afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals(); });
 function response(data, status = 200) { return { ok: status < 400, status, json: async () => structuredClone(data) }; }
-function server({ registered = false, released = false, mutationError = null, detailError = null, approvalEntries = [] } = {}) {
+function server({ registered = false, released = false, mutationError = null, detailError = null, approvalEntries = [], reviewEntries = [] } = {}) {
     let record = structuredClone(draft);
     const approvals = structuredClone(approvalEntries);
+    const reviews = structuredClone(reviewEntries);
     if (registered || released) { record.registered_at = '2026-10-26T10:00:00Z'; record.internal_number = 'TEST/CD/2026/000001'; record.lock_version = 2; }
     if (released) { record.status = 'current'; record.current_revision_id = record.authoritative_revision_id = 11; record.revisions[0].status = 'current'; record.revisions[0].released_at = '2026-10-26T10:01:00Z'; record.revisions[0].released_by = 5; record.lock_version = 3; }
     const fetch = vi.fn(async (url, options = {}) => {
@@ -24,10 +25,11 @@ function server({ registered = false, released = false, mutationError = null, de
         const method = options.method ?? 'GET';
         if (path.endsWith('/lookups')) { return response({ data: [type], people: [{ id: 5, name: 'Example owner' }] }); }
         if (method === 'GET' && path === '/controlled') { return response({ data: new URL(url, 'http://localhost').searchParams.get('status') === 'current' ? [{ ...record, id: 2, document_code: 'XPPL/SOP/REPLACEMENT' }] : [record], meta: { total: 1 } }); }
-        if (method === 'GET') { return detailError ? response(detailError.body, detailError.status) : response({ data: record, audits: [{ id: 1, action: 'created', actor_id: 5, created_at: '2026-10-26T10:00:00Z' }], related: [], approvals }); }
+        if (method === 'GET') { return detailError ? response(detailError.body, detailError.status) : response({ data: record, audits: [{ id: 1, action: 'created', actor_id: 5, created_at: '2026-10-26T10:00:00Z' }], related: [], approvals, reviews }); }
         if (mutationError) { return response(mutationError.body, mutationError.status); }
         const body = JSON.parse(options.body);
-        if (path.endsWith('/approvals')) { approvals.push({ id: approvals.length + 1, revision_id: 11, actor_id: 5, recorded_at: '2026-10-28T10:00:00Z', snapshot: { revision: structuredClone(record.revisions[0]) }, ...body }); }
+        if (path.endsWith('/reviews')) { reviews.push({ id: reviews.length + 1, revision_id: 11, actor_id: 5, recorded_at: '2026-10-28T10:00:00Z', next_review_date: '2027-10-28', ...body }); }
+        else if (path.endsWith('/approvals')) { approvals.push({ id: approvals.length + 1, revision_id: 11, actor_id: 5, recorded_at: '2026-10-28T10:00:00Z', snapshot: { revision: structuredClone(record.revisions[0]) }, ...body }); }
         else if (path.endsWith('/register')) { record.registered_at = '2026-10-26T10:00:00Z'; record.internal_number = 'TEST/CD/2026/000001'; }
         else if (path.endsWith('/release')) { record.status = 'current'; record.current_revision_id = record.authoritative_revision_id = 11; record.revisions[0].status = 'current'; record.revisions[0].released_at = '2026-10-26T10:01:00Z'; }
         else if (path.endsWith('/revisions')) { record.revisions.push({ ...revision, id: 12, identifier: 'R01', display_identifier: 'XPPL/SOP/001-R01', revision_number: 1, ...body }); }
@@ -198,4 +200,32 @@ it('opens the existing controlled detail directly from a document search link', 
     } finally {
         window.history.replaceState({}, '', '/');
     }
+});
+
+it('records completion on the authoritative revision with CSRF and displays escaped review history', async () => {
+    const fetch = server({ released: true });
+    const wrapper = await render({ ...scope, permissions: ['controlled.reviews.record'] }); await show(wrapper);
+    await button(wrapper, en['controlledAction-reviews']).trigger('click');
+    await wrapper.get('#controlled-review-outcome').setValue('revision_required');
+    await wrapper.get('#controlled-review-comments').setValue('<script>Check procedure</script>');
+    await wrapper.get('#controlled-action-form').trigger('submit'); await flushPromises();
+    const [url, options] = fetch.mock.calls.find(([url, options]) => options.method === 'POST' && url.includes('/reviews'));
+    expect(url).toContain('/controlled/1/revisions/11/reviews');
+    expect(options.headers['X-CSRF-TOKEN']).toBe('sample-csrf');
+    expect(JSON.parse(options.body)).toEqual({ company_id: 4, site_id: 7, department_id: null, lock_version: 3, outcome: 'revision_required', comments: '<script>Check procedure</script>' });
+    expect(wrapper.text()).toContain(en['controlledReview-revision_required']);
+    expect(wrapper.text()).toContain('<script>Check procedure</script>');
+    expect(wrapper.find('script').exists()).toBe(false);
+    expect(wrapper.text()).toContain('28/10/2027');
+});
+
+it('shows reviews only in their revision history and hides completion controls from readers and drafts', async () => {
+    server({ released: true, reviewEntries: [{ id: 1, revision_id: 11, actor_id: 5, outcome: 'no_changes_required', comments: 'Completed check', recorded_at: '2026-10-28T10:00:00Z', next_review_date: '2027-10-28' }, { id: 2, revision_id: 999, outcome: 'revision_required', comments: 'Foreign history' }] });
+    const wrapper = await render({ ...scope, permissions: [] }); await show(wrapper);
+    expect(wrapper.text()).toContain('Completed check');
+    expect(wrapper.text()).not.toContain('Foreign history');
+    expect(wrapper.findAll('button').some(item => item.text() === en['controlledAction-reviews'])).toBe(false);
+    server();
+    const draftWrapper = await render({ ...scope, permissions: ['controlled.reviews.record'] }); await show(draftWrapper);
+    expect(draftWrapper.findAll('button').some(item => item.text() === en['controlledAction-reviews'])).toBe(false);
 });

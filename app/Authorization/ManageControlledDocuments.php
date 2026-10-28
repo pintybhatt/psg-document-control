@@ -5,6 +5,7 @@ namespace App\Authorization;
 use App\Models\AuthorizationScope;
 use App\Models\ControlledDocument;
 use App\Models\ControlledDocumentAudit;
+use App\Models\ControlledDocumentReview;
 use App\Models\ControlledRevision;
 use App\Models\ControlledRevisionApproval;
 use App\Models\DocumentSecurityAudit;
@@ -252,6 +253,44 @@ class ManageControlledDocuments
             $this->persist($entry);
             $this->touch($record, $actor);
             $this->audit($actor, $record, $revision, 'approval_'.$validated['decision'], $entry->comments, ['approval:'.$entry->id]);
+
+            return $record->refresh();
+        }, 1);
+    }
+
+    /** Record a review against the current released revision without changing its content.
+     * @param  array<string, mixed>  $data
+     */
+    public function recordReview(User $actor, DocumentScope $scope, string $id, string $revisionId, array $data): ControlledDocument
+    {
+        return DB::transaction(function () use ($actor, $scope, $id, $revisionId, $data): ControlledDocument {
+            $register = $this->lockRegister($scope);
+            $this->authorizeContext($actor, $scope, 'controlled.reviews.record');
+            $record = $this->find($actor, $scope, $id, true);
+            $this->rejectUnknown($data, ['lock_version', 'outcome', 'comments']);
+            $validated = Validator::make($data, ['outcome' => ['required', Rule::in(['no_changes_required', 'revision_required'])],
+                'comments' => ['nullable', 'string', 'max:5000']], $this->messages())->validate();
+            $this->version($record, $data);
+            $revision = $record->revisions()->whereKey($revisionId)->lockForUpdate()->firstOrFail();
+            if ($record->status !== 'current' || $record->current_revision_id !== $revision->id || $revision->released_at === null) {
+                throw ValidationException::withMessages(['controlled' => 'controlledReviewCurrentOnly']);
+            }
+            $type = DocumentType::query()->where('scope_id', $record->scope_id)->lockForUpdate()->findOrFail($record->type_id);
+            $previous = ControlledDocumentReview::query()->where('revision_id', $revision->id)->latest('id')->first();
+            $next = $previous?->next_review_date ?? $revision->review_date;
+            $timestamp = now();
+            $calculate = $validated['outcome'] === 'no_changes_required' && $type->review_enabled && $type->effectiveFor($register)
+                && $type->review_baseline === 'completion_date' && $type->review_interval_months >= 1 && $type->review_interval_months <= 1200;
+            if ($calculate) {
+                $next = $timestamp->copy()->addMonthsNoOverflow($type->review_interval_months);
+            }
+            $entry = new ControlledDocumentReview(['revision_id' => $revision->id, 'actor_id' => $actor->id,
+                'document_version' => $record->lock_version, 'outcome' => $validated['outcome'], 'comments' => $validated['comments'] ?? null,
+                'recorded_at' => $timestamp, 'interval_months' => $calculate ? $type->review_interval_months : null,
+                'baseline' => $calculate ? $type->review_baseline : null, 'next_review_date' => $next?->format('Y-m-d')]);
+            $this->persist($entry);
+            $this->touch($record, $actor);
+            $this->audit($actor, $record, $revision, 'review_completed', $entry->comments, ['review:'.$entry->id]);
 
             return $record->refresh();
         }, 1);

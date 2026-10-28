@@ -6,6 +6,7 @@ use App\Authorization\CorrespondenceContexts;
 use App\Authorization\ManageControlledDocuments;
 use App\Http\Requests\ControlledDocumentRequest;
 use App\Http\Resources\ControlledDocumentResource;
+use App\Models\ControlledDocumentReview;
 use App\Models\ControlledRevisionApproval;
 use App\Models\DocumentType;
 use App\Models\RegisterConfiguration;
@@ -69,6 +70,7 @@ class ControlledDocumentController extends Controller
         }
 
         return response()->json(['data' => new ControlledDocumentResource($model), 'audits' => $model->audits()->get(['id', 'revision_id', 'actor_id', 'action', 'reason', 'changed_fields', 'created_at']), 'related' => $related,
+            'reviews' => ControlledDocumentReview::query()->whereIn('revision_id', $model->revisions()->select('id'))->orderBy('id')->get(['id', 'revision_id', 'actor_id', 'document_version', 'outcome', 'comments', 'recorded_at', 'interval_months', 'baseline', 'next_review_date']),
             'approvals' => ControlledRevisionApproval::query()->whereIn('revision_id', $model->revisions()->select('id'))->orderBy('id')
                 ->get(['id', 'revision_id', 'actor_id', 'decision', 'document_version', 'comments', 'snapshot', 'recorded_at'])]);
     }
@@ -96,6 +98,11 @@ class ControlledDocumentController extends Controller
     public function release(ControlledDocumentRequest $request, string $record, ManageControlledDocuments $manager): ControlledDocumentResource
     {
         return new ControlledDocumentResource($manager->release($request->user(), $request->documentScope(), $record, $request->documentData()));
+    }
+
+    public function recordReview(ControlledDocumentRequest $request, string $record, string $revision, ManageControlledDocuments $manager): ControlledDocumentResource
+    {
+        return new ControlledDocumentResource($manager->recordReview($request->user(), $request->documentScope(), $record, $revision, $request->documentData()));
     }
 
     public function recordApproval(ControlledDocumentRequest $request, string $record, string $revision, ManageControlledDocuments $manager): ControlledDocumentResource

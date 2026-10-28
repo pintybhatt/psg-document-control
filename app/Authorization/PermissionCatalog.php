@@ -34,6 +34,7 @@ class PermissionCatalog
             'controlled.register' => ['area' => 'documents', 'name_en' => 'Register controlled documents', 'name_lo' => 'ລົງທະບຽນເອກະສານຄວບຄຸມ', 'available' => true],
             'controlled.release' => ['area' => 'documents', 'name_en' => 'Release controlled revisions', 'name_lo' => 'ປະກາດໃຊ້ສະບັບເອກະສານຄວບຄຸມ', 'available' => true],
             'controlled.approvals.record' => ['area' => 'documents', 'name_en' => 'Record controlled revision approval decisions', 'name_lo' => 'ບັນທຶກຜົນການອະນຸມັດສະບັບເອກະສານຄວບຄຸມ', 'available' => true],
+            'controlled.reviews.record' => ['area' => 'documents', 'name_en' => 'Record controlled document reviews', 'name_lo' => 'ບັນທຶກການທົບທວນເອກະສານຄວບຄຸມ', 'available' => true],
             'controlled.status.manage' => ['area' => 'documents', 'name_en' => 'Manage controlled document status', 'name_lo' => 'ຈັດການສະຖານະເອກະສານຄວບຄຸມ', 'available' => true],
             'outgoing.operations.manage' => ['area' => 'documents', 'name_en' => 'Manage outgoing dispatch and delivery', 'name_lo' => 'ຈັດການສົ່ງ ແລະ ຈັດສົ່ງເອກະສານຂາອອກ', 'available' => true],
             'outgoing.operations.reopen' => ['area' => 'documents', 'name_en' => 'Reopen closed outgoing correspondence', 'name_lo' => 'ເປີດຄືນເອກະສານຂາອອກທີ່ປິດແລ້ວ', 'available' => true],
