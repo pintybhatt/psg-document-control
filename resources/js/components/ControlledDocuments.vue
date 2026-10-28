@@ -1,4 +1,5 @@
 <script setup>
+import DocumentApprovalPanel from './DocumentApprovalPanel.vue';
 import DocumentStorage from './DocumentStorage.vue';
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { formatDate, formatDateTime } from '../utilities/dates.js';
@@ -21,7 +22,7 @@ const { items, notify, dismiss } = useNotifications();
 const rows = ref([]), types = ref([]), people = ref([]), total = ref(0), page = ref(1);
 const search = ref(''), status = ref(''), typeFilter = ref('');
 const detail = ref(null), audits = ref([]), related = ref([]), editing = ref(false), action = ref('');
-const approvals = ref([]), reviews = ref([]);
+const approvals = ref([]), reviews = ref([]), execution = ref(null);
 const loading = ref(false), saving = ref(false), error = ref(''), fields = ref({});
 const replacements = ref([]), replacementSearch = ref('');
 const actionForm = reactive({ reason: '', revision_reason: '', change_description: '', status: 'obsolete', replaced_by_id: '', decision: '', outcome: 'no_changes_required', comments: '' });
@@ -57,10 +58,10 @@ function url(path = '', extra = {}) { return `${props.endpoint}${path}?${new URL
 function fail(failure) {
     if (failure.name === 'AbortError') { return; }
     fields.value = failure.fields ?? {};
-    error.value = Object.values(fields.value).flat().find(value => /^(controlled|rbac|numbering)/.test(value)) ?? failure.message;
-    if (!/^(controlled|rbac|numbering)/.test(error.value)) { error.value = 'rbacRequestFailed'; }
+    error.value = Object.values(fields.value).flat().find(value => /^(controlled|rbac|numbering|approval)/.test(value)) ?? failure.message;
+    if (!/^(controlled|rbac|numbering|approval)/.test(error.value)) { error.value = 'rbacRequestFailed'; }
     if ([401, 403, 404, 419].includes(failure.status)) {
-        approvals.value = []; reviews.value = [];
+        approvals.value = []; reviews.value = []; execution.value = null;
         rows.value = []; detail.value = null; audits.value = []; related.value = []; types.value = []; people.value = []; replacements.value = []; total.value = 0; editing.value = false; action.value = '';
         if (failure.status !== 404) { controller?.abort(); emit('unauthorized', failure); }
     }
@@ -72,7 +73,7 @@ async function load(signal = controller.signal) {
     finally { if (!signal.aborted) { loading.value = false; } }
 }
 async function reset() {
-    approvals.value = []; reviews.value = [];
+    approvals.value = []; reviews.value = []; execution.value = null;
     controller?.abort(); controller = new AbortController(); const signal = controller.signal;
     rows.value = []; detail.value = null; audits.value = []; related.value = []; types.value = []; people.value = []; replacements.value = []; total.value = 0; page.value = 1; editing.value = false; action.value = ''; error.value = ''; fields.value = {}; saving.value = false;
     await load(signal);
@@ -84,10 +85,10 @@ async function reset() {
     catch (failure) { if (!signal.aborted) { fail(failure); } }
 }
 async function show(row) {
-    approvals.value = []; reviews.value = [];
+    approvals.value = []; reviews.value = []; execution.value = null;
     const signal = controller.signal;
     detail.value = null; audits.value = []; related.value = []; editing.value = false; action.value = ''; error.value = ''; fields.value = {}; loading.value = true;
-    try { const result = await request(url(`/${row.id}`), { signal }); if (!signal.aborted) { detail.value = result.data; audits.value = result.audits; related.value = result.related; approvals.value = result.approvals ?? []; reviews.value = result.reviews ?? []; await nextTick(); document.getElementById('controlled-detail-title')?.focus(); } }
+    try { const result = await request(url(`/${row.id}`), { signal }); if (!signal.aborted) { detail.value = result.data; audits.value = result.audits; related.value = result.related; execution.value = result.approval_execution ?? null; approvals.value = result.approvals ?? []; reviews.value = result.reviews ?? []; await nextTick(); document.getElementById('controlled-detail-title')?.focus(); } }
     catch (failure) { if (!signal.aborted) { fail(failure); } }
     finally { if (!signal.aborted) { loading.value = false; } }
 }
@@ -189,11 +190,12 @@ onBeforeUnmount(() => controller?.abort());
                 <div><dt class="text-sm text-slate-600">{{ t('outgoingClassification') }}</dt><dd>{{ t(`confidentiality-${detail.classification}`) }}</dd></div>
                 <div><dt class="text-sm text-slate-600">{{ t('controlledAuthoritative') }}</dt><dd class="font-semibold">{{ authoritative ? `${authoritative.identifier} · ${language === 'lo' ? authoritative.title_lo || authoritative.title_en : authoritative.title_en}` : t('controlledNoAuthority') }}</dd></div>
             </dl>
+            <DocumentApprovalPanel v-if="execution" :execution="execution" :scope="scope" :csrf-token="csrfToken" kind="controlled" @failure="fail" @saved="show(detail)" />
             <p v-if="authoritative" class="text-sm">{{ t('controlledNextReview') }}: {{ formatDate(nextReview) }}</p>
             <div v-if="!action" class="flex flex-wrap gap-3">
                 <UiButton v-if="authoritative && can('controlled.reviews.record')" variant="secondary" :disabled="saving || loading" @click="beginAction('reviews')">{{ t('controlledAction-reviews') }}</UiButton>
                 <UiButton v-if="draft && editable && can('controlled.drafts.manage')" variant="secondary" :disabled="saving || loading" @click="edit()">{{ t('controlledEdit') }}</UiButton>
-                <UiButton v-if="draft && editable && approvalOptions.length" variant="secondary" :disabled="saving || loading" @click="beginAction('approvals')">{{ t('controlledAction-approvals') }}</UiButton>
+                <UiButton v-if="!execution && draft && editable && approvalOptions.length" variant="secondary" :disabled="saving || loading" @click="beginAction('approvals')">{{ t('controlledAction-approvals') }}</UiButton>
                 <UiButton v-if="!detail.registered_at && canRegister" :disabled="saving || loading" @click="beginAction('register')">{{ t('controlledAction-register') }}</UiButton>
                 <UiButton v-if="draft && editable && detail.registered_at && can('controlled.release')" :disabled="saving || loading" @click="beginAction('release')">{{ t('controlledAction-release') }}</UiButton>
                 <UiButton v-if="!draft && detail.status === 'current' && can('controlled.drafts.manage')" variant="secondary" :disabled="saving || loading" @click="beginAction('revisions')">{{ t('controlledAction-revisions') }}</UiButton>
@@ -212,8 +214,8 @@ onBeforeUnmount(() => controller?.abort());
                 </fieldset>
                 <div class="flex gap-3"><UiButton type="submit" :loading="saving" :disabled="loading">{{ t('uiConfirm') }}</UiButton><UiButton variant="secondary" :disabled="saving" @click="action = ''">{{ t('uiCancel') }}</UiButton></div>
             </form>
-            <DocumentStorage v-if="detail.storage_url" :key="detail.id" :endpoint="detail.storage_url" :scope="scope" :csrf-token="csrfToken" :revisions="detail.revisions" :authoritative-revision="detail.authoritative_revision_id" @failure="fail" />
-            <p class="text-sm text-slate-600">{{ t('controlledConfirm-approvals') }}</p>
+            <DocumentStorage v-if="detail.storage_url" :key="detail.id" :endpoint="detail.storage_url" :scope="scope" :csrf-token="csrfToken" :revisions="detail.revisions" :authoritative-revision="detail.authoritative_revision_id" @failure="fail" @changed="execution && show(detail)" />
+            <p v-if="!execution" class="text-sm text-slate-600">{{ t('controlledConfirm-approvals') }}</p>
             <h3 class="font-semibold">{{ t('controlledHistory') }}</h3>
             <details v-for="revision in detail.revisions.toReversed()" :key="revision.id" :open="revision.id === detail.authoritative_revision_id || (!authoritative && revision.status === 'draft')" class="rounded-xl border border-slate-200 p-4">
                 <summary class="cursor-pointer font-semibold">{{ t('controlledRevision') }} {{ revision.identifier }} · {{ t(`controlledStatus-${revision.status}`) }} · {{ language === 'lo' ? revision.title_lo || revision.title_en : revision.title_en }}</summary>
@@ -222,7 +224,7 @@ onBeforeUnmount(() => controller?.abort());
                     <template v-if="revision.released_at"><div><dt class="text-sm text-slate-600">{{ t('controlledReleased') }}</dt><dd>{{ formatDateTime(revision.released_at) }} · {{ t('controlledActor') }} {{ revision.released_by }}</dd></div><div><dt class="text-sm text-slate-600">{{ t('controlledReason') }}</dt><dd class="whitespace-pre-wrap wrap-anywhere">{{ revision.release_reason }}</dd></div></template>
                 </dl>
                 <section class="mt-4 flex flex-col gap-2"><h4 class="font-semibold">{{ t('controlledReviewHistory') }}</h4><p v-if="!reviews.some(item => item.revision_id === revision.id)" class="text-sm text-slate-600">{{ t('controlledReviewEmpty') }}</p><article v-for="entry in reviews.filter(item => item.revision_id === revision.id)" :key="entry.id" class="rounded-lg border border-slate-200 p-3 text-sm"><p>{{ t(`controlledReview-${entry.outcome}`) }} · {{ formatDateTime(entry.recorded_at) }} · {{ t('controlledActor') }} {{ entry.actor_id }}</p><p class="whitespace-pre-wrap wrap-anywhere">{{ entry.comments || '—' }}</p><p>{{ t('controlledNextReview') }}: {{ formatDate(entry.next_review_date?.slice(0, 10)) }}</p></article></section>
-                <section class="mt-4 flex flex-col gap-2"><h4 class="font-semibold">{{ t('controlledApprovalHistory') }}</h4><p v-if="!approvals.some(item => item.revision_id === revision.id)" class="text-sm text-slate-600">{{ t('controlledApprovalEmpty') }}</p><article v-for="entry in approvals.filter(item => item.revision_id === revision.id)" :key="entry.id" class="rounded-lg border border-slate-200 p-3 text-sm"><p>{{ t(`controlledApproval-${entry.decision}`) }} · {{ formatDateTime(entry.recorded_at) }} · {{ t('controlledActor') }} {{ entry.actor_id }}</p><p class="whitespace-pre-wrap wrap-anywhere">{{ entry.comments || '—' }}</p><p class="text-slate-600">{{ entry.snapshot?.revision?.title_en }}</p></article></section>
+                <section class="mt-4 flex flex-col gap-2"><h4 class="font-semibold">{{ t('controlledApprovalHistory') }}</h4><p v-if="!approvals.some(item => item.revision_id === revision.id)" class="text-sm text-slate-600">{{ t('controlledApprovalEmpty') }}</p><article v-for="entry in approvals.filter(item => item.revision_id === revision.id)" :key="entry.id" class="rounded-lg border border-slate-200 p-3 text-sm"><p>{{ t(`controlledApproval-${entry.decision}`) }} · {{ formatDateTime(entry.recorded_at) }} · {{ t('controlledActor') }} {{ entry.actor_id }}</p><p v-if="entry.snapshot?.workflow">{{ t('workflowVersion') }} {{ entry.snapshot.workflow.configuration_version }} · {{ t('workflowLevel') }} {{ entry.snapshot.workflow.level }}</p><p class="whitespace-pre-wrap wrap-anywhere">{{ entry.comments || '—' }}</p><p class="text-slate-600">{{ entry.snapshot?.revision?.title_en }}</p></article></section>
             </details>
             <section v-if="related.length" class="flex flex-col gap-2"><h3 class="font-semibold">{{ t('controlledRelationships') }}</h3><p v-for="item in related" :key="item.id">{{ t(`controlledRelation-${item.relationship}`) }}: <button class="font-semibold text-teal-800 hover:underline" :disabled="loading || saving" @click="show(item)">{{ item.document_code }}</button></p></section>
             <details class="rounded-xl border border-slate-200 p-4"><summary class="cursor-pointer font-semibold">{{ t('controlledAudit') }}</summary><ul class="mt-3 flex flex-col gap-3"><li v-for="audit in audits" :key="audit.id" class="text-sm"><p>{{ t(`controlledAudit-${audit.action}`) }} · {{ formatDateTime(audit.created_at) }} · {{ t('controlledActor') }} {{ audit.actor_id }}</p><p v-if="audit.reason" class="whitespace-pre-wrap wrap-anywhere text-slate-600">{{ audit.reason }}</p></li></ul></details>

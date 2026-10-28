@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Authorization\CorrespondenceContexts;
+use App\Authorization\DocumentApprovals;
 use App\Authorization\ManageControlledDocuments;
 use App\Http\Requests\ControlledDocumentRequest;
 use App\Http\Resources\ControlledDocumentResource;
@@ -69,7 +70,9 @@ class ControlledDocumentController extends Controller
             }
         }
 
-        return response()->json(['data' => new ControlledDocumentResource($model), 'audits' => $model->audits()->get(['id', 'revision_id', 'actor_id', 'action', 'reason', 'changed_fields', 'created_at']), 'related' => $related,
+        $focus = $model->revisions()->whereNull('released_at')->first() ?? $model->currentRevision;
+
+        return response()->json(['data' => new ControlledDocumentResource($model), 'approval_execution' => $focus ? app(DocumentApprovals::class)->panel($request->user(), $model, $focus) : null, 'audits' => $model->audits()->get(['id', 'revision_id', 'actor_id', 'action', 'reason', 'changed_fields', 'created_at']), 'related' => $related,
             'reviews' => ControlledDocumentReview::query()->whereIn('revision_id', $model->revisions()->select('id'))->orderBy('id')->get(['id', 'revision_id', 'actor_id', 'document_version', 'outcome', 'comments', 'recorded_at', 'interval_months', 'baseline', 'next_review_date']),
             'approvals' => ControlledRevisionApproval::query()->whereIn('revision_id', $model->revisions()->select('id'))->orderBy('id')
                 ->get(['id', 'revision_id', 'actor_id', 'decision', 'document_version', 'comments', 'snapshot', 'recorded_at'])]);

@@ -65,7 +65,7 @@ class ApprovalWorkflowConfigurationTest extends TestCase
     {
         [, $scope] = $this->administrator();
 
-        $this->getJson($this->url($scope))->assertOk()->assertJsonCount(3, 'data')->assertJsonPath('enforcement_enabled', false)
+        $this->getJson($this->url($scope))->assertOk()->assertJsonCount(3, 'data')->assertJsonPath('enforcement_enabled', true)
             ->assertJsonPath('data.0.enabled', false)->assertJsonPath('data.1.enabled', false)->assertJsonPath('data.2.enabled', false)->assertJsonPath('data.0.version', 0);
         $this->assertDatabaseCount('approval_workflow_configurations', 0);
         $this->assertDatabaseCount('controlled_revision_approvals', 0);
@@ -294,7 +294,7 @@ class ApprovalWorkflowConfigurationTest extends TestCase
     #[TestWith(['controlled'])]
     #[TestWith(['incoming'])]
     #[TestWith(['outgoing'])]
-    public function test_enabled_configuration_does_not_gate_existing_registration_release_or_reinterpret_evidence(string $register): void
+    public function test_disabled_configuration_preserves_registration_release_and_existing_evidence(string $register): void
     {
         [$record, $actor, $role] = $this->fixture($register);
         $scope = $record->profile->documentScope();
@@ -314,6 +314,7 @@ class ApprovalWorkflowConfigurationTest extends TestCase
         app(ManageApprovalWorkflows::class)->save($actor, $scope->authorizationScope(), $register, $this->payload([$approver->id], true, 2));
         $this->assertSame($before, $record->fresh()->getAttributes());
         $this->assertSame($evidence, ControlledRevisionApproval::query()->get()->map->getAttributes()->all());
+        app(ManageApprovalWorkflows::class)->save($actor, $scope->authorizationScope(), $register, $this->payload([], false, 3));
         app(ManageNumbering::class)->save($actor, $scope->authorizationScope(), ['register_id' => $record->register_id, 'purpose' => 'internal_register', 'reset_policy' => 'annual', 'prefix' => 'COMPAT/'.strtoupper($register), 'padding' => 4, 'active' => true]);
         if ($register === 'outgoing') {
             app(ManageNumbering::class)->save($actor, $scope->authorizationScope(), ['register_id' => $record->register_id, 'purpose' => 'official_outgoing', 'reset_policy' => 'annual', 'prefix' => 'COMPAT/OFFICIAL', 'padding' => 4, 'active' => true]);

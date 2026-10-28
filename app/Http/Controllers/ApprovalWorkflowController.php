@@ -19,7 +19,7 @@ class ApprovalWorkflowController extends Controller
 
         return response()->json(['data' => array_map(fn (string $register): array => $current->has($register)
             ? $current[$register]->toArray() : ['id' => null, 'register_key' => $register, 'version' => 0, 'enabled' => false, 'sequence' => 'sequential', 'levels' => []],
-            ManageApprovalWorkflows::REGISTERS), 'enforcement_enabled' => false])->header('Cache-Control', 'private, no-store');
+            ManageApprovalWorkflows::REGISTERS), 'enforcement_enabled' => true, 'incoming_checkpoint_confirmed' => false])->header('Cache-Control', 'private, no-store');
     }
 
     public function roles(ApprovalWorkflowRequest $request, ManageApprovalWorkflows $manager): JsonResponse

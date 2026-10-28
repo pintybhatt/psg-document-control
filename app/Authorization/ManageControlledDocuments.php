@@ -209,6 +209,7 @@ class ManageControlledDocuments
                 throw ValidationException::withMessages(['effective_date' => 'controlledEffectiveFuture']);
             }
             $this->validatePeople($scope, $revision->getAttributes());
+            app(DocumentApprovals::class)->requireApproved($actor, $record, $revision);
             $revision->fill(['released_at' => now(), 'released_by' => $actor->id, 'release_reason' => $validated['reason'], 'draft_slot' => null,
                 'owner_name' => $revision->owner->name, 'custodian_name' => $revision->custodian->name, 'updated_by' => $actor->id]);
             $this->persist($revision);
@@ -221,7 +222,7 @@ class ManageControlledDocuments
     }
 
     /**
-     * Records evidence only; approval hierarchy and release gating remain unconfigured.
+     * Records evidence, enforcing a pinned sequential workflow when configured.
      * Each event snapshots its revision and attachment versions, so later edits do not
      * turn historical decisions into approval of newly edited content.
      *
@@ -234,7 +235,7 @@ class ManageControlledDocuments
             $permission = ($data['decision'] ?? null) === 'submitted' ? 'controlled.drafts.manage' : 'controlled.approvals.record';
             $this->authorizeContext($actor, $scope, $permission);
             $record = $this->find($actor, $scope, $id, true);
-            $this->rejectUnknown($data, ['lock_version', 'decision', 'comments']);
+            $this->rejectUnknown($data, ['lock_version', 'decision', 'comments', 'content_hash', 'expected_event_id']);
             $validated = Validator::make($data, ['decision' => ['required', Rule::in(['submitted', 'approved', 'rejected'])],
                 'comments' => ['nullable', 'string', 'max:5000']], $this->messages())->validate();
             $this->version($record, $data);
@@ -243,13 +244,14 @@ class ManageControlledDocuments
             if ($revision->released_at !== null) {
                 throw ValidationException::withMessages(['controlled' => 'controlledImmutable']);
             }
+            $workflow = app(DocumentApprovals::class)->prepareControlled($actor, $record, $revision, $data);
             $files = DB::table('attachment_versions as v')->join('document_attachments as a', 'a.id', '=', 'v.attachment_id')
                 ->where('a.profile_id', $record->profile_id)->where('a.revision_id', $revision->id)->orderBy('v.attachment_id')->orderBy('v.version')
                 ->get(['v.id', 'v.attachment_id', 'v.version', 'v.sha256'])->map(fn (object $file): array => (array) $file)->all();
             $entry = new ControlledRevisionApproval(['revision_id' => $revision->id, 'actor_id' => $actor->id,
                 'decision' => $validated['decision'], 'document_version' => $record->lock_version,
                 'comments' => $validated['comments'] ?? null, 'recorded_at' => now(),
-                'snapshot' => ['revision' => $revision->attributesToArray(), 'files' => $files]]);
+                'snapshot' => ['revision' => $revision->attributesToArray(), 'files' => $files] + ($workflow ? ['workflow' => $workflow] : [])]);
             $this->persist($entry);
             $this->touch($record, $actor);
             $this->audit($actor, $record, $revision, 'approval_'.$validated['decision'], $entry->comments, ['approval:'.$entry->id]);

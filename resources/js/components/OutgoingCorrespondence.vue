@@ -1,4 +1,5 @@
 <script setup>
+import DocumentApprovalPanel from './DocumentApprovalPanel.vue';
 import CorrespondenceCorrection from './CorrespondenceCorrection.vue';
 import DocumentStorage from './DocumentStorage.vue';
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue';
@@ -69,8 +70,8 @@ function preview(path = '/export') { previewPath.value = path; previewOpen.value
 function fail(failure) {
     if (failure.name === 'AbortError') { return; }
     fields.value = failure.fields ?? {};
-    error.value = Object.values(fields.value).flat().find(value => /^(outgoing|rbac|numbering)/.test(value)) ?? failure.message;
-    if (!/^(outgoing|rbac|numbering)/.test(error.value)) { error.value = 'rbacRequestFailed'; }
+    error.value = Object.values(fields.value).flat().find(value => /^(outgoing|rbac|numbering|approval)/.test(value)) ?? failure.message;
+    if (!/^(outgoing|rbac|numbering|approval)/.test(error.value)) { error.value = 'rbacRequestFailed'; }
     if ([401, 403, 404, 419].includes(failure.status)) {
         rows.value = []; detail.value = null; audits.value = []; handling.value = null; editing.value = false; confirmation.value = false; types.value = []; total.value = 0;
         if (failure.status !== 404) { controller?.abort(); emit('unauthorized', failure); }
@@ -180,6 +181,7 @@ onBeforeUnmount(() => controller?.abort());
         </form>
         <section v-else-if="detail" class="flex flex-col gap-5 rounded-2xl border border-slate-200 bg-white p-5" aria-labelledby="outgoing-detail-title">
             <div class="flex flex-wrap items-center justify-between gap-3"><h2 id="outgoing-detail-title" tabindex="-1" class="text-lg font-semibold">{{ detail.subject }}</h2><div v-if="detail.status === 'draft'" class="flex gap-3"><UiButton v-if="canManage" variant="secondary" :disabled="saving || loading" @click="edit()">{{ t('outgoingEdit') }}</UiButton><UiButton v-if="canRegister" :disabled="saving || loading" @click="confirmation = true">{{ t('outgoingRegister') }}</UiButton></div></div>
+            <DocumentApprovalPanel v-if="handling?.approval_execution" :execution="handling.approval_execution" :scope="scope" :csrf-token="csrfToken" kind="outgoing" @failure="fail" @saved="operationSaved(detail)" />
             <CorrespondenceCorrection :key="detail.id" kind="outgoing" :record="detail" :scope="scope" :endpoint="endpoint" :csrf-token="csrfToken" :history="handling?.history ?? []" @failure="fail" @saved="operationSaved" />
             <div><UiButton variant="secondary" :disabled="loading || saving" @click="preview(`/${detail.id}/pdf`)">{{ t('reportPreviewDetailPdf') }}</UiButton></div>
             <dl class="grid gap-4 md:grid-cols-2">
@@ -200,7 +202,7 @@ onBeforeUnmount(() => controller?.abort());
             <ul class="flex flex-col gap-3"><li v-for="(recipient, index) in detail.recipients" :key="index" class="rounded-xl border border-slate-200 p-3"><p class="font-medium">{{ t(`outgoingRecipient-${recipient.kind}`) }} · {{ recipient.organization }}</p><p v-for="field in recipientFields.filter(field => field !== 'organization' && recipient[field])" :key="field" class="whitespace-pre-wrap wrap-anywhere">{{ t(`outgoingRecipient-${field}`) }}: {{ recipient[field] }}</p></li></ul>
             <p v-if="detail.status === 'registered'" class="text-sm text-slate-600">{{ t('correspondenceProtectedIdentity') }}</p>
             <OutgoingDispatch v-if="detail.status === 'registered'" :key="detail.id" :record="detail" :scope="scope" :endpoint="endpoint" :incoming-endpoint="incomingEndpoint" :csrf-token="csrfToken" :history="handling?.history ?? []" :related-incoming="handling?.related_incoming ?? []" @failure="fail" @saved="operationSaved" />
-            <DocumentStorage v-if="detail.storage_url" :key="detail.id" :endpoint="detail.storage_url" :scope="scope" :csrf-token="csrfToken" @failure="fail" />
+            <DocumentStorage v-if="detail.storage_url" :key="detail.id" :endpoint="detail.storage_url" :scope="scope" :csrf-token="csrfToken" @failure="fail" @changed="handling?.approval_execution && operationSaved(detail)" />
             <h3 class="font-semibold">{{ t('outgoingHistory') }}</h3>
             <ul class="flex flex-col gap-2"><li v-for="audit in audits" :key="audit.id">{{ t(`outgoingAudit-${audit.action}`) }} · {{ formatDateTime(audit.created_at) }} · {{ t('outgoingActor') }} {{ audit.actor_id }}</li></ul>
         </section>

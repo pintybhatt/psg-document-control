@@ -7,6 +7,7 @@ use App\Http\Controllers\AuthorizationContextController;
 use App\Http\Controllers\ControlledDocumentController;
 use App\Http\Controllers\CurrentUserController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DocumentApprovalController;
 use App\Http\Controllers\DocumentMasterDataController;
 use App\Http\Controllers\DocumentSearchController;
 use App\Http\Controllers\DocumentStorageController;
@@ -60,6 +61,8 @@ Route::middleware(['auth:web', EnsureActiveUserSession::class])->group(function 
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
     Route::get('/api/v1/user', CurrentUserController::class)->name('api.v1.user');
     Route::prefix('api/v1')->name('api.v1.')->group(function (): void {
+        Route::get('document-approvals/{type}/{record}', [DocumentApprovalController::class, 'show'])->name('document-approvals.show');
+        Route::post('document-approvals/{type}/{record}', [DocumentApprovalController::class, 'store'])->name('document-approvals.store');
         Route::get('approval-workflows', [ApprovalWorkflowController::class, 'index'])->name('approval-workflows.index');
         Route::get('approval-workflows/roles', [ApprovalWorkflowController::class, 'roles'])->name('approval-workflows.roles');
         Route::post('approval-workflows/{register}', [ApprovalWorkflowController::class, 'store'])->name('approval-workflows.store');

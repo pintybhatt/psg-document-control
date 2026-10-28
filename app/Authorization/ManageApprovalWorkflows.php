@@ -56,8 +56,8 @@ class ManageApprovalWorkflows
     }
 
     /**
-     * Configuration only. Future submissions must pin an immutable configuration ID;
-     * existing approval evidence has no workflow binding and is never migrated here.
+     * New submissions pin an immutable configuration ID. Existing approval evidence
+     * and active submissions are never migrated when administration settings change.
      *
      * @param  array<string, mixed>  $data
      */
