@@ -160,9 +160,9 @@ class NumberingTest extends TestCase
     public function test_custom_format_collision_rolls_back_allocation_and_can_be_corrected_without_reusing_history(): void
     {
         [$actor, $scope, $register] = $this->actor();
-        $first = $this->series($actor, $scope, $register, ['format' => ['pattern' => 'EXAMPLE-{sequence}']]);
+        $first = $this->series($actor, $scope, $register, ['reset_policy' => 'continuous', 'format' => ['pattern' => 'EXAMPLE-{sequence}']]);
         $issued = $this->issue($actor, $scope, $first);
-        $second = $this->series($actor, $scope, $register, ['purpose' => 'official_outgoing', 'prefix' => 'EXAMPLE/OFFICIAL', 'format' => ['pattern' => 'EXAMPLE-{sequence}']]);
+        $second = $this->series($actor, $scope, $register, ['reset_policy' => 'continuous', 'purpose' => 'official_outgoing', 'prefix' => 'EXAMPLE/OFFICIAL', 'format' => ['pattern' => 'EXAMPLE-{sequence}']]);
         try {
             $this->issue($actor, $scope, $second);
             $this->fail('A duplicate rendered number was issued.');
@@ -186,25 +186,93 @@ class NumberingTest extends TestCase
         $this->assertSame(0, DB::table('numbering_counters')->sole()->period);
     }
 
-    public function test_yearless_annual_format_does_not_bypass_uniqueness_after_reset(): void
+    #[TestWith([true, 'EXAMPLE-{sequence}'])]
+    #[TestWith([false, 'EXAMPLE-{sequence}'])]
+    #[TestWith([true, 'EXAMPLE-2026-{sequence}-R00'])]
+    public function test_yearless_annual_format_is_rejected_before_configuration_is_saved(bool $active, string $pattern): void
     {
         [$actor, $scope, $register] = $this->actor();
-        $series = $this->series($actor, $scope, $register, ['format' => ['pattern' => 'EXAMPLE-{sequence}']]);
-        $this->issue($actor, $scope, $series);
-        $this->travelTo(now()->setDate(2027, 1, 1));
+        $data = $this->data($register, ['active' => $active, 'format' => ['pattern' => $pattern]]);
+        $this->postJson('/api/v1/numbering-series', $this->scopeData($scope) + $data)->assertUnprocessable()
+            ->assertJsonPath('errors.format.0', 'numberingInvalidFormat');
         try {
-            $this->issue($actor, $scope, $series);
-            $this->fail('Year rollover bypassed global uniqueness.');
-        } catch (QueryException) {
-            $this->assertDatabaseCount('numbering_counters', 1);
-            $this->assertDatabaseCount('issued_document_numbers', 1);
+            app(ManageNumbering::class)->save($actor, $scope, $data);
+            $this->fail('An annual yearless format was saved through the service.');
+        } catch (ValidationException $exception) {
+            $this->assertSame(['format' => ['numberingInvalidFormat']], $exception->errors());
         }
+        $this->assertDatabaseCount('numbering_series', 0);
+        $this->assertDatabaseCount('numbering_configurations', 0);
+        $this->assertDatabaseCount('numbering_namespaces', 0);
+        $this->assertDatabaseCount('numbering_counters', 0);
+    }
+
+    public function test_rejected_yearless_update_preserves_legacy_configuration_and_issued_number(): void
+    {
+        [$actor, $scope, $register] = $this->actor();
+        $series = $this->series($actor, $scope, $register);
+        $issued = $this->issue($actor, $scope, $series);
+        $this->patchJson('/api/v1/numbering-series/'.$series->id, $this->scopeData($scope) + [
+            'prefix' => 'EXAMPLE/OUT', 'padding' => 4, 'active' => true, 'format' => ['pattern' => 'EXAMPLE-{sequence}'],
+        ])->assertUnprocessable()->assertJsonPath('errors.format.0', 'numberingInvalidFormat');
+        $this->assertDatabaseCount('numbering_configurations', 1);
+        $this->assertNull($series->fresh()->currentConfiguration->format);
+        $this->assertSame('EXAMPLE/OUT/2026/000001', $issued->refresh()->number);
+        $this->assertSame('EXAMPLE/OUT/2026/000002', $this->issue($actor, $scope, $series)->number);
+    }
+
+    #[TestWith([true])]
+    #[TestWith([false])]
+    public function test_preexisting_incompatible_format_cannot_be_activated_or_issued(bool $active): void
+    {
+        [$actor, $scope, $register] = $this->actor();
+        $series = $this->series($actor, $scope, $register);
+        $issued = $this->issue($actor, $scope, $series);
+        $configuration = $series->currentConfiguration->replicate();
+        $configuration->version = 2;
+        $configuration->format = ['pattern' => 'EXAMPLE-{sequence}'];
+        $configuration->active = $active;
+        $configuration->save();
+        $this->patchJson('/api/v1/numbering-series/'.$series->id, $this->scopeData($scope) + [
+            'prefix' => 'EXAMPLE/OUT', 'padding' => 6, 'active' => true,
+        ])->assertUnprocessable()->assertJsonPath('errors.format.0', 'numberingInvalidFormat');
+        $called = false;
+        try {
+            DB::transaction(function () use ($actor, $scope, $series, &$called): IssuedDocumentNumber {
+                return app(DocumentNumbering::class)->register($actor, $scope, $series->id, function (string $number) use (&$called): FormalRegistrationRecord {
+                    $called = true;
+                    throw new LogicException('Incompatible numbering must not reach persistence.');
+                });
+            });
+            $this->fail('An incompatible format was used for allocation.');
+        } catch (ValidationException $exception) {
+            $this->assertSame($active ? ['format' => ['numberingInvalidFormat']] : ['series' => ['numberingInactive']], $exception->errors());
+        }
+        $this->assertFalse($called);
+        $this->assertSame(1, DB::table('numbering_counters')->sole()->value);
+        $this->assertDatabaseCount('issued_document_numbers', 1);
+        $this->assertDatabaseCount('numbering_configurations', 2);
+        $this->assertSame('EXAMPLE/OUT/2026/000001', $issued->refresh()->number);
+    }
+
+    #[TestWith(['{year}', '2027'])]
+    #[TestWith(['{year2}', '27'])]
+    public function test_annual_formats_with_year_tokens_allocate_safely_after_rollover(string $token, string $year): void
+    {
+        [$actor, $scope, $register] = $this->actor();
+        $series = $this->series($actor, $scope, $register, ['padding' => 4, 'format' => ['pattern' => 'EXAMPLE-'.$token.'-{sequence}-R00']]);
+        $first = $this->issue($actor, $scope, $series);
+        $this->assertStringEndsWith('-0001-R00', $first->number);
+        $this->travelTo(now()->setDate(2027, 1, 1));
+        $this->assertSame('EXAMPLE-'.$year.'-0001-R00', $this->issue($actor, $scope, $series)->number);
+        $this->assertSame('EXAMPLE-'.$year.'-0002-R00', $this->issue($actor, $scope, $series)->number);
+        $this->assertDatabaseCount('issued_document_numbers', 3);
     }
 
     public function test_custom_formats_do_not_grant_management_issuance_or_foreign_scope_access(): void
     {
         [$actor, $scope, $register] = $this->actor(['numbering.view', 'numbering.manage']);
-        $format = ['pattern' => 'EXAMPLE-{sequence}'];
+        $format = ['pattern' => 'EXAMPLE-{year}-{sequence}'];
         $series = $this->series($actor, $scope, $register, ['format' => $format]);
         try {
             $this->issue($actor, $scope, $series);

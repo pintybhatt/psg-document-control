@@ -47,6 +47,7 @@ class DocumentNumbering
             if (! $configuration?->active || ! $register->active || ! $scope->isActive()) {
                 throw ValidationException::withMessages(['series' => 'numberingInactive']);
             }
+            NumberingFormat::validateResetPolicy($configuration->format, $series->reset_policy);
             $year = (int) now()->format('Y');
             $period = $series->reset_policy === NumberingResetPolicy::Annual ? $year : 0;
             DB::table('numbering_counters')->insertOrIgnore(['series_id' => $series->id, 'period' => $period, 'value' => 0]);

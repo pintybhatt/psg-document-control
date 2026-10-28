@@ -38,6 +38,7 @@ class ManageNumbering
                 ], array_fill_keys(['required', 'string', 'max', 'min', 'regex', 'integer', 'boolean', 'prohibited'], 'numberingInvalidFormat'))->validate();
                 $format = array_key_exists('format', $validated) ? $validated['format'] : $current?->format;
                 NumberingFormat::render($validated['prefix'], (int) $validated['padding'], (int) now()->format('Y'), NumberingFormat::MAX_SEQUENCE, $format);
+                NumberingFormat::validateResetPolicy($format, $series?->reset_policy ?? NumberingResetPolicy::from($validated['reset_policy']));
                 if (! $series) {
                     $register = RegisterConfiguration::query()->where('scope_id', $scope->id)->whereKey($validated['register_id'])->first();
                     if (! $register || ! $register->active || ($validated['purpose'] === NumberingPurpose::OfficialOutgoing->value && $register->register_key !== DocumentResourceType::Outgoing)) {

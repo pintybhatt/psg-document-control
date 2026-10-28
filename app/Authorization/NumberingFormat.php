@@ -11,6 +11,15 @@ class NumberingFormat
 
     public const PREFIX_PATTERN = '/^[A-Z][A-Z0-9_-]*(\/[A-Z0-9][A-Z0-9_-]*)*$/D';
 
+    /** @param array{pattern: string, company?: string, department?: string, document_type?: string}|null $format */
+    public static function validateResetPolicy(?array $format, NumberingResetPolicy $resetPolicy): void
+    {
+        if ($resetPolicy === NumberingResetPolicy::Annual && $format !== null
+            && ! str_contains($format['pattern'] ?? '', '{year}') && ! str_contains($format['pattern'] ?? '', '{year2}')) {
+            throw ValidationException::withMessages(['format' => 'numberingInvalidFormat']);
+        }
+    }
+
     /** @return array<string, mixed> */
     public static function rules(): array
     {
