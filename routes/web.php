@@ -20,6 +20,7 @@ use App\Http\Controllers\OutgoingOperationController;
 use App\Http\Controllers\PhysicalCustodyController;
 use App\Http\Controllers\RoleAssignmentController;
 use App\Http\Controllers\RoleController;
+use App\Http\Controllers\TemplateCatalogueController;
 use App\Http\Middleware\AuditDocumentStorageRequests;
 use App\Http\Middleware\EnsureActiveUserSession;
 use App\Http\Middleware\EnsureDevelopmentEnvironment;
@@ -58,6 +59,11 @@ Route::middleware(['auth:web', EnsureActiveUserSession::class])->group(function 
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
     Route::get('/api/v1/user', CurrentUserController::class)->name('api.v1.user');
     Route::prefix('api/v1')->name('api.v1.')->group(function (): void {
+        Route::get('document-templates', [TemplateCatalogueController::class, 'index'])->name('templates.index');
+        Route::get('document-templates/sources', [TemplateCatalogueController::class, 'sources'])->name('templates.sources');
+        Route::post('document-templates', [TemplateCatalogueController::class, 'store'])->name('templates.store');
+        Route::get('document-templates/{template}', [TemplateCatalogueController::class, 'show'])->name('templates.show');
+        Route::post('document-templates/{template}/retire', [TemplateCatalogueController::class, 'retire'])->name('templates.retire');
         Route::get('document-search/lookups', [DocumentSearchController::class, 'lookups'])->name('document-search.lookups');
         Route::get('document-search', [DocumentSearchController::class, 'index'])->name('document-search');
         Route::get('reports/lookups', [ManagementReportController::class, 'lookups'])->name('reports.lookups');
