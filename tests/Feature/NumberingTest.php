@@ -133,14 +133,18 @@ class NumberingTest extends TestCase
         $this->assertDatabaseCount('issued_document_numbers', 1);
         $this->assertSame(1, DB::table('numbering_counters')->sole()->value);
         $this->patchJson('/api/v1/numbering-series/'.$series->id, $body)->assertOk()
-            ->assertJsonPath('data.configuration.format', $format)->assertJsonPath('data.configuration.version', 2);
+            ->assertJson(['data' => ['configuration' => ['format' => $format]]], true)
+            ->assertJsonCount(4, 'data.configuration.format')->assertJsonPath('data.configuration.version', 2);
         $this->assertSame('EXAMPLE-DEPT-TYPE-26-0002', $this->issue($actor, $scope, $series)->number);
         $this->getJson($this->scopedUrl('numbering-series/'.$series->id.'/history', $scope))->assertOk()
-            ->assertJsonPath('data.0.format', $format)->assertJsonPath('data.1.format', null);
+            ->assertJson(['data' => [['format' => $format]]], true)
+            ->assertJsonCount(4, 'data.0.format')->assertJsonPath('data.1.format', null);
         $this->patchJson('/api/v1/numbering-series/'.$series->id, $body)->assertOk()->assertJsonPath('data.configuration.version', 2);
         unset($body['format']);
         $body['padding'] = 3;
-        $this->patchJson('/api/v1/numbering-series/'.$series->id, $body)->assertOk()->assertJsonPath('data.configuration.format', $format);
+        $this->patchJson('/api/v1/numbering-series/'.$series->id, $body)->assertOk()
+            ->assertJson(['data' => ['configuration' => ['format' => $format]]], true)
+            ->assertJsonCount(4, 'data.configuration.format');
         $this->assertSame('EXAMPLE-DEPT-TYPE-26-003', $this->issue($actor, $scope, $series)->number);
         $this->patchJson('/api/v1/numbering-series/'.$series->id, $body + ['format' => null])->assertOk()->assertJsonPath('data.configuration.format', null);
         $this->assertSame('EXAMPLE/OUT/2026/004', $this->issue($actor, $scope, $series)->number);
