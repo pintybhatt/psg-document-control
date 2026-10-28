@@ -22,8 +22,9 @@ class PermissionCatalog
     public static function definitions(): array
     {
         return [
-            'templates.view' => ['area' => 'master-data', 'name_en' => 'View inactive template catalogue', 'name_lo' => 'ເບິ່ງບັນຊີແບບເອກະສານທີ່ຍັງບໍ່ເຜີຍແຜ່', 'available' => true],
-            'templates.manage' => ['area' => 'master-data', 'name_en' => 'Manage inactive template catalogue', 'name_lo' => 'ຈັດການບັນຊີແບບເອກະສານທີ່ຍັງບໍ່ເຜີຍແຜ່', 'available' => true],
+            'templates.publish' => ['area' => 'master-data', 'name_en' => 'Publish and retire approved templates', 'name_lo' => 'ເຜີຍແຜ່ ແລະ ຖອນແບບເອກະສານທີ່ອະນຸມັດ', 'available' => true],
+            'templates.view' => ['area' => 'master-data', 'name_en' => 'View template catalogue', 'name_lo' => 'ເບິ່ງບັນຊີແບບເອກະສານ', 'available' => true],
+            'templates.manage' => ['area' => 'master-data', 'name_en' => 'Manage template catalogue', 'name_lo' => 'ຈັດການບັນຊີແບບເອກະສານ', 'available' => true],
             'reports.view' => ['area' => 'reports', 'name_en' => 'View and export operational reports', 'name_lo' => 'ເບິ່ງ ແລະ ສົ່ງອອກລາຍງານການດຳເນີນງານ', 'available' => true],
             'documents.audit.view' => ['area' => 'reports', 'name_en' => 'View document operational audit reports', 'name_lo' => 'ເບິ່ງລາຍງານປະຫວັດການດຳເນີນງານເອກະສານ', 'available' => true],
             'security.audit.view' => ['area' => 'document-security', 'name_en' => 'View protected security-event reports', 'name_lo' => 'ເບິ່ງລາຍງານເຫດການຄວາມປອດໄພ', 'available' => true],

@@ -36,6 +36,12 @@ class TemplateCatalogueTest extends TestCase
     {
         [$record, $actor, $role] = $this->fixture('controlled', $classification);
         $role->permissions()->syncWithoutDetaching(Permission::query()->whereIn('key', ['templates.view', 'templates.manage'])->pluck('id'));
+        if ($classification !== 'normal') {
+            ConfidentialityClearance::factory()->forProfile($record->profile)->create(['user_id' => $actor->id]);
+            foreach (['metadata', 'download'] as $operation) {
+                DocumentAccessGrant::factory()->create(['profile_id' => $record->profile_id, 'user_id' => $actor->id, 'operation' => $operation]);
+            }
+        }
 
         return [$record, $actor, $role];
     }
@@ -101,7 +107,7 @@ class TemplateCatalogueTest extends TestCase
         $this->assertSame('inactive', $entry['status']);
         $this->assertNull($entry['attachment_version_id']);
         $this->assertArrayNotHasKey('download_url', $entry);
-        $this->getJson($this->catalogueUrl($scope))->assertOk()->assertJsonPath('publication_enabled', false)->assertJsonPath('meta.total', 1);
+        $this->getJson($this->catalogueUrl($scope))->assertOk()->assertJsonPath('publication_enabled', true)->assertJsonPath('meta.total', 1);
         $this->assertDatabaseHas('document_template_audits', ['template_id' => $entry['id'], 'actor_id' => $actor->id, 'action' => 'created']);
         $this->assertDatabaseCount('numbering_counters', 0);
     }
@@ -161,16 +167,16 @@ class TemplateCatalogueTest extends TestCase
 
     #[TestWith([false])]
     #[TestWith([true])]
-    public function test_retirement_preserves_history_and_publication_and_catalogue_download_are_unavailable(bool $administrator): void
+    public function test_inactive_entry_retirement_preserves_history_and_does_not_allow_download_or_unapproved_publication(bool $administrator): void
     {
         [$record, $actor] = $this->catalogueFixture($administrator ? 'highly_confidential' : 'normal');
         $scope = $this->scope($record);
         $entry = $this->createEntry($scope);
         $url = $this->catalogueUrl($scope, '/'.$entry['id']);
-        $this->postJson($this->catalogueUrl($scope, '/'.$entry['id'].'/publish'))->assertNotFound();
+        $this->postJson($this->catalogueUrl($scope, '/'.$entry['id'].'/publish'), ['reason' => 'No approved source'])->assertStatus($administrator ? 422 : 403);
         $this->getJson($this->catalogueUrl($scope, '/'.$entry['id'].'/download'))->assertNotFound();
         $this->postJson($this->catalogueUrl($scope, '/'.$entry['id'].'/retire'), $this->scopeData($scope) + ['reason' => 'Candidate withdrawn'])->assertOk()->assertJsonPath('data.status', 'retired')->assertJsonPath('data.retired_by', $actor->id);
-        $this->getJson($url)->assertOk()->assertJsonPath('publication_enabled', false)->assertJsonCount(2, 'history')->assertJsonPath('history.0.snapshot.status', 'inactive')->assertJsonPath('history.1.action', 'retired');
+        $this->getJson($url)->assertOk()->assertJsonPath('publication_enabled', true)->assertJsonCount(2, 'history')->assertJsonPath('history.0.snapshot.status', 'inactive')->assertJsonPath('history.1.action', 'retired');
         $this->postJson($this->catalogueUrl($scope, '/'.$entry['id'].'/retire'), $this->scopeData($scope) + ['reason' => 'Again'])->assertUnprocessable();
         $this->patchJson($url, ['attachment_version_id' => null])->assertStatus(405);
         $this->deleteJson($url)->assertStatus(405);

@@ -8,6 +8,8 @@ use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use RuntimeException;
+use Symfony\Component\HttpFoundation\HeaderUtils;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 use ZipArchive;
 
 class AttachmentFiles
@@ -112,5 +114,24 @@ class AttachmentFiles
         rewind($stream);
 
         return $stream;
+    }
+
+    /** @param resource $stream */
+    public function contentResponse(AttachmentVersion $version, mixed $stream, bool $preview = false): StreamedResponse
+    {
+        return response()->stream(function () use ($stream): void {
+            try {
+                fpassthru($stream);
+            } finally {
+                fclose($stream);
+            }
+        }, 200, [
+            'Content-Type' => $version->mime_type,
+            'Content-Length' => (string) $version->size,
+            'Content-Disposition' => HeaderUtils::makeDisposition($preview ? 'inline' : 'attachment', $version->original_name, 'document.'.pathinfo($version->original_name, PATHINFO_EXTENSION)),
+            'Cache-Control' => 'private, no-store, max-age=0', 'Pragma' => 'no-cache',
+            'X-Content-Type-Options' => 'nosniff', 'Referrer-Policy' => 'no-referrer',
+            'Content-Security-Policy' => "sandbox; default-src 'none'; frame-ancestors 'self'",
+        ]);
     }
 }

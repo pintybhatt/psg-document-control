@@ -9,7 +9,7 @@ class TemplateCatalogueRequest extends RbacScopeRequest
     public function rules(): array
     {
         return parent::rules() + ($this->isMethod('POST')
-            ? ($this->route()->getActionMethod() === 'retire' ? ['reason' => ['required', 'string', 'max:2000']] : TemplateCatalogue::creationRules()) : []);
+            ? (in_array($this->route()->getActionMethod(), ['retire', 'publish'], true) ? ['reason' => ['required', 'string', 'max:2000']] : TemplateCatalogue::creationRules()) : []);
     }
 
     /** @return array<string, mixed> */

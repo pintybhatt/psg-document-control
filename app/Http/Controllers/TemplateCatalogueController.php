@@ -6,7 +6,9 @@ use App\Authorization\TemplateCatalogue;
 use App\Http\Requests\TemplateCatalogueRequest;
 use App\Http\Resources\DocumentTemplateResource;
 use App\Models\DocumentTemplateAudit;
+use App\Models\StorageEvent;
 use Illuminate\Http\JsonResponse;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class TemplateCatalogueController extends Controller
 {
@@ -27,7 +29,7 @@ class TemplateCatalogueController extends Controller
             }
         }
 
-        return response()->json(['data' => DocumentTemplateResource::collection($rows), 'meta' => ['total' => $total], 'publication_enabled' => false])->header('Cache-Control', 'private, no-store');
+        return response()->json(['data' => DocumentTemplateResource::collection($rows), 'meta' => ['total' => $total], 'publication_enabled' => true])->header('Cache-Control', 'private, no-store');
     }
 
     public function sources(TemplateCatalogueRequest $request, TemplateCatalogue $catalogue): JsonResponse
@@ -41,8 +43,17 @@ class TemplateCatalogueController extends Controller
         $catalogue->authorize($request->user(), $scope);
         $record = $catalogue->find($request->user(), $scope, $template);
 
-        return response()->json(['data' => new DocumentTemplateResource($record), 'history' => DocumentTemplateAudit::query()->where('template_id', $record->id)->orderBy('id')
-            ->get(['id', 'actor_id', 'action', 'snapshot', 'reason', 'created_at']), 'publication_enabled' => false])->header('Cache-Control', 'private, no-store');
+        $history = DocumentTemplateAudit::query()->where('template_id', $record->id)->orderBy('id')->get(['id', 'actor_id', 'action', 'snapshot', 'reason', 'created_at'])
+            ->map(fn (DocumentTemplateAudit $entry): array => $entry->toArray() + ['key' => ($entry->action === 'created' ? '0:' : '3:').'catalogue:'.$entry->id]);
+        if ($publication = $record->publication) {
+            $history->push(['id' => $publication->id, 'key' => '1:publication:'.$publication->id, 'actor_id' => $publication->published_by, 'action' => 'published',
+                'snapshot' => $publication->snapshot, 'reason' => $publication->reason, 'created_at' => $publication->published_at->toISOString()]);
+        }
+        foreach (StorageEvent::query()->where('after->template_id', $record->id)->where('action', 'attachment.download')->orderBy('id')->get() as $entry) {
+            $history->push(['id' => $entry->id, 'key' => '2:download:'.$entry->id, 'actor_id' => $entry->actor_id, 'action' => 'downloaded', 'snapshot' => $entry->after, 'reason' => null, 'created_at' => $entry->created_at->toISOString()]);
+        }
+
+        return response()->json(['data' => new DocumentTemplateResource($record), 'history' => $history->sortBy(['created_at', 'key'])->values(), 'publication_enabled' => true])->header('Cache-Control', 'private, no-store');
     }
 
     public function store(TemplateCatalogueRequest $request, TemplateCatalogue $catalogue): DocumentTemplateResource
@@ -53,5 +64,15 @@ class TemplateCatalogueController extends Controller
     public function retire(TemplateCatalogueRequest $request, string $template, TemplateCatalogue $catalogue): DocumentTemplateResource
     {
         return new DocumentTemplateResource($catalogue->retire($request->user(), $request->scopeContext(), $template, $request->catalogueData()));
+    }
+
+    public function publish(TemplateCatalogueRequest $request, string $template, TemplateCatalogue $catalogue): DocumentTemplateResource
+    {
+        return new DocumentTemplateResource($catalogue->publish($request->user(), $request->scopeContext(), $template, $request->catalogueData()));
+    }
+
+    public function download(TemplateCatalogueRequest $request, string $template, TemplateCatalogue $catalogue): StreamedResponse
+    {
+        return $catalogue->download($request->user(), $request->scopeContext(), $template);
     }
 }

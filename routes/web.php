@@ -71,6 +71,8 @@ Route::middleware(['auth:web', EnsureActiveUserSession::class])->group(function 
         Route::get('document-templates/sources', [TemplateCatalogueController::class, 'sources'])->name('templates.sources');
         Route::post('document-templates', [TemplateCatalogueController::class, 'store'])->name('templates.store');
         Route::get('document-templates/{template}', [TemplateCatalogueController::class, 'show'])->name('templates.show');
+        Route::post('document-templates/{template}/publish', [TemplateCatalogueController::class, 'publish'])->name('templates.publish');
+        Route::get('document-templates/{template}/download', [TemplateCatalogueController::class, 'download'])->middleware(AuditDocumentStorageRequests::class)->name('templates.download');
         Route::post('document-templates/{template}/retire', [TemplateCatalogueController::class, 'retire'])->name('templates.retire');
         Route::get('document-search/lookups', [DocumentSearchController::class, 'lookups'])->name('document-search.lookups');
         Route::get('document-search', [DocumentSearchController::class, 'index'])->name('document-search');

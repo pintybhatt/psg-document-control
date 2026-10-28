@@ -17,6 +17,11 @@ function server() {
     const fetch = vi.fn(async (url, options = {}) => {
         const path = new URL(url, 'http://localhost').pathname;
         if (path.endsWith('/sources')) { return response({ data: [{ id: 'version-a', original_name: 'synthetic.docx', document_code: 'TEST/SOP/001', revision: 'R00', version: 1 }] }); }
+        if (path.endsWith('/publish')) {
+            Object.assign(rows[0], { status: 'published', published_by: 5, published_at: '2026-10-28T10:30:00Z', download_url: '/templates/1/download?scope_type=site&company_id=4&site_id=7' });
+            history.push({ id: 1, key: 'publication:1', actor_id: 5, action: 'published', reason: JSON.parse(options.body).reason, created_at: rows[0].published_at });
+            return response({ data: rows[0] });
+        }
         if (path.endsWith('/retire')) {
             rows[0].status = 'retired'; history.push({ id: 2, actor_id: 5, action: 'retired', reason: JSON.parse(options.body).reason, created_at: '2026-10-28T11:00:00Z' });
             return response({ data: rows[0] });
@@ -105,4 +110,57 @@ it('clears confidential metadata and ignores a late response when scope changes 
     await wrapper.setProps({ scope: { ...scope, scope_key: 'site:9', site_id: 9 } }); await flushPromises();
     expect(wrapper.text()).not.toContain('<script>Synthetic template</script>');
     expect(wrapper.emitted('unauthorized')).toHaveLength(1);
+});
+
+it.each(['en', 'lo'])('publishes only after confirmation and displays the server download link and publication history in %s', async language => {
+    const fetch = server();
+    const wrapper = await render({ ...scope, permissions: [...scope.permissions, 'templates.publish'] }, language);
+    const text = language === 'lo' ? lo : en;
+    await button(wrapper, text.rbacDetails).trigger('click'); await flushPromises();
+    expect(wrapper.find('a[download]').exists()).toBe(false);
+    await wrapper.get('#template-publish-reason').setValue('<b>Approved source</b>');
+    await wrapper.findAll('form').find(form => form.find('#template-publish-reason').exists()).trigger('submit');
+    expect(wrapper.text()).toContain(text.templatePublishConfirm);
+    expect(fetch.mock.calls.some(([url]) => url.includes('/publish'))).toBe(false);
+    await wrapper.get('[data-confirm]').trigger('click'); await flushPromises();
+    const [url, options] = fetch.mock.calls.find(([url]) => url.includes('/publish'));
+    expect(url).toContain('site_id=7');
+    expect(options.headers['X-CSRF-TOKEN']).toBe('sample-csrf');
+    expect(JSON.parse(options.body)).toEqual({ scope_type: 'site', company_id: 4, site_id: 7, reason: '<b>Approved source</b>' });
+    expect(wrapper.get('a[download]').attributes('href')).toBe('/templates/1/download?scope_type=site&company_id=4&site_id=7');
+    expect(wrapper.text()).toContain(text['templateStatus-published']);
+    expect(wrapper.text()).toContain(text['templateHistory-published']);
+    expect(wrapper.find('b').exists()).toBe(false);
+    expect(wrapper.find('#template-publish-reason').exists()).toBe(false);
+});
+
+it('keeps publication controls hidden without explicit publication permission', async () => {
+    server(); const wrapper = await render();
+    await button(wrapper, en.rbacDetails).trigger('click'); await flushPromises();
+    expect(wrapper.find('#template-publish-reason').exists()).toBe(false);
+    expect(wrapper.find('a[download]').exists()).toBe(false);
+});
+
+it('retires a published entry without removing publication history or retaining a download link', async () => {
+    server(); const wrapper = await render({ ...scope, permissions: [...scope.permissions, 'templates.publish'] });
+    await button(wrapper, en.rbacDetails).trigger('click'); await flushPromises();
+    await wrapper.get('#template-publish-reason').setValue('Authorized publication');
+    await wrapper.findAll('form').find(form => form.find('#template-publish-reason').exists()).trigger('submit');
+    await wrapper.get('[data-confirm]').trigger('click'); await flushPromises();
+    await wrapper.get('#template-retire-reason').setValue('Withdraw template');
+    await wrapper.get('form').trigger('submit'); await wrapper.get('[data-confirm]').trigger('click'); await flushPromises();
+    expect(wrapper.find('a[download]').exists()).toBe(false);
+    expect(wrapper.text()).toContain(en['templateHistory-published']);
+    expect(wrapper.text()).toContain(en['templateHistory-retired']);
+});
+
+it('shows approval and integrity failures without replacing an inactive entry or offering downloads', async () => {
+    const fetch = server(); const wrapper = await render({ ...scope, permissions: [...scope.permissions, 'templates.publish'] });
+    await button(wrapper, en.rbacDetails).trigger('click'); await flushPromises();
+    await wrapper.get('#template-publish-reason').setValue('Unapproved source');
+    await wrapper.findAll('form').find(form => form.find('#template-publish-reason').exists()).trigger('submit');
+    fetch.mockImplementationOnce(async () => response({ errors: { template: ['templateApprovalRequired'] } }, 422));
+    await wrapper.get('[data-confirm]').trigger('click'); await flushPromises();
+    expect(wrapper.text()).toContain(en.templateApprovalRequired);
+    expect(wrapper.find('a[download]').exists()).toBe(false);
 });

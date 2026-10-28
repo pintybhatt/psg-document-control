@@ -18,6 +18,8 @@ const rows = ref([]), sources = ref([]), history = ref([]), selected = ref(null)
 const busy = ref(false), editing = ref(false), error = ref(''), search = ref(''), reason = ref(''), confirming = ref(false);
 const form = reactive({ name_en: '', name_lo: '', description_en: '', description_lo: '', purpose: '', attachment_version_id: '' });
 const canManage = computed(() => props.scope.permissions.includes('templates.manage'));
+const canPublish = computed(() => canManage.value && props.scope.permissions.includes('templates.publish'));
+const confirmAction = ref('retire');
 const columns = computed(() => [{ key: 'name', label: t('masterName') }, { key: 'purpose', label: t('templatePurpose') }, { key: 'state', label: t('uiStatus') }, { key: 'actions', label: t('rbacActions') }]);
 const displayRows = computed(() => rows.value.map(row => ({ ...row, name: row[language.value === 'lo' ? 'name_lo' : 'name_en'], state: t(`templateStatus-${row.status}`) })));
 const sourceOptions = computed(() => [{ value: '', label: t('templateNoSource') }, ...sources.value.map(row => ({ value: row.id, label: `${row.document_code} · ${row.revision} · ${row.original_name} · v${row.version}` }))]);
@@ -26,7 +28,7 @@ function scopeData() { return { scope_type: props.scope.scope_type, company_id: 
 function url(path = '', extra = {}) { return `${props.endpoint}${path}?${new URLSearchParams({ ...scopeData(), page: page.value, ...extra })}`; }
 function fail(failure) {
     if (failure.name === 'AbortError') { return; }
-    error.value = 'templateRequestFailed';
+    error.value = Object.values(failure.fields ?? {}).flat().find(value => /^(template|storage)/.test(value)) ?? 'templateRequestFailed';
     if ([401, 403, 404, 419].includes(failure.status)) {
         rows.value = []; sources.value = []; history.value = []; selected.value = null; total.value = 0; editing.value = false; confirming.value = false;
         if (failure.status !== 404) { controller?.abort(); emit('unauthorized', failure); }
@@ -60,13 +62,13 @@ async function details(row) {
     catch (failure) { if (!signal.aborted) { fail(failure); } }
     finally { if (!signal.aborted) { busy.value = false; } }
 }
-async function save(retire = false) {
-    if (busy.value || !canManage.value) { return; }
+async function save(action = 'create') {
+    if (busy.value || !canManage.value || (action === 'publish' && !canPublish.value)) { return; }
     const signal = controller.signal;
     busy.value = true; error.value = '';
     try {
-        const body = retire ? { reason: reason.value } : { ...form, attachment_version_id: form.attachment_version_id || null };
-        const result = await request(url(retire ? `/${selected.value.id}/retire` : ''), { method: 'POST', signal, body: { ...scopeData(), ...body } });
+        const body = action !== 'create' ? { reason: reason.value } : { ...form, attachment_version_id: form.attachment_version_id || null };
+        const result = await request(url(action !== 'create' ? `/${selected.value.id}/${action}` : ''), { method: 'POST', signal, body: { ...scopeData(), ...body } });
         if (!signal.aborted) { editing.value = false; confirming.value = false; await details(result.data); if (!signal.aborted) { await load(); } }
     } catch (failure) { if (!signal.aborted) { confirming.value = false; fail(failure); } }
     finally { if (!signal.aborted) { busy.value = false; } }
@@ -98,9 +100,12 @@ onBeforeUnmount(() => controller?.abort());
             <p>{{ selected.purpose }} · {{ t(`templateStatus-${selected.status}`) }}</p>
             <p class="whitespace-pre-wrap wrap-anywhere">{{ selected[language === 'lo' ? 'description_lo' : 'description_en'] }}</p>
             <p>{{ t(selected.attachment_version_id ? 'templateSourceReferenced' : 'templateNoSource') }}</p>
-            <ul class="flex flex-col gap-2"><li v-for="entry in history" :key="entry.id" class="text-sm"><p>{{ t(`templateHistory-${entry.action}`) }} · {{ formatDateTime(entry.created_at) }} · {{ t('controlledActor') }} {{ entry.actor_id }}</p><p class="whitespace-pre-wrap wrap-anywhere">{{ entry.reason }}</p></li></ul>
-            <form v-if="canManage && selected.status === 'inactive'" class="flex flex-col gap-3" @submit.prevent="confirming = true"><TextareaInput id="template-retire-reason" v-model="reason" :label="t('controlledReason')" required maxlength="2000" :disabled="busy" /><UiButton type="submit" variant="secondary" :disabled="busy">{{ t('templateRetire') }}</UiButton></form>
+            <p v-if="selected.published_at" class="text-sm">{{ t('templatePublishedAt') }}: {{ formatDateTime(selected.published_at) }} · {{ t('controlledActor') }} {{ selected.published_by }}</p>
+            <a v-if="selected.status === 'published' && selected.download_url" :href="selected.download_url" download class="font-semibold text-teal-800 hover:underline">{{ t('templateDownload') }}</a>
+            <ul class="flex flex-col gap-2"><li v-for="entry in history" :key="entry.key ?? entry.id" class="text-sm"><p>{{ t(`templateHistory-${entry.action}`) }} · {{ formatDateTime(entry.created_at) }} · {{ t('controlledActor') }} {{ entry.actor_id }}</p><p class="whitespace-pre-wrap wrap-anywhere">{{ entry.reason }}</p></li></ul>
+            <form v-if="canManage && (selected.status === 'inactive' || (selected.status === 'published' && canPublish))" class="flex flex-col gap-3" @submit.prevent="confirmAction = 'retire'; confirming = true"><TextareaInput id="template-retire-reason" v-model="reason" :label="t('controlledReason')" required maxlength="2000" :disabled="busy" /><UiButton type="submit" variant="secondary" :disabled="busy">{{ t('templateRetire') }}</UiButton></form>
+            <form v-if="canPublish && selected.status === 'inactive' && selected.attachment_version_id" class="flex flex-col gap-3" @submit.prevent="confirmAction = 'publish'; confirming = true"><TextareaInput id="template-publish-reason" v-model="reason" :label="t('templatePublishReason')" required maxlength="2000" :disabled="busy" /><UiButton type="submit" :disabled="busy">{{ t('templatePublish') }}</UiButton></form>
         </section>
-        <ConfirmDialog v-model="confirming" :title="t('templateRetire')" :message="t('templateRetireConfirm')" :loading="busy" @confirm="save(true)" @cancel="confirming = false" />
+        <ConfirmDialog v-model="confirming" :title="t(confirmAction === 'publish' ? 'templatePublish' : 'templateRetire')" :message="t(confirmAction === 'publish' ? 'templatePublishConfirm' : 'templateRetireConfirm')" :loading="busy" @confirm="save(confirmAction)" @cancel="confirming = false" />
     </section>
 </template>

@@ -18,6 +18,8 @@ class RbacScopeRequest extends FormRequest
             'api.v1.approval-workflows.store', 'api.v1.approval-workflows.roles' => 'master-data.manage',
             'api.v1.templates.index', 'api.v1.templates.show' => 'templates.view',
             'api.v1.templates.store', 'api.v1.templates.retire', 'api.v1.templates.sources' => 'templates.manage',
+            'api.v1.templates.publish' => 'templates.publish',
+            'api.v1.templates.download' => 'templates.view',
             'api.v1.numbering.index', 'api.v1.numbering.registers', 'api.v1.numbering.preview', 'api.v1.numbering.history' => 'numbering.view',
             'api.v1.numbering.store', 'api.v1.numbering.update' => 'numbering.manage',
             'api.v1.master-data.index', 'api.v1.master-data.classifications' => 'master-data.view',
