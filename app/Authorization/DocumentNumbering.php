@@ -55,7 +55,7 @@ class DocumentNumbering
                 throw ValidationException::withMessages(['series' => 'numberingExhausted']);
             }
             $sequence = (int) DB::table('numbering_counters')->where('series_id', $series->id)->where('period', $period)->lockForUpdate()->value('value');
-            $number = NumberingFormat::render($configuration->prefix, $configuration->padding, $year, $sequence);
+            $number = NumberingFormat::render($configuration->prefix, $configuration->padding, $year, $sequence, $configuration->format);
             $record = $persistRegistration($number);
             if (! $record instanceof Model || ! $record instanceof FormalNumberedRegistration || ! $record->exists || $record->getConnection() !== DB::connection()) {
                 throw new LogicException('Registration must persist a formal record on the numbering connection.');

@@ -102,6 +102,124 @@ class NumberingTest extends TestCase
         $this->assertSame(3, FormalRegistrationRecord::query()->where('external_reference', 'EXTERNAL-REPEATABLE')->count());
     }
 
+    public function test_custom_format_is_previewed_saved_issued_and_versioned_without_rewriting_history(): void
+    {
+        [$actor, $scope, $register] = $this->actor();
+        $series = $this->series($actor, $scope, $register);
+        $legacy = $this->issue($actor, $scope, $series);
+        $format = ['pattern' => '{company}-{department}-{document_type}-{year2}-{sequence}', 'company' => 'EXAMPLE', 'department' => 'DEPT', 'document_type' => 'TYPE'];
+        $body = $this->scopeData($scope) + ['prefix' => 'EXAMPLE/OUT', 'padding' => 4, 'format' => $format, 'active' => true];
+        $this->postJson('/api/v1/numbering-series/preview', $body + ['year' => 2026])->assertOk()->assertJsonPath('number', 'EXAMPLE-DEPT-TYPE-26-0001');
+        $this->assertDatabaseCount('issued_document_numbers', 1);
+        $this->assertSame(1, DB::table('numbering_counters')->sole()->value);
+        $this->patchJson('/api/v1/numbering-series/'.$series->id, $body)->assertOk()
+            ->assertJsonPath('data.configuration.format', $format)->assertJsonPath('data.configuration.version', 2);
+        $this->assertSame('EXAMPLE-DEPT-TYPE-26-0002', $this->issue($actor, $scope, $series)->number);
+        $this->getJson($this->scopedUrl('numbering-series/'.$series->id.'/history', $scope))->assertOk()
+            ->assertJsonPath('data.0.format', $format)->assertJsonPath('data.1.format', null);
+        $this->patchJson('/api/v1/numbering-series/'.$series->id, $body)->assertOk()->assertJsonPath('data.configuration.version', 2);
+        unset($body['format']);
+        $body['padding'] = 3;
+        $this->patchJson('/api/v1/numbering-series/'.$series->id, $body)->assertOk()->assertJsonPath('data.configuration.format', $format);
+        $this->assertSame('EXAMPLE-DEPT-TYPE-26-003', $this->issue($actor, $scope, $series)->number);
+        $this->patchJson('/api/v1/numbering-series/'.$series->id, $body + ['format' => null])->assertOk()->assertJsonPath('data.configuration.format', null);
+        $this->assertSame('EXAMPLE/OUT/2026/004', $this->issue($actor, $scope, $series)->number);
+        $this->assertSame('EXAMPLE/OUT/2026/000001', $legacy->refresh()->number);
+        $this->assertSame(4, DB::table('numbering_counters')->sole()->value);
+        $this->assertDatabaseCount('numbering_series', 1);
+        $this->assertDatabaseCount('numbering_configurations', 4);
+    }
+
+    public function test_invalid_format_is_rejected_by_preview_configuration_and_direct_service(): void
+    {
+        [$actor, $scope, $register] = $this->actor();
+        $format = ['pattern' => '{department}-{sequence}'];
+        $body = $this->scopeData($scope) + $this->data($register, ['format' => $format]);
+        $this->postJson('/api/v1/numbering-series', $body)->assertUnprocessable()->assertJsonPath('errors.format.0', 'numberingInvalidFormat');
+        $this->postJson('/api/v1/numbering-series/preview', $body + ['year' => 2026])->assertUnprocessable()->assertJsonPath('errors.format.0', 'numberingInvalidFormat');
+        try {
+            $this->series($actor, $scope, $register, ['format' => $format]);
+            $this->fail('A definition without its referenced code was saved.');
+        } catch (ValidationException $exception) {
+            $this->assertSame(['format' => ['numberingInvalidFormat']], $exception->errors());
+        }
+        $this->assertDatabaseCount('numbering_series', 0);
+        $this->assertDatabaseCount('numbering_configurations', 0);
+        $this->assertDatabaseCount('numbering_namespaces', 0);
+    }
+
+    public function test_format_output_length_is_validated_for_the_largest_sequence_before_saving(): void
+    {
+        [, $scope, $register] = $this->actor();
+        $this->postJson('/api/v1/numbering-series', $this->scopeData($scope) + $this->data($register, [
+            'format' => ['pattern' => str_repeat('A', 117).'{sequence}'],
+        ]))->assertUnprocessable()->assertJsonValidationErrors('format');
+        $this->assertDatabaseCount('numbering_configurations', 0);
+    }
+
+    public function test_custom_format_collision_rolls_back_allocation_and_can_be_corrected_without_reusing_history(): void
+    {
+        [$actor, $scope, $register] = $this->actor();
+        $first = $this->series($actor, $scope, $register, ['format' => ['pattern' => 'EXAMPLE-{sequence}']]);
+        $issued = $this->issue($actor, $scope, $first);
+        $second = $this->series($actor, $scope, $register, ['purpose' => 'official_outgoing', 'prefix' => 'EXAMPLE/OFFICIAL', 'format' => ['pattern' => 'EXAMPLE-{sequence}']]);
+        try {
+            $this->issue($actor, $scope, $second);
+            $this->fail('A duplicate rendered number was issued.');
+        } catch (QueryException) {
+            $this->assertDatabaseCount('issued_document_numbers', 1);
+            $this->assertDatabaseCount('test_formal_numbering_records', 1);
+            $this->assertDatabaseCount('numbering_counters', 1);
+        }
+        app(ManageNumbering::class)->save($actor, $scope, ['prefix' => 'EXAMPLE/OFFICIAL', 'padding' => 4, 'active' => true, 'format' => ['pattern' => 'OFFICIAL-{sequence}']], (string) $second->id);
+        $this->assertSame('OFFICIAL-0001', $this->issue($actor, $scope, $second)->number);
+        $this->assertSame('EXAMPLE-000001', $issued->refresh()->number);
+    }
+
+    public function test_yearless_continuous_format_keeps_its_sequence_across_years(): void
+    {
+        [$actor, $scope, $register] = $this->actor();
+        $series = $this->series($actor, $scope, $register, ['reset_policy' => 'continuous', 'padding' => 4, 'format' => ['pattern' => 'EXAMPLE-{sequence}']]);
+        $this->assertSame('EXAMPLE-0001', $this->issue($actor, $scope, $series)->number);
+        $this->travelTo(now()->setDate(2027, 1, 1));
+        $this->assertSame('EXAMPLE-0002', $this->issue($actor, $scope, $series)->number);
+        $this->assertSame(0, DB::table('numbering_counters')->sole()->period);
+    }
+
+    public function test_yearless_annual_format_does_not_bypass_uniqueness_after_reset(): void
+    {
+        [$actor, $scope, $register] = $this->actor();
+        $series = $this->series($actor, $scope, $register, ['format' => ['pattern' => 'EXAMPLE-{sequence}']]);
+        $this->issue($actor, $scope, $series);
+        $this->travelTo(now()->setDate(2027, 1, 1));
+        try {
+            $this->issue($actor, $scope, $series);
+            $this->fail('Year rollover bypassed global uniqueness.');
+        } catch (QueryException) {
+            $this->assertDatabaseCount('numbering_counters', 1);
+            $this->assertDatabaseCount('issued_document_numbers', 1);
+        }
+    }
+
+    public function test_custom_formats_do_not_grant_management_issuance_or_foreign_scope_access(): void
+    {
+        [$actor, $scope, $register] = $this->actor(['numbering.view', 'numbering.manage']);
+        $format = ['pattern' => 'EXAMPLE-{sequence}'];
+        $series = $this->series($actor, $scope, $register, ['format' => $format]);
+        try {
+            $this->issue($actor, $scope, $series);
+            $this->fail('A custom format granted issuance authority.');
+        } catch (HttpException $exception) {
+            $this->assertSame(403, $exception->getStatusCode());
+        }
+        [$other, $otherScope] = $this->actor(['numbering.view', 'numbering.manage']);
+        $this->patchJson('/api/v1/numbering-series/'.$series->id, $this->scopeData($otherScope) + ['prefix' => 'EXAMPLE/OUT', 'padding' => 4, 'active' => true, 'format' => $format])->assertNotFound();
+        $other->roleAssignments()->sole()->role->permissions()->detach();
+        $this->postJson('/api/v1/numbering-series', $this->scopeData($otherScope) + $this->data($register, ['format' => $format]))->assertForbidden();
+        $this->assertDatabaseCount('numbering_configurations', 1);
+        $this->assertDatabaseCount('numbering_counters', 0);
+    }
+
     public function test_internal_and_official_numbers_are_separate_for_the_same_record(): void
     {
         [$actor, $scope, $register] = $this->actor();
