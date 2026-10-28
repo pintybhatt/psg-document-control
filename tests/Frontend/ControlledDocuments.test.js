@@ -14,8 +14,9 @@ enableAutoUnmount(afterEach);
 beforeEach(() => localStorage.clear());
 afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals(); });
 function response(data, status = 200) { return { ok: status < 400, status, json: async () => structuredClone(data) }; }
-function server({ registered = false, released = false, mutationError = null, detailError = null } = {}) {
+function server({ registered = false, released = false, mutationError = null, detailError = null, approvalEntries = [] } = {}) {
     let record = structuredClone(draft);
+    const approvals = structuredClone(approvalEntries);
     if (registered || released) { record.registered_at = '2026-10-26T10:00:00Z'; record.internal_number = 'TEST/CD/2026/000001'; record.lock_version = 2; }
     if (released) { record.status = 'current'; record.current_revision_id = record.authoritative_revision_id = 11; record.revisions[0].status = 'current'; record.revisions[0].released_at = '2026-10-26T10:01:00Z'; record.revisions[0].released_by = 5; record.lock_version = 3; }
     const fetch = vi.fn(async (url, options = {}) => {
@@ -23,10 +24,11 @@ function server({ registered = false, released = false, mutationError = null, de
         const method = options.method ?? 'GET';
         if (path.endsWith('/lookups')) { return response({ data: [type], people: [{ id: 5, name: 'Example owner' }] }); }
         if (method === 'GET' && path === '/controlled') { return response({ data: new URL(url, 'http://localhost').searchParams.get('status') === 'current' ? [{ ...record, id: 2, document_code: 'XPPL/SOP/REPLACEMENT' }] : [record], meta: { total: 1 } }); }
-        if (method === 'GET') { return detailError ? response(detailError.body, detailError.status) : response({ data: record, audits: [{ id: 1, action: 'created', actor_id: 5, created_at: '2026-10-26T10:00:00Z' }], related: [] }); }
+        if (method === 'GET') { return detailError ? response(detailError.body, detailError.status) : response({ data: record, audits: [{ id: 1, action: 'created', actor_id: 5, created_at: '2026-10-26T10:00:00Z' }], related: [], approvals }); }
         if (mutationError) { return response(mutationError.body, mutationError.status); }
         const body = JSON.parse(options.body);
-        if (path.endsWith('/register')) { record.registered_at = '2026-10-26T10:00:00Z'; record.internal_number = 'TEST/CD/2026/000001'; }
+        if (path.endsWith('/approvals')) { approvals.push({ id: approvals.length + 1, revision_id: 11, actor_id: 5, recorded_at: '2026-10-28T10:00:00Z', snapshot: { revision: structuredClone(record.revisions[0]) }, ...body }); }
+        else if (path.endsWith('/register')) { record.registered_at = '2026-10-26T10:00:00Z'; record.internal_number = 'TEST/CD/2026/000001'; }
         else if (path.endsWith('/release')) { record.status = 'current'; record.current_revision_id = record.authoritative_revision_id = 11; record.revisions[0].status = 'current'; record.revisions[0].released_at = '2026-10-26T10:01:00Z'; }
         else if (path.endsWith('/revisions')) { record.revisions.push({ ...revision, id: 12, identifier: '01', revision_number: 1, ...body }); }
         else if (path.endsWith('/status')) { record.status = body.status; record.authoritative_revision_id = null; }
@@ -42,6 +44,39 @@ async function render(currentScope = scope) {
 }
 function button(wrapper, text) { const found = wrapper.findAll('button').find(item => item.text() === text); expect(found, text).toBeDefined(); return found; }
 async function show(wrapper) { await button(wrapper, 'Details').trigger('click'); await flushPromises(); }
+
+it('allows draft editors to record resubmission without offering approval authority', async () => {
+    const fetch = server(); const wrapper = await render(); await show(wrapper);
+    await button(wrapper, en['controlledAction-approvals']).trigger('click');
+    expect(wrapper.get('#controlled-approval-decision').findAll('option').map(item => item.element.value)).toEqual(['submitted']);
+    await wrapper.get('#controlled-action-form').trigger('submit'); await flushPromises();
+    const [url, options] = fetch.mock.calls.find(([url, options]) => options.method === 'POST' && url.includes('/approvals'));
+    expect(url).toContain('/controlled/1/revisions/11/approvals');
+    expect(options.headers['X-CSRF-TOKEN']).toBe('sample-csrf');
+    expect(JSON.parse(options.body)).toMatchObject({ company_id: 4, site_id: 7, lock_version: 1, decision: 'submitted', comments: null });
+    expect(wrapper.text()).toContain(en['controlledApproval-submitted']);
+    expect(wrapper.text()).toContain(en['controlledConfirm-approvals']);
+});
+
+it('records an authorized rejection for the exact revision and safely displays comments', async () => {
+    const fetch = server(); const wrapper = await render({ ...scope, permissions: ['controlled.approvals.record'] }); await show(wrapper);
+    await button(wrapper, en['controlledAction-approvals']).trigger('click');
+    expect(wrapper.get('#controlled-approval-decision').findAll('option').map(item => item.element.value)).toEqual(['approved', 'rejected']);
+    await wrapper.get('#controlled-approval-decision').setValue('rejected');
+    await wrapper.get('#controlled-approval-comments').setValue('<script>review</script>');
+    await wrapper.get('#controlled-action-form').trigger('submit'); await flushPromises();
+    expect(JSON.parse(fetch.mock.calls.find(([url, options]) => options.method === 'POST' && url.includes('/approvals'))[1].body)).toMatchObject({ decision: 'rejected', comments: '<script>review</script>' });
+    expect(wrapper.text()).toContain('<script>review</script>');
+    expect(wrapper.find('script').exists()).toBe(false);
+});
+
+it('shows revision-specific history to readers without mutation controls', async () => {
+    server({ approvalEntries: [{ id: 1, revision_id: 11, actor_id: 5, decision: 'approved', comments: 'Reviewed content', recorded_at: '2026-10-28T10:00:00Z' }, { id: 2, revision_id: 999, actor_id: 5, decision: 'rejected', comments: 'Other revision', recorded_at: '2026-10-28T10:00:00Z' }] });
+    const wrapper = await render({ ...scope, permissions: [] }); await show(wrapper);
+    expect(wrapper.text()).toContain('Reviewed content');
+    expect(wrapper.text()).not.toContain('Other revision');
+    expect(wrapper.findAll('button').some(item => item.text() === en['controlledAction-approvals'])).toBe(false);
+});
 
 it('creates drafts with bilingual metadata, exact unit, CSRF and display dates without numbers', async () => {
     const fetch = server(); const wrapper = await render();

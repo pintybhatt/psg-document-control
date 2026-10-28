@@ -6,6 +6,7 @@ use App\Models\AuthorizationScope;
 use App\Models\ControlledDocument;
 use App\Models\ControlledDocumentAudit;
 use App\Models\ControlledRevision;
+use App\Models\ControlledRevisionApproval;
 use App\Models\DocumentSecurityAudit;
 use App\Models\DocumentSecurityProfile;
 use App\Models\DocumentType;
@@ -213,6 +214,44 @@ class ManageControlledDocuments
             $record->fill(['status' => 'current', 'current_revision_id' => $revision->id]);
             $this->touch($record, $actor);
             $this->audit($actor, $record, $revision, 'released', $validated['reason'], ['current_revision_id', 'released_at', 'released_by', 'status']);
+
+            return $record->refresh();
+        }, 1);
+    }
+
+    /**
+     * Records evidence only; approval hierarchy and release gating remain unconfigured.
+     * Each event snapshots its revision and attachment versions, so later edits do not
+     * turn historical decisions into approval of newly edited content.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    public function recordApproval(User $actor, DocumentScope $scope, string $id, string $revisionId, array $data): ControlledDocument
+    {
+        return DB::transaction(function () use ($actor, $scope, $id, $revisionId, $data): ControlledDocument {
+            $this->lockRegister($scope);
+            $permission = ($data['decision'] ?? null) === 'submitted' ? 'controlled.drafts.manage' : 'controlled.approvals.record';
+            $this->authorizeContext($actor, $scope, $permission);
+            $record = $this->find($actor, $scope, $id, true);
+            $this->rejectUnknown($data, ['lock_version', 'decision', 'comments']);
+            $validated = Validator::make($data, ['decision' => ['required', Rule::in(['submitted', 'approved', 'rejected'])],
+                'comments' => ['nullable', 'string', 'max:5000']], $this->messages())->validate();
+            $this->version($record, $data);
+            $this->editable($record);
+            $revision = $record->revisions()->whereKey($revisionId)->lockForUpdate()->firstOrFail();
+            if ($revision->released_at !== null) {
+                throw ValidationException::withMessages(['controlled' => 'controlledImmutable']);
+            }
+            $files = DB::table('attachment_versions as v')->join('document_attachments as a', 'a.id', '=', 'v.attachment_id')
+                ->where('a.profile_id', $record->profile_id)->where('a.revision_id', $revision->id)->orderBy('v.attachment_id')->orderBy('v.version')
+                ->get(['v.id', 'v.attachment_id', 'v.version', 'v.sha256'])->map(fn (object $file): array => (array) $file)->all();
+            $entry = new ControlledRevisionApproval(['revision_id' => $revision->id, 'actor_id' => $actor->id,
+                'decision' => $validated['decision'], 'document_version' => $record->lock_version,
+                'comments' => $validated['comments'] ?? null, 'recorded_at' => now(),
+                'snapshot' => ['revision' => $revision->attributesToArray(), 'files' => $files]]);
+            $this->persist($entry);
+            $this->touch($record, $actor);
+            $this->audit($actor, $record, $revision, 'approval_'.$validated['decision'], $entry->comments, ['approval:'.$entry->id]);
 
             return $record->refresh();
         }, 1);

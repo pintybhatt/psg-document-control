@@ -6,6 +6,7 @@ use App\Authorization\CorrespondenceContexts;
 use App\Authorization\ManageControlledDocuments;
 use App\Http\Requests\ControlledDocumentRequest;
 use App\Http\Resources\ControlledDocumentResource;
+use App\Models\ControlledRevisionApproval;
 use App\Models\DocumentType;
 use App\Models\RegisterConfiguration;
 use Illuminate\Database\Eloquent\Builder;
@@ -67,7 +68,9 @@ class ControlledDocumentController extends Controller
             }
         }
 
-        return response()->json(['data' => new ControlledDocumentResource($model), 'audits' => $model->audits()->get(['id', 'revision_id', 'actor_id', 'action', 'reason', 'changed_fields', 'created_at']), 'related' => $related]);
+        return response()->json(['data' => new ControlledDocumentResource($model), 'audits' => $model->audits()->get(['id', 'revision_id', 'actor_id', 'action', 'reason', 'changed_fields', 'created_at']), 'related' => $related,
+            'approvals' => ControlledRevisionApproval::query()->whereIn('revision_id', $model->revisions()->select('id'))->orderBy('id')
+                ->get(['id', 'revision_id', 'actor_id', 'decision', 'document_version', 'comments', 'snapshot', 'recorded_at'])]);
     }
 
     public function store(ControlledDocumentRequest $request, ManageControlledDocuments $manager): ControlledDocumentResource
@@ -93,6 +96,11 @@ class ControlledDocumentController extends Controller
     public function release(ControlledDocumentRequest $request, string $record, ManageControlledDocuments $manager): ControlledDocumentResource
     {
         return new ControlledDocumentResource($manager->release($request->user(), $request->documentScope(), $record, $request->documentData()));
+    }
+
+    public function recordApproval(ControlledDocumentRequest $request, string $record, string $revision, ManageControlledDocuments $manager): ControlledDocumentResource
+    {
+        return new ControlledDocumentResource($manager->recordApproval($request->user(), $request->documentScope(), $record, $revision, $request->documentData()));
     }
 
     public function changeStatus(ControlledDocumentRequest $request, string $record, ManageControlledDocuments $manager): ControlledDocumentResource
