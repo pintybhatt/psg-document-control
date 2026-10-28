@@ -1,4 +1,13 @@
 export default {
+    'numberingFormatDefinition': 'ຮູບແບບເລກທີ',
+    'numberingCustomFormat': 'ໃຊ້ຮູບແບບກຳນົດເອງ',
+    'numberingLegacyFormat': 'ຮູບແບບເດີມ: PREFIX/YYYY/SEQUENCE',
+    'numberingFormatPattern': 'ແບບແຜນເລກທີ',
+    'numberingFormatHelp': 'ໃຊ້ {prefix}, {company}, {department}, {document_type}, {year}, {year2} ແລະ {sequence} ພຽງໜຶ່ງຄັ້ງ. ຕົວຄັ່ນ: - _ / . ລະຫັດເປັນຄ່າການຕັ້ງຄ່າ, ບໍ່ແບ່ງລຳດັບເລກ. R00 ເປັນຂໍ້ຄວາມຄົງທີ່. ການເລີ່ມເລກໃໝ່ປະຈຳປີຕ້ອງມີປີ.',
+    'numberingComponent-company': 'ລະຫັດບໍລິສັດ (ຖ້າໃຊ້)',
+    'numberingComponent-department': 'ລະຫັດພະແນກ (ຖ້າໃຊ້)',
+    'numberingComponent-document_type': 'ລະຫັດປະເພດເອກະສານ (ຖ້າໃຊ້)',
+
     'masterReviewPolicy': 'ນະໂຍບາຍການທົບທວນຕາມໄລຍະ',
     'masterReviewHelp': 'ປິດໄວ້ເປັນຄ່າເລີ່ມຕົ້ນ. ເປີດໃຊ້ຫຼັງຈາກອະນຸມັດໄລຍະເວລາ, ປະເພດ ແລະ ວັນທົບທວນເປັນວັນເລີ່ມຕົ້ນ. ບໍ່ຄຳນວນວັນເກົ່າຄືນ.',
     'masterReviewEnabled': 'ເປີດໃຊ້ນະໂຍບາຍທົບທວນທີ່ອະນຸມັດ',
@@ -41,7 +50,7 @@ export default {
     'controlledConfirm-approvals': 'ຂໍ້ກຳນົດການອະນຸມັດລໍຖ້າການຢືນຢັນ. ບັນທຶກນີ້ເກັບເນື້ອຫາໃນເວລາບັນທຶກ ແລະ ບໍ່ຂັດຂວາງການປະກາດໃຊ້.',
     'controlledApprovalDecision': 'ລາຍການ',
     'controlledApprovalComments': 'ຄຳເຫັນ (ບໍ່ບັງຄັບ)',
-    'controlledApproval-submitted': 'ສົ່ງເພື່ອທົບທວນ',
+    'controlledApproval-submitted': 'ສົ່ງ / ສົ່ງຄືນເພື່ອອະນຸມັດ',
     'controlledApproval-approved': 'ບັນທຶກການອະນຸມັດ',
     'controlledApproval-rejected': 'ບັນທຶກການປະຕິເສດ',
     'controlledApprovalHistory': 'ປະຫວັດການອະນຸມັດ',

@@ -1,4 +1,13 @@
 export default {
+    'numberingFormatDefinition': 'Format definition',
+    'numberingCustomFormat': 'Use custom format',
+    'numberingLegacyFormat': 'Legacy format: PREFIX/YYYY/SEQUENCE',
+    'numberingFormatPattern': 'Format pattern',
+    'numberingFormatHelp': 'Use {prefix}, {company}, {department}, {document_type}, {year}, {year2} and exactly one {sequence}. Separators: - _ / . Codes are configuration snapshots, not sequence partitions. Literal R00 is static. Annual resets require a year component.',
+    'numberingComponent-company': 'Company code (if used)',
+    'numberingComponent-department': 'Department code (if used)',
+    'numberingComponent-document_type': 'Document-type code (if used)',
+
     'masterReviewPolicy': 'Periodic review policy',
     'masterReviewHelp': 'Disabled by default. Enable only after the interval, type mapping and completion-date baseline have been approved. Applies to this type within its organizational scope. Existing dates are not recalculated.',
     'masterReviewEnabled': 'Enable approved review policy',
@@ -41,7 +50,7 @@ export default {
     'controlledConfirm-approvals': 'Approval requirements await confirmation. These records capture the revision content at the time and do not block release.',
     'controlledApprovalDecision': 'Entry',
     'controlledApprovalComments': 'Comments (optional)',
-    'controlledApproval-submitted': 'Submitted for review',
+    'controlledApproval-submitted': 'Submitted / resubmitted for approval',
     'controlledApproval-approved': 'Approval recorded',
     'controlledApproval-rejected': 'Rejection recorded',
     'controlledApprovalHistory': 'Approval history',

@@ -83,6 +83,26 @@ class NumberingTest extends TestCase
         $this->assertSame(auth()->id(), NumberingConfiguration::query()->latest('id')->first()->created_by);
     }
 
+    #[TestWith(['annual', 'EXAMPLE-{sequence}', null])]
+    #[TestWith(['continuous', 'EXAMPLE-{sequence}', 'EXAMPLE-0001'])]
+    #[TestWith(['annual', 'EXAMPLE-{year2}-{sequence}', 'EXAMPLE-26-0001'])]
+    public function test_preview_applies_the_selected_reset_policy_without_allocating(string $reset, string $pattern, ?string $expected): void
+    {
+        [, $scope] = $this->actor(['numbering.view']);
+        $body = $this->scopeData($scope) + ['prefix' => 'EXAMPLE', 'padding' => 4, 'year' => 2026, 'reset_policy' => $reset, 'format' => ['pattern' => $pattern]];
+        $response = $this->postJson('/api/v1/numbering-series/preview', $body);
+        if ($expected === null) {
+            $response->assertUnprocessable()->assertJsonValidationErrors('format');
+        } else {
+            $response->assertOk()->assertJsonPath('number', $expected);
+        }
+        $this->postJson('/api/v1/numbering-series/preview', array_replace($body, ['reset_policy' => 'custom']))->assertUnprocessable()->assertJsonValidationErrors('reset_policy');
+        auth()->user()->roleAssignments()->sole()->role->permissions()->detach();
+        $this->postJson('/api/v1/numbering-series/preview', $body)->assertForbidden();
+        $this->assertDatabaseCount('numbering_counters', 0);
+        $this->assertDatabaseCount('issued_document_numbers', 0);
+    }
+
     #[TestWith(['annual', 1])]
     #[TestWith(['continuous', 3])]
     public function test_year_rollover_and_format_changes_keep_the_correct_sequence(string $policy, int $next): void

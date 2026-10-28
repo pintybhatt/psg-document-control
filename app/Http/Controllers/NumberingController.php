@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Authorization\ManageNumbering;
 use App\Authorization\NumberingFormat;
+use App\Authorization\NumberingResetPolicy;
 use App\Http\Requests\NumberingRequest;
 use App\Http\Resources\NumberingSeriesResource;
 use App\Models\NumberingSeries;
@@ -36,6 +37,10 @@ class NumberingController extends Controller
 
     public function preview(NumberingRequest $request): JsonResponse
     {
+        if ($request->has('reset_policy')) {
+            NumberingFormat::validateResetPolicy($request->validated('format'), NumberingResetPolicy::from($request->validated('reset_policy')));
+        }
+
         return response()->json(['number' => NumberingFormat::render($request->validated('prefix'), $request->integer('padding'), $request->integer('year'), 1, $request->validated('format'))]);
     }
 

@@ -48,6 +48,11 @@ class ManagementReport extends CorrespondenceReport
     public function event(string $event, string $language): string
     {
         $events = [
+            'approval_submitted' => ['Submitted / resubmitted for approval', 'ສົ່ງ / ສົ່ງຄືນເພື່ອອະນຸມັດ'],
+            'approval_approved' => ['Revision approval recorded', 'ບັນທຶກການອະນຸມັດສະບັບ'],
+            'approval_rejected' => ['Revision rejection recorded', 'ບັນທຶກການປະຕິເສດສະບັບ'],
+            'review_completed' => ['Document review completed', 'ທົບທວນເອກະສານສຳເລັດ'],
+            'review_policy.updated' => ['Document review policy changed', 'ປ່ຽນນະໂຍບາຍທົບທວນເອກະສານ'],
             'created' => ['Draft created', 'ສ້າງຮ່າງ'], 'updated' => ['Metadata updated', 'ປັບປຸງຂໍ້ມູນ'], 'registered' => ['Formally registered', 'ລົງທະບຽນທາງການ'], 'number.issued' => ['Number issued', 'ອອກເລກທີ'],
             'correct_details' => ['Metadata corrected', 'ແກ້ໄຂຂໍ້ມູນ'], 'update' => ['Assignment / handling updated', 'ປັບປຸງການມອບໝາຍ / ດຳເນີນງານ'], 'close' => ['Closed', 'ປິດແລ້ວ'], 'reopen' => ['Reopened', 'ເປີດຄືນ'], 'note' => ['Follow-up added', 'ເພີ່ມການຕິດຕາມ'],
             'dispatch' => ['Dispatched', 'ສົ່ງອອກ'], 'correct_dispatch' => ['Dispatch corrected', 'ແກ້ໄຂການສົ່ງ'], 'delivery' => ['Delivery / acknowledgment updated', 'ປັບປຸງການສົ່ງ / ຢືນຢັນ'], 'link' => ['Document relationship added', 'ເພີ່ມການເຊື່ອມໂຍງ'], 'unlink' => ['Document relationship removed', 'ຍົກເລີກການເຊື່ອມໂຍງ'],

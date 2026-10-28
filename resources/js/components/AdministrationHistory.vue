@@ -8,7 +8,7 @@ import { formatDateTime } from '../utilities/dates.js';
 
 const props = defineProps({ scope: { type: Object, required: true }, endpoint: { type: String, required: true }, csrfToken: { type: String, required: true }, canManageOrganization: { type: Boolean, default: false } });
 const emit = defineEmits(['unauthorized']);
-const { t } = useLocalization();
+const { t, language } = useLocalization();
 const request = createJsonClient(props.csrfToken);
 const permissions = { 'master-data': 'master-data.view', numbering: 'numbering.view', roles: 'roles.view', assignments: 'assignments.view', memberships: 'memberships.view', organization: 'security.audit.view' };
 const sources = computed(() => Object.keys(permissions).filter(key => (props.scope.scope_type !== 'global' || ['roles', 'assignments', 'organization'].includes(key)) && (key !== 'organization' || (props.scope.scope_type === 'global' && props.canManageOrganization)) && props.scope.permissions.includes(permissions[key])));
@@ -24,9 +24,9 @@ const columns = computed(() => [
     { key: 'timestamp', label: t('adminTimestamp') }, { key: 'actor', label: t('adminActor') },
     { key: 'action', label: t('adminAction') }, { key: 'subject', label: t('adminSubject') }, { key: 'changes', label: t('adminChanges') },
 ]);
-const displayRows = computed(() => rows.value.map(row => ({ ...row, actor: row.actor ?? t('adminSystem'), timestamp: formatDateTime(row.timestamp), action: t(`adminAction-${row.action}`), subject: `${t(`adminSubject-${row.subject_type}`)} #${row.subject_id}` })));
-const fieldLabels = { code: 'rbacCode', name_en: 'rbacNameEn', name_lo: 'rbacNameLo', active: 'rbacActive', prefix: 'numberingPrefix', padding: 'numberingPadding', version: 'adminVersion', change_reason: 'numberingReason', permission_keys: 'adminPermissions', register_ids: 'adminRegisterIds', user_id: 'adminAccountId', role_id: 'adminRoleId' };
-const displayValue = value => value === null ? '—' : typeof value === 'boolean' ? t(value ? 'rbacActive' : 'rbacInactive') : Array.isArray(value) ? value.join(', ') : String(value);
+const displayRows = computed(() => rows.value.map(row => ({ ...row, actor: row.actor ?? t('adminSystem'), timestamp: formatDateTime(row.timestamp), action: (language.value === 'lo' ? row.event_lo : row.event_en) || t(`adminAction-${row.action}`), subject: `${t(`adminSubject-${row.subject_type}`)} #${row.subject_id}` })));
+const fieldLabels = { code: 'rbacCode', name_en: 'rbacNameEn', name_lo: 'rbacNameLo', active: 'rbacActive', prefix: 'numberingPrefix', padding: 'numberingPadding', version: 'adminVersion', change_reason: 'numberingReason', permission_keys: 'adminPermissions', register_ids: 'adminRegisterIds', user_id: 'adminAccountId', role_id: 'adminRoleId', review_enabled: 'masterReviewEnabled', review_interval_months: 'masterReviewMonths', review_baseline: 'masterReviewBaseline' };
+const displayValue = (value, field) => field === 'review_baseline' && value === 'completion_date' ? t('masterReviewCompletionBaseline') : value === null ? '—' : typeof value === 'boolean' ? t(value ? 'rbacActive' : 'rbacInactive') : Array.isArray(value) ? value.join(', ') : String(value);
 async function load() {
     controller?.abort();
     controller = new AbortController();
@@ -66,7 +66,7 @@ onBeforeUnmount(() => controller?.abort());
         <DataTable v-model:page="page" :rows="displayRows" :columns="columns" :caption="t('adminHistory')" :loading="loading" server-side :total="total" :per-page="10" @change="load">
             <template #cell-changes="{ row }">
                 <details v-if="row.changes.length"><summary class="cursor-pointer text-teal-800">{{ t('adminChanges') }}</summary>
-                    <dl class="mt-2 flex flex-col gap-2"><div v-for="change in row.changes" :key="change.field"><dt class="font-medium">{{ t(fieldLabels[change.field]) }}</dt><dd class="wrap-anywhere">{{ displayValue(change.before) }} → {{ displayValue(change.after) }}</dd></div></dl>
+                    <dl class="mt-2 flex flex-col gap-2"><div v-for="change in row.changes" :key="change.field"><dt class="font-medium">{{ t(fieldLabels[change.field]) }}</dt><dd class="wrap-anywhere">{{ displayValue(change.before, change.field) }} → {{ displayValue(change.after, change.field) }}</dd></div></dl>
                 </details><span v-else>—</span>
             </template>
         </DataTable>
