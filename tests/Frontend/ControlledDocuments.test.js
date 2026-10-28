@@ -8,14 +8,16 @@ import lo from '../../resources/js/localization/lo.js';
 
 const scope = { key: '7:site', company_id: 4, site_id: 7, department_id: null, permissions: ['controlled.drafts.manage', 'controlled.register', 'controlled.release', 'controlled.status.manage', 'numbering.issue'] };
 const type = { id: 9, name_en: 'SOP', name_lo: 'ລະບຽບ', category: { id: 8, name_en: 'Procedures', name_lo: 'ຂັ້ນຕອນ' } };
-const revision = { id: 11, revision_number: 0, identifier: '00', status: 'draft', title_en: '<script>Safety procedure</script>', title_lo: 'ລະບຽບຄວາມປອດໄພ', owner_id: 5, custodian_id: 5, owner_name: 'Example owner', custodian_name: 'Example owner', issue_date: '2026-10-25', effective_date: '2026-10-26', review_date: '2027-10-26', revision_reason: 'Initial', change_description: 'Initial issue', released_at: null };
+const revision = { id: 11, revision_number: 0, identifier: 'R00', display_identifier: 'XPPL/SOP/001-R00', status: 'draft', title_en: '<script>Safety procedure</script>', title_lo: 'ລະບຽບຄວາມປອດໄພ', owner_id: 5, custodian_id: 5, owner_name: 'Example owner', custodian_name: 'Example owner', issue_date: '2026-10-25', effective_date: '2026-10-26', review_date: '2027-10-26', revision_reason: 'Initial', change_description: 'Initial issue', released_at: null };
 const draft = { id: 1, document_code: 'XPPL/SOP/001', type_id: 9, type, category: type.category, internal_number: null, classification: 'normal', registered_at: null, lock_version: 1, status: 'draft', current_revision_id: null, authoritative_revision_id: null, revisions: [revision] };
 enableAutoUnmount(afterEach);
 beforeEach(() => localStorage.clear());
 afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals(); });
 function response(data, status = 200) { return { ok: status < 400, status, json: async () => structuredClone(data) }; }
-function server({ registered = false, released = false, mutationError = null, detailError = null } = {}) {
+function server({ registered = false, released = false, mutationError = null, detailError = null, approvalEntries = [], reviewEntries = [] } = {}) {
     let record = structuredClone(draft);
+    const approvals = structuredClone(approvalEntries);
+    const reviews = structuredClone(reviewEntries);
     if (registered || released) { record.registered_at = '2026-10-26T10:00:00Z'; record.internal_number = 'TEST/CD/2026/000001'; record.lock_version = 2; }
     if (released) { record.status = 'current'; record.current_revision_id = record.authoritative_revision_id = 11; record.revisions[0].status = 'current'; record.revisions[0].released_at = '2026-10-26T10:01:00Z'; record.revisions[0].released_by = 5; record.lock_version = 3; }
     const fetch = vi.fn(async (url, options = {}) => {
@@ -23,12 +25,14 @@ function server({ registered = false, released = false, mutationError = null, de
         const method = options.method ?? 'GET';
         if (path.endsWith('/lookups')) { return response({ data: [type], people: [{ id: 5, name: 'Example owner' }] }); }
         if (method === 'GET' && path === '/controlled') { return response({ data: new URL(url, 'http://localhost').searchParams.get('status') === 'current' ? [{ ...record, id: 2, document_code: 'XPPL/SOP/REPLACEMENT' }] : [record], meta: { total: 1 } }); }
-        if (method === 'GET') { return detailError ? response(detailError.body, detailError.status) : response({ data: record, audits: [{ id: 1, action: 'created', actor_id: 5, created_at: '2026-10-26T10:00:00Z' }], related: [] }); }
+        if (method === 'GET') { return detailError ? response(detailError.body, detailError.status) : response({ data: record, audits: [{ id: 1, action: 'created', actor_id: 5, created_at: '2026-10-26T10:00:00Z' }], related: [], approvals, reviews }); }
         if (mutationError) { return response(mutationError.body, mutationError.status); }
         const body = JSON.parse(options.body);
-        if (path.endsWith('/register')) { record.registered_at = '2026-10-26T10:00:00Z'; record.internal_number = 'TEST/CD/2026/000001'; }
+        if (path.endsWith('/reviews')) { reviews.push({ id: reviews.length + 1, revision_id: 11, actor_id: 5, recorded_at: '2026-10-28T10:00:00Z', next_review_date: '2027-10-28', ...body }); }
+        else if (path.endsWith('/approvals')) { approvals.push({ id: approvals.length + 1, revision_id: 11, actor_id: 5, recorded_at: '2026-10-28T10:00:00Z', snapshot: { revision: structuredClone(record.revisions[0]) }, ...body }); }
+        else if (path.endsWith('/register')) { record.registered_at = '2026-10-26T10:00:00Z'; record.internal_number = 'TEST/CD/2026/000001'; }
         else if (path.endsWith('/release')) { record.status = 'current'; record.current_revision_id = record.authoritative_revision_id = 11; record.revisions[0].status = 'current'; record.revisions[0].released_at = '2026-10-26T10:01:00Z'; }
-        else if (path.endsWith('/revisions')) { record.revisions.push({ ...revision, id: 12, identifier: '01', revision_number: 1, ...body }); }
+        else if (path.endsWith('/revisions')) { record.revisions.push({ ...revision, id: 12, identifier: 'R01', display_identifier: 'XPPL/SOP/001-R01', revision_number: 1, ...body }); }
         else if (path.endsWith('/status')) { record.status = body.status; record.authoritative_revision_id = null; }
         else { Object.assign(record.revisions.at(-1), body); }
         record.lock_version++;
@@ -42,6 +46,39 @@ async function render(currentScope = scope) {
 }
 function button(wrapper, text) { const found = wrapper.findAll('button').find(item => item.text() === text); expect(found, text).toBeDefined(); return found; }
 async function show(wrapper) { await button(wrapper, 'Details').trigger('click'); await flushPromises(); }
+
+it('allows draft editors to record resubmission without offering approval authority', async () => {
+    const fetch = server(); const wrapper = await render(); await show(wrapper);
+    await button(wrapper, en['controlledAction-approvals']).trigger('click');
+    expect(wrapper.get('#controlled-approval-decision').findAll('option').map(item => item.element.value)).toEqual(['submitted']);
+    await wrapper.get('#controlled-action-form').trigger('submit'); await flushPromises();
+    const [url, options] = fetch.mock.calls.find(([url, options]) => options.method === 'POST' && url.includes('/approvals'));
+    expect(url).toContain('/controlled/1/revisions/11/approvals');
+    expect(options.headers['X-CSRF-TOKEN']).toBe('sample-csrf');
+    expect(JSON.parse(options.body)).toMatchObject({ company_id: 4, site_id: 7, lock_version: 1, decision: 'submitted', comments: null });
+    expect(wrapper.text()).toContain(en['controlledApproval-submitted']);
+    expect(wrapper.text()).toContain(en['controlledConfirm-approvals']);
+});
+
+it('records an authorized rejection for the exact revision and safely displays comments', async () => {
+    const fetch = server(); const wrapper = await render({ ...scope, permissions: ['controlled.approvals.record'] }); await show(wrapper);
+    await button(wrapper, en['controlledAction-approvals']).trigger('click');
+    expect(wrapper.get('#controlled-approval-decision').findAll('option').map(item => item.element.value)).toEqual(['approved', 'rejected']);
+    await wrapper.get('#controlled-approval-decision').setValue('rejected');
+    await wrapper.get('#controlled-approval-comments').setValue('<script>review</script>');
+    await wrapper.get('#controlled-action-form').trigger('submit'); await flushPromises();
+    expect(JSON.parse(fetch.mock.calls.find(([url, options]) => options.method === 'POST' && url.includes('/approvals'))[1].body)).toMatchObject({ decision: 'rejected', comments: '<script>review</script>' });
+    expect(wrapper.text()).toContain('<script>review</script>');
+    expect(wrapper.find('script').exists()).toBe(false);
+});
+
+it('shows revision-specific history to readers without mutation controls', async () => {
+    server({ approvalEntries: [{ id: 1, revision_id: 11, actor_id: 5, decision: 'approved', comments: 'Reviewed content', recorded_at: '2026-10-28T10:00:00Z' }, { id: 2, revision_id: 999, actor_id: 5, decision: 'rejected', comments: 'Other revision', recorded_at: '2026-10-28T10:00:00Z' }] });
+    const wrapper = await render({ ...scope, permissions: [] }); await show(wrapper);
+    expect(wrapper.text()).toContain('Reviewed content');
+    expect(wrapper.text()).not.toContain('Other revision');
+    expect(wrapper.findAll('button').some(item => item.text() === en['controlledAction-approvals'])).toBe(false);
+});
 
 it('creates drafts with bilingual metadata, exact unit, CSRF and display dates without numbers', async () => {
     const fetch = server(); const wrapper = await render();
@@ -94,11 +131,22 @@ it('prepares the next revision without resubmitting released metadata and preser
     const body = JSON.parse(fetch.mock.calls.find(([, options]) => options.method === 'POST')[1].body);
     expect(body).toMatchObject({ lock_version: 3, revision_reason: 'Annual review', change_description: 'Updated precautions' });
     expect(body).not.toHaveProperty('title_en');
-    expect(wrapper.text()).toContain('Revision 01');
+    expect(wrapper.text()).toContain('Revision R01');
+    expect(wrapper.get('#controlled-detail-title').text()).toBe('XPPL/SOP/001');
+    expect(wrapper.text()).toContain(`${en.controlledRevisionIdentifier}: XPPL/SOP/001-R01`);
     expect(wrapper.text()).toContain(en.controlledAuthoritative);
     await button(wrapper, en.controlledEdit).trigger('click');
     expect(wrapper.find('#controlled-document_code').exists()).toBe(false);
     expect(wrapper.find('#controlled-classification').exists()).toBe(false);
+});
+it('preserves ambiguous stored codes and displays the revision label separately', async () => {
+    const fetch = server(); const wrapper = await render();
+    fetch.mockImplementationOnce(async () => response({ data: { ...structuredClone(draft), document_code: 'LEGACY001R00', revisions: [{ ...revision, display_identifier: null }] }, audits: [], related: [], approvals: [] }));
+    await show(wrapper);
+    expect(wrapper.get('#controlled-detail-title').text()).toBe('LEGACY001R00');
+    expect(wrapper.text()).toContain('Revision R00');
+    expect(wrapper.text()).not.toContain(en.controlledRevisionIdentifier);
+    expect(wrapper.text()).not.toContain('LEGACY001R00-R00');
 });
 it('renders Lao status, history and dd/mm/yyyy dates without untranslated keys', async () => {
     server({ released: true }); const wrapper = await render(); await show(wrapper);
@@ -152,4 +200,32 @@ it('opens the existing controlled detail directly from a document search link', 
     } finally {
         window.history.replaceState({}, '', '/');
     }
+});
+
+it('records completion on the authoritative revision with CSRF and displays escaped review history', async () => {
+    const fetch = server({ released: true });
+    const wrapper = await render({ ...scope, permissions: ['controlled.reviews.record'] }); await show(wrapper);
+    await button(wrapper, en['controlledAction-reviews']).trigger('click');
+    await wrapper.get('#controlled-review-outcome').setValue('revision_required');
+    await wrapper.get('#controlled-review-comments').setValue('<script>Check procedure</script>');
+    await wrapper.get('#controlled-action-form').trigger('submit'); await flushPromises();
+    const [url, options] = fetch.mock.calls.find(([url, options]) => options.method === 'POST' && url.includes('/reviews'));
+    expect(url).toContain('/controlled/1/revisions/11/reviews');
+    expect(options.headers['X-CSRF-TOKEN']).toBe('sample-csrf');
+    expect(JSON.parse(options.body)).toEqual({ company_id: 4, site_id: 7, department_id: null, lock_version: 3, outcome: 'revision_required', comments: '<script>Check procedure</script>' });
+    expect(wrapper.text()).toContain(en['controlledReview-revision_required']);
+    expect(wrapper.text()).toContain('<script>Check procedure</script>');
+    expect(wrapper.find('script').exists()).toBe(false);
+    expect(wrapper.text()).toContain('28/10/2027');
+});
+
+it('shows reviews only in their revision history and hides completion controls from readers and drafts', async () => {
+    server({ released: true, reviewEntries: [{ id: 1, revision_id: 11, actor_id: 5, outcome: 'no_changes_required', comments: 'Completed check', recorded_at: '2026-10-28T10:00:00Z', next_review_date: '2027-10-28' }, { id: 2, revision_id: 999, outcome: 'revision_required', comments: 'Foreign history' }] });
+    const wrapper = await render({ ...scope, permissions: [] }); await show(wrapper);
+    expect(wrapper.text()).toContain('Completed check');
+    expect(wrapper.text()).not.toContain('Foreign history');
+    expect(wrapper.findAll('button').some(item => item.text() === en['controlledAction-reviews'])).toBe(false);
+    server();
+    const draftWrapper = await render({ ...scope, permissions: ['controlled.reviews.record'] }); await show(draftWrapper);
+    expect(draftWrapper.findAll('button').some(item => item.text() === en['controlledAction-reviews'])).toBe(false);
 });

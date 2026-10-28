@@ -47,7 +47,26 @@ class ControlledRevision extends Model
 
     public function identifier(): string
     {
-        return str_pad((string) $this->revision_number, 2, '0', STR_PAD_LEFT);
+        return self::formatIdentifier($this->revision_number);
+    }
+
+    public static function formatIdentifier(int $revisionNumber): string
+    {
+        return 'R'.str_pad((string) $revisionNumber, 2, '0', STR_PAD_LEFT);
+    }
+
+    /**
+     * Display only. Existing revision-like components are never removed or replaced:
+     * their meaning may be a static suffix or part of a legacy document identity.
+     */
+    public function displayIdentifier(string $documentCode): ?string
+    {
+        $components = preg_match_all('/R[0-9]+/i', $documentCode);
+        if ($components > 0) {
+            return $components === 1 && str_ends_with($documentCode, '-'.$this->identifier()) ? $documentCode : null;
+        }
+
+        return $documentCode.'-'.$this->identifier();
     }
 
     protected function casts(): array

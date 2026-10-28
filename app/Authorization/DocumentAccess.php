@@ -16,12 +16,12 @@ class DocumentAccess
 {
     public function __construct(private AccessControl $roles, private MembershipAccess $memberships) {}
 
-    public function allows(?User $user, mixed $resource, DocumentOperation|string $operation): bool
+    public function allows(?User $user, mixed $resource, DocumentOperation|string $operation, bool $allowAdministratorBypass = true): bool
     {
         $operation = is_string($operation) ? DocumentOperation::tryFrom($operation) : $operation;
         $profile = $resource instanceof DocumentSecurityDescriptor ? $resource->resolve() : null;
         $actor = $user?->exists ? User::query()->find($user->getKey()) : null;
-        $isSystemAdministrator = $actor !== null && $this->roles->isSystemAdministrator($actor);
+        $isSystemAdministrator = $allowAdministratorBypass && $actor !== null && $this->roles->isSystemAdministrator($actor);
         $reason = $this->denialReason($actor, $profile, $operation, $isSystemAdministrator);
         $audit = DocumentSecurityAudit::query()->create([
             'actor_id' => $actor?->id, 'profile_id' => $profile?->id, 'event' => $reason === null ? 'access.allowed' : 'access.denied',

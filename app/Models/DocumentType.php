@@ -8,11 +8,16 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 
-#[Fillable(['scope_id', 'code', 'category_id', 'name_en', 'name_lo', 'description_en', 'description_lo', 'active'])]
+#[Fillable(['scope_id', 'code', 'category_id', 'name_en', 'name_lo', 'description_en', 'description_lo', 'active', 'review_enabled', 'review_interval_months', 'review_baseline'])]
 class DocumentType extends ScopedDocumentMaster
 {
     /** @use HasFactory<DocumentTypeFactory> */
     use HasFactory;
+
+    protected function casts(): array
+    {
+        return parent::casts() + ['review_enabled' => 'boolean', 'review_interval_months' => 'integer'];
+    }
 
     public function category(): BelongsTo
     {

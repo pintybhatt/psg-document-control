@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Authorization\CorrespondenceContexts;
+use App\Authorization\DocumentApprovals;
 use App\Authorization\ManageOutgoingCorrespondence;
 use App\Authorization\ManageOutgoingOperations;
 use App\CorrespondenceReport;
@@ -65,7 +66,7 @@ class OutgoingCorrespondenceController extends Controller
     {
         $model = $outgoing->find($request->user(), $request->documentScope(), $record);
 
-        return response()->json(['data' => new OutgoingCorrespondenceResource($model), 'audits' => $model->audits()->get(['id', 'actor_id', 'action', 'changed_fields', 'created_at'])] + $operations->details($request->user(), $model));
+        return response()->json(['data' => new OutgoingCorrespondenceResource($model), 'approval_execution' => app(DocumentApprovals::class)->panel($request->user(), $model), 'audits' => $model->audits()->get(['id', 'actor_id', 'action', 'changed_fields', 'created_at'])] + $operations->details($request->user(), $model));
     }
 
     public function export(OutgoingCorrespondenceRequest $request, ManageOutgoingCorrespondence $manager, CorrespondenceReport $report): Response

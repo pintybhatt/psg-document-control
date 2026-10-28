@@ -62,7 +62,7 @@ it('submits checkout with the reviewed custody version and ISO dates', async () 
     expect(body).toMatchObject({ action: 'checkout', lock_version: 1, custodian_id: 5, checkout_date: '2026-10-25', expected_return_date: '2026-10-28', reason: 'Review' });
 });
 it('keeps released files immutable and requests the selected controlled revision', async () => {
-    const fetch = server({ writable: false }); const wrapper = await render({ revisions: [{ id: 11, identifier: '00', status: 'current' }, { id: 12, identifier: '01', status: 'draft' }], authoritativeRevision: 11 }); await expand(wrapper);
+    const fetch = server({ writable: false }); const wrapper = await render({ revisions: [{ id: 11, identifier: 'R00', status: 'current' }, { id: 12, identifier: 'R01', status: 'draft' }], authoritativeRevision: 11 }); await expand(wrapper);
     expect(fetch.mock.calls.every(([url]) => url.includes('revision_id=11'))).toBe(true);
     expect(wrapper.text()).toContain(en.storageRevisionImmutable);
     expect(wrapper.findAll('button').some(item => item.text() === en.storageReplace)).toBe(false);

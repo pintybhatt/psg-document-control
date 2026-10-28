@@ -23,8 +23,8 @@ it.each(['en', 'lo'])('renders localized identities, released/draft revisions, l
     const { wrapper } = await render(language);
     const text = language === 'en' ? en : lo;
     expect(wrapper.text()).toContain(text.controlledAuthoritative);
-    expect(wrapper.text()).toContain(`${text.controlledAuthoritative}: 00`);
-    expect(wrapper.text()).toContain(`${text['controlledStatus-draft']}: 01`);
+    expect(wrapper.text()).toContain(`${text.controlledAuthoritative}: R00`);
+    expect(wrapper.text()).toContain(`${text['controlledStatus-draft']}: R01`);
     expect(wrapper.text()).toContain('Room A → Cabinet B');
     expect(wrapper.find('script').exists()).toBe(false);
     expect(wrapper.findAll('a').every(link => link.attributes('href') === record.detail_url)).toBe(true);
@@ -34,13 +34,13 @@ it('submits combined filters, scopes, padded revisions and server pagination', a
     const { wrapper, fetch } = await render();
     await wrapper.get('#search-register').setValue('controlled'); await flushPromises();
     await wrapper.get('#document-search').setValue('ຄວາມປອດໄພ');
-    await wrapper.get('#search-revision').setValue('00');
+    await wrapper.get('#search-revision').setValue('R00');
     await wrapper.get('#search-physical').setValue('Box A');
     await wrapper.get('#search-exact').setValue(true);
     await wrapper.findAll('form')[0].trigger('submit'); await flushPromises();
     const call = fetch.mock.calls.filter(([url]) => !url.includes('/lookups')).at(-1)[0];
     const params = new URL(call, 'http://localhost').searchParams;
-    expect(Object.fromEntries(params)).toMatchObject({ company_id: '4', site_id: '7', register: 'controlled', revision: '00', physical: 'Box A', search: 'ຄວາມປອດໄພ', exact: '1', page: '1' });
+    expect(Object.fromEntries(params)).toMatchObject({ company_id: '4', site_id: '7', register: 'controlled', revision: 'R00', physical: 'Box A', search: 'ຄວາມປອດໄພ', exact: '1', page: '1' });
     await wrapper.findAll('button').find(button => button.text() === en.uiNext).trigger('click'); await flushPromises();
     expect(fetch.mock.calls.at(-1)[0]).toContain('page=2');
 });

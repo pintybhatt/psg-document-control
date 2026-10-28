@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Authorization\CorrespondenceContexts;
+use App\Authorization\DocumentApprovals;
 use App\Authorization\ManageIncomingCorrespondence;
 use App\Authorization\ManageIncomingOperations;
 use App\CorrespondenceReport;
@@ -58,7 +59,7 @@ class IncomingCorrespondenceController extends Controller
     {
         $model = $incoming->find($request->user(), $request->documentScope(), $record);
 
-        return response()->json(['data' => new IncomingCorrespondenceResource($model), 'audits' => IncomingCorrespondenceAudit::query()->where('correspondence_id', $model->id)->orderBy('id')->get(['id', 'actor_id', 'action', 'changed_fields', 'created_at'])] + $operations->details($request->user(), $model));
+        return response()->json(['data' => new IncomingCorrespondenceResource($model), 'approval_execution' => app(DocumentApprovals::class)->panel($request->user(), $model), 'audits' => IncomingCorrespondenceAudit::query()->where('correspondence_id', $model->id)->orderBy('id')->get(['id', 'actor_id', 'action', 'changed_fields', 'created_at'])] + $operations->details($request->user(), $model));
     }
 
     /** @return Builder<IncomingCorrespondence> */

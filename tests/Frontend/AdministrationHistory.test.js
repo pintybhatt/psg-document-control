@@ -49,3 +49,14 @@ describe('Administration configuration history', () => {
         expect(wrapper.emitted('unauthorized')).toHaveLength(1);
     });
 });
+
+it('uses bilingual review-policy descriptions and translates the recorded calculation baseline', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => reply({ data: [{ ...event, subject_type: 'types', event_en: 'Document review policy changed', event_lo: 'ປ່ຽນນະໂຍບາຍທົບທວນເອກະສານ', changes: [{ field: 'review_baseline', before: null, after: 'completion_date' }, { field: 'review_enabled', before: false, after: true }] }], meta: { total: 1 } })));
+    const wrapper = render(); await flushPromises();
+    expect(wrapper.text()).toContain('Document review policy changed');
+    expect(wrapper.text()).toContain('Review completion date');
+    expect(wrapper.text()).not.toContain('completion_date');
+    await wrapper.get('select[aria-label="Language"]').setValue('lo');
+    expect(wrapper.text()).toContain('ປ່ຽນນະໂຍບາຍທົບທວນເອກະສານ');
+    expect(wrapper.text()).toContain('ວັນສຳເລັດການທົບທວນ');
+});

@@ -25,7 +25,7 @@ afterAll(() => {
     }
 });
 function response(data, status = 200) { return { ok: status < 400, status, json: async () => structuredClone(data) }; }
-function server({ rows = [series], error = null, registerRows = registers, history = [configuration] } = {}) {
+function server({ rows = [series], error = null, registerRows = registers, history = [configuration], previewNumber = null } = {}) {
     const state = structuredClone(rows);
     const fetch = vi.fn(async (url, options = {}) => {
         const path = new URL(url, 'http://localhost').pathname;
@@ -36,7 +36,7 @@ function server({ rows = [series], error = null, registerRows = registers, histo
         if (method === 'GET' && path.endsWith('/history')) { return response({ data: history, total: history.length }); }
         if (path.endsWith('/preview')) {
             const body = JSON.parse(options.body);
-            return response({ number: `${body.prefix}/${body.year}/${'1'.padStart(body.padding, '0')}` });
+            return response({ number: previewNumber ?? `${body.prefix}/${body.year}/${'1'.padStart(body.padding, '0')}` });
         }
         if (error) { return response(error.body, error.status); }
         const body = JSON.parse(options.body);
@@ -100,7 +100,7 @@ describe('numbering administration', () => {
         const calls = fetch.mock.calls.filter(([, options]) => options.method === 'POST');
         expect(calls).toHaveLength(1);
         expect(calls[0][0]).toBe(`${endpoint}/preview`);
-        expect(JSON.parse(calls[0][1].body)).toEqual({ scope_type: 'site', company_id: 4, site_id: 7, prefix: 'EXAMPLE/DOC', padding: 4, year: 2027 });
+        expect(JSON.parse(calls[0][1].body)).toEqual({ scope_type: 'site', company_id: 4, site_id: 7, prefix: 'EXAMPLE/DOC', padding: 4, year: 2027, reset_policy: 'annual' });
         await control(wrapper, 'Prefix').setValue('CHANGED');
         expect(wrapper.text()).not.toContain('EXAMPLE/DOC/2027/0001');
     });
@@ -205,4 +205,48 @@ describe('numbering administration', () => {
         expect(wrapper.text()).not.toContain('STALE-PREVIEW');
         expect(fetch.mock.calls.some(([url]) => url.includes('site_id=8'))).toBe(true);
     });
+});
+
+it('loads, previews and saves a custom definition and presents each historical format', async () => {
+    const format = { pattern: '{company}-{department}-{document_type}-{year2}-{sequence}', company: 'EXAMPLE', department: 'DEPT', document_type: 'TYPE' };
+    const custom = { ...configuration, version: 2, format, padding: 4 };
+    const fetch = server({ rows: [{ ...series, configuration: custom }], history: [custom, { ...configuration, format: null }], previewNumber: 'EXAMPLE-DEPT-TYPE-27-0001' });
+    const wrapper = await render();
+    expect(wrapper.text()).toContain(format.pattern);
+    await button(wrapper, 'Configuration history').trigger('click'); await flushPromises();
+    const history = wrapper.get('section[aria-labelledby="numbering-history"]');
+    expect(history.text()).toContain(JSON.stringify(format, null, 2));
+    expect(history.text()).toContain('Legacy format: PREFIX/YYYY/SEQUENCE');
+    await button(wrapper, 'Edit').trigger('click');
+    expect(control(wrapper, 'Use custom format').element.checked).toBe(true);
+    expect(control(wrapper, 'Format pattern').element.value).toBe(format.pattern);
+    expect(control(wrapper, 'Department code (if used)').element.value).toBe('DEPT');
+    await control(wrapper, 'Preview year').setValue('2027');
+    await button(wrapper, 'Preview format without allocation').trigger('click'); await flushPromises();
+    const [, options] = fetch.mock.calls.find(([url]) => url.endsWith('/preview'));
+    expect(JSON.parse(options.body)).toMatchObject({ format, reset_policy: 'annual', year: 2027, padding: 4 });
+    expect(JSON.parse(options.body)).not.toHaveProperty('sequence');
+    expect(wrapper.text()).toContain('EXAMPLE-DEPT-TYPE-27-0001');
+    await control(wrapper, 'Company code (if used)').setValue('CHANGED');
+    expect(wrapper.text()).not.toContain('EXAMPLE-DEPT-TYPE-27-0001');
+    await confirmSave(wrapper);
+    expect(JSON.parse(fetch.mock.calls.find(([, options]) => options.method === 'PATCH')[1].body).format).toEqual({ ...format, company: 'CHANGED' });
+});
+
+it('allows an explicit return to the legacy format and leaves custom definitions read-only for viewers', async () => {
+    const custom = { ...series, configuration: { ...configuration, format: { pattern: 'EXAMPLE-{year}-{sequence}' } } };
+    const fetch = server({ rows: [custom] });
+    const reader = await render({ ...scope, permissions: ['numbering.view'] });
+    await button(reader, 'Details').trigger('click');
+    expect(control(reader, 'Use custom format').element.matches(':disabled')).toBe(true);
+    expect(control(reader, 'Format pattern').element.matches(':disabled')).toBe(true);
+    expect(reader.find('button[type="submit"]').exists()).toBe(false);
+    reader.unmount();
+    const editor = await render(); await button(editor, 'Edit').trigger('click');
+    await control(editor, 'Use custom format').setValue(false);
+    expect(editor.text()).toContain('Legacy format: PREFIX/YYYY/SEQUENCE');
+    await confirmSave(editor);
+    expect(JSON.parse(fetch.mock.calls.find(([, options]) => options.method === 'PATCH')[1].body).format).toBeNull();
+    await editor.get('select[aria-label="Language"]').setValue('lo');
+    expect(editor.text()).toContain('ຮູບແບບເດີມ: PREFIX/YYYY/SEQUENCE');
 });
