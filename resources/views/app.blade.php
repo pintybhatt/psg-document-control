@@ -39,6 +39,7 @@
                 'history' => route('api.v1.administration.history', [], false),
                 'numbering' => route('api.v1.numbering.index', [], false),
                 'templates' => route('api.v1.templates.index', [], false),
+                'approvalWorkflows' => route('api.v1.approval-workflows.index', [], false),
                 'contexts' => route('api.v1.authorization.contexts', [], false),
                 'roles' => route('api.v1.roles.index', [], false),
                 'permissions' => route('api.v1.permissions', [], false),

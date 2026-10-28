@@ -15,6 +15,7 @@ import AdministrationHistory from '../components/AdministrationHistory.vue';
 import { useWorkspace } from '../utilities/workspace.js';
 import NumberingManagement from '../components/NumberingManagement.vue';
 import TemplateCatalogue from '../components/TemplateCatalogue.vue';
+import ApprovalWorkflows from '../components/ApprovalWorkflows.vue';
 import { useNotifications } from '../components/ui/useNotifications.js';
 import { useLocalization } from '../localization/index.js';
 import { createJsonClient } from '../utilities/jsonClient.js';
@@ -36,6 +37,7 @@ const sections = computed(() => [
     { key: 'documents', label: 'adminDocuments', available: selected.value?.scope_type !== 'global' && can('master-data.view') },
     { key: 'numbering', label: 'adminNumbering', available: selected.value?.scope_type !== 'global' && can('numbering.view') },
     { key: 'templates', label: 'templateTitle', available: !!props.endpoints.templates && selected.value?.scope_type === 'site' && can('templates.view') },
+    { key: 'approvalWorkflows', label: 'workflowTitle', available: !!props.endpoints.approvalWorkflows && selected.value?.scope_type !== 'global' && can('master-data.view') },
     { key: 'history', label: 'adminHistory', available: !!props.endpoints.history && can('security.audit.view') },
     { key: 'roles', label: 'adminRoles', available: can('roles.view') || can('assignments.view') },
 ].filter(item => item.available));
@@ -297,6 +299,7 @@ onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
             <DocumentMasterDataManagement v-show="section === 'documents'" v-if="selected && selected.scope_type !== 'global' && can('master-data.view')" :scope="selected" :endpoints="endpoints.masterData" :csrf-token="csrfToken" @unauthorized="handleError" />
             <NumberingManagement v-show="section === 'numbering'" v-if="selected && selected.scope_type !== 'global' && can('numbering.view')" :scope="selected" :endpoint="endpoints.numbering" :csrf-token="csrfToken" @unauthorized="handleError" />
             <TemplateCatalogue v-if="section === 'templates' && selected?.scope_type === 'site' && can('templates.view')" :scope="selected" :endpoint="endpoints.templates" :csrf-token="csrfToken" @unauthorized="handleError" />
+            <ApprovalWorkflows v-if="section === 'approvalWorkflows' && selected && selected.scope_type !== 'global' && can('master-data.view')" :scope="selected" :endpoint="endpoints.approvalWorkflows" :csrf-token="csrfToken" @unauthorized="handleError" />
 
             <section v-show="section === 'roles'" v-if="can('roles.view')" class="flex flex-col gap-4" aria-labelledby="roles-heading">
                 <div class="flex flex-wrap items-center justify-between gap-3"><h3 id="roles-heading" class="font-semibold">{{ t('rbacRoles') }}</h3><UiButton v-if="can('roles.manage')" :disabled="loading || saving" @click="showRole()">{{ t('rbacCreateRole') }}</UiButton></div>

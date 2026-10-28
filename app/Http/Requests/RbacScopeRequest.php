@@ -14,6 +14,8 @@ class RbacScopeRequest extends FormRequest
     public function authorize(): bool
     {
         $permission = match ($this->route()?->getName()) {
+            'api.v1.approval-workflows.index', 'api.v1.approval-workflows.history' => 'master-data.view',
+            'api.v1.approval-workflows.store', 'api.v1.approval-workflows.roles' => 'master-data.manage',
             'api.v1.templates.index', 'api.v1.templates.show' => 'templates.view',
             'api.v1.templates.store', 'api.v1.templates.retire', 'api.v1.templates.sources' => 'templates.manage',
             'api.v1.numbering.index', 'api.v1.numbering.registers', 'api.v1.numbering.preview', 'api.v1.numbering.history' => 'numbering.view',

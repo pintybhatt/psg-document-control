@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AdministrationHistoryController;
+use App\Http\Controllers\ApprovalWorkflowController;
 use App\Http\Controllers\AuthenticatedSessionController;
 use App\Http\Controllers\AuthorizationContextController;
 use App\Http\Controllers\ControlledDocumentController;
@@ -59,6 +60,10 @@ Route::middleware(['auth:web', EnsureActiveUserSession::class])->group(function 
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
     Route::get('/api/v1/user', CurrentUserController::class)->name('api.v1.user');
     Route::prefix('api/v1')->name('api.v1.')->group(function (): void {
+        Route::get('approval-workflows', [ApprovalWorkflowController::class, 'index'])->name('approval-workflows.index');
+        Route::get('approval-workflows/roles', [ApprovalWorkflowController::class, 'roles'])->name('approval-workflows.roles');
+        Route::post('approval-workflows/{register}', [ApprovalWorkflowController::class, 'store'])->name('approval-workflows.store');
+        Route::get('approval-workflows/{register}/history', [ApprovalWorkflowController::class, 'history'])->name('approval-workflows.history');
         Route::get('document-templates', [TemplateCatalogueController::class, 'index'])->name('templates.index');
         Route::get('document-templates/sources', [TemplateCatalogueController::class, 'sources'])->name('templates.sources');
         Route::post('document-templates', [TemplateCatalogueController::class, 'store'])->name('templates.store');
