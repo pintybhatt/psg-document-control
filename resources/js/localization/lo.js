@@ -1,4 +1,5 @@
 export default {
+    'controlledRevisionIdentifier': 'ລະຫັດສະເພາະສະບັບ',
     'controlledAction-approvals': 'ບັນທຶກປະຫວັດການອະນຸມັດ',
     'controlledConfirm-approvals': 'ຂໍ້ກຳນົດການອະນຸມັດລໍຖ້າການຢືນຢັນ. ບັນທຶກນີ້ເກັບເນື້ອຫາໃນເວລາບັນທຶກ ແລະ ບໍ່ຂັດຂວາງການປະກາດໃຊ້.',
     'controlledApprovalDecision': 'ລາຍການ',

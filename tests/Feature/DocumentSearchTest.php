@@ -106,6 +106,10 @@ class DocumentSearchTest extends TestCase
         $this->getJson($this->searchUrl($record, ['revision' => '00', 'revision_state' => 'superseded']))->assertOk()->assertJsonPath('meta.total', 1)->assertJsonPath('data.0.authoritative_revision', 1)->assertJsonPath('data.0.draft_revision', null);
         $this->getJson($this->searchUrl($record, ['revision' => '00', 'revision_state' => 'current']))->assertOk()->assertJsonPath('meta.total', 0);
         $this->getJson($this->searchUrl($record, ['owner' => $actor->name, 'revision' => 1]))->assertOk()->assertJsonPath('meta.total', 1);
+        $this->getJson($this->searchUrl($record, ['revision' => 'R00', 'revision_state' => 'superseded']))->assertOk()->assertJsonPath('meta.total', 1);
+        $this->getJson($this->searchUrl($record, ['revision' => 'R01', 'revision_state' => 'current']))->assertOk()->assertJsonPath('meta.total', 1);
+        $this->getJson($this->searchUrl($record, ['revision' => 'R02']))->assertOk()->assertJsonPath('meta.total', 0);
+        $this->getJson($this->searchUrl($record, ['revision' => 'Rinvalid']))->assertUnprocessable();
     }
 
     public function test_physical_location_search_and_retrieval_keep_content_permissions_separate(): void

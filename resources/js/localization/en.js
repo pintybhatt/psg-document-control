@@ -1,4 +1,5 @@
 export default {
+    'controlledRevisionIdentifier': 'Revision-specific identifier',
     'controlledAction-approvals': 'Record approval history',
     'controlledConfirm-approvals': 'Approval requirements await confirmation. These records capture the revision content at the time and do not block release.',
     'controlledApprovalDecision': 'Entry',

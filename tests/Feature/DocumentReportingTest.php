@@ -101,7 +101,7 @@ class DocumentReportingTest extends TestCase
         $this->getJson($this->reportUrl($record))->assertOk()->assertJsonPath('totals.controlled', 1)->assertJsonPath('totals.authoritative', 1)->assertJsonPath('totals.draft_documents', 1)->assertJsonPath('totals.review_overdue', 1)->assertJsonPath('totals.review_soon', 0)->assertJsonCount(1, 'reviews');
         $record = $manager->release($actor, $scope, (string) $record->id, ['lock_version' => $record->lock_version, 'revision_id' => $record->revisions->last()->id, 'reason' => 'Release reviewed procedure']);
         $this->getJson($this->reportUrl($record))->assertOk()->assertJsonPath('totals.controlled', 1)->assertJsonPath('totals.authoritative', 1)->assertJsonPath('totals.draft_documents', 0)->assertJsonPath('totals.review_overdue', 0);
-        $this->getJson($this->reportUrl($record, 'reports', ['view' => 'revisions', 'register' => 'controlled', 'revision_state' => 'superseded']))->assertOk()->assertJsonPath('meta.total', 1)->assertJsonPath('data.0.revision_identifier', '00')->assertJsonPath('data.0.revision_status', 'superseded');
+        $this->getJson($this->reportUrl($record, 'reports', ['view' => 'revisions', 'register' => 'controlled', 'revision' => 'R00', 'revision_state' => 'superseded']))->assertOk()->assertJsonPath('meta.total', 1)->assertJsonPath('data.0.revision_identifier', 'R00')->assertJsonPath('data.0.revision_status', 'superseded');
     }
 
     public function test_report_access_is_explicit_and_totals_reconcile_with_dashboard(): void

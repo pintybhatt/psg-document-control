@@ -2,6 +2,7 @@
 
 namespace App\Authorization;
 
+use App\Models\ControlledRevision;
 use App\Models\DocumentSecurityAudit;
 use App\Models\User;
 use Illuminate\Database\Query\Builder;
@@ -224,7 +225,7 @@ class DocumentReporting
             $values['title_lo'] = $values['revision_title_lo'];
         }
         if (isset($values['revision_number'])) {
-            $values['revision_identifier'] = str_pad((string) $values['revision_number'], 2, '0', STR_PAD_LEFT);
+            $values['revision_identifier'] = ControlledRevision::formatIdentifier((int) $values['revision_number']);
         }
         unset($values['profile_id'], $values['current_revision_id']);
 

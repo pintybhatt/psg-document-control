@@ -207,6 +207,7 @@ onBeforeUnmount(() => controller?.abort());
             <h3 class="font-semibold">{{ t('controlledHistory') }}</h3>
             <details v-for="revision in detail.revisions.toReversed()" :key="revision.id" :open="revision.id === detail.authoritative_revision_id || (!authoritative && revision.status === 'draft')" class="rounded-xl border border-slate-200 p-4">
                 <summary class="cursor-pointer font-semibold">{{ t('controlledRevision') }} {{ revision.identifier }} · {{ t(`controlledStatus-${revision.status}`) }} · {{ language === 'lo' ? revision.title_lo || revision.title_en : revision.title_en }}</summary>
+                <p v-if="revision.display_identifier" class="mt-3 font-mono text-sm">{{ t('controlledRevisionIdentifier') }}: {{ revision.display_identifier }}</p>
                 <dl class="mt-4 grid gap-4 md:grid-cols-2"><div v-for="field in detailFields" :key="field"><dt class="text-sm text-slate-600">{{ t(`controlled-${field}`) }}</dt><dd class="whitespace-pre-wrap wrap-anywhere">{{ field.endsWith('_date') ? formatDate(revision[field]) : revision[field] || '—' }}</dd></div>
                     <template v-if="revision.released_at"><div><dt class="text-sm text-slate-600">{{ t('controlledReleased') }}</dt><dd>{{ formatDateTime(revision.released_at) }} · {{ t('controlledActor') }} {{ revision.released_by }}</dd></div><div><dt class="text-sm text-slate-600">{{ t('controlledReason') }}</dt><dd class="whitespace-pre-wrap wrap-anywhere">{{ revision.release_reason }}</dd></div></template>
                 </dl>

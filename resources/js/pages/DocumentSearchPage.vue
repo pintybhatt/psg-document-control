@@ -85,7 +85,7 @@ onBeforeUnmount(() => controller?.abort());
                     <TextInput id="search-from" v-model="filters.date_from" type="date" :label="t('searchFrom')" />
                     <TextInput id="search-to" v-model="filters.date_to" type="date" :label="t('searchTo')" />
                     <template v-if="register === 'controlled'">
-                        <TextInput id="search-revision" v-model="filters.revision" inputmode="numeric" :label="t('controlledRevision')" />
+                        <TextInput id="search-revision" v-model="filters.revision" placeholder="R00" :label="t('controlledRevision')" />
                         <SelectInput id="search-revision-state" v-model="filters.revision_state" :label="t('searchRevisionState')" :options="revisionOptions" />
                         <TextInput id="search-owner" v-model="filters.owner" :label="t('searchOwner')" maxlength="200" />
                     </template>
@@ -101,7 +101,7 @@ onBeforeUnmount(() => controller?.abort());
             <DataTable v-model:page="page" :rows="rows" :columns="columns" row-key="key" :caption="t('document-search')" :loading="loading" :error="error" server-side :total="total" :per-page="10" @change="load()">
                 <template #cell-register="{ row }">{{ t(row.register === 'controlled' ? 'controlled-documents' : row.register) }}</template>
                 <template #cell-number="{ row }"><a :href="row.detail_url" class="font-semibold text-teal-800 hover:underline focus-visible:outline-2">{{ row.number || '—' }}</a><span v-if="row.register === 'controlled' && row.internal_number" class="block text-xs text-slate-600">{{ t('controlledNumber') }}: {{ row.internal_number }}</span><span v-if="row.official_number" class="block text-xs text-slate-600">{{ t('outgoingOfficialNumber') }}: {{ row.official_number }}</span><span v-if="row.external_reference" class="block text-xs text-slate-600">{{ t('incoming-external_reference') }}: {{ row.external_reference }}</span></template>
-                <template #cell-title="{ row }">{{ language === 'lo' ? row.title_lo || row.title_en : row.title_en }}<span v-if="row.register === 'controlled'" class="block text-xs text-slate-600">{{ t('controlledAuthoritative') }}: {{ row.authoritative_revision == null ? t('controlledNoAuthority') : String(row.authoritative_revision).padStart(2, '0') }}<span v-if="row.draft_revision != null" class="block">{{ t('controlledStatus-draft') }}: {{ String(row.draft_revision).padStart(2, '0') }}</span></span></template>
+                <template #cell-title="{ row }">{{ language === 'lo' ? row.title_lo || row.title_en : row.title_en }}<span v-if="row.register === 'controlled'" class="block text-xs text-slate-600">{{ t('controlledAuthoritative') }}: {{ row.authoritative_revision == null ? t('controlledNoAuthority') : `R${String(row.authoritative_revision).padStart(2, '0')}` }}<span v-if="row.draft_revision != null" class="block">{{ t('controlledStatus-draft') }}: {{ `R${String(row.draft_revision).padStart(2, '0')}` }}</span></span></template>
                 <template #cell-type="{ row }">{{ label(row.category) }} / {{ label(row.type) }}</template>
                 <template #cell-document_date="{ row }">{{ formatDate(row.document_date) }}</template>
                 <template #cell-status="{ row }"><StatusBadge :status="row.status" :label="t(`${row.register === 'controlled' ? 'controlledStatus' : row.register === 'incoming' ? 'incomingStatus' : 'outgoingStatus'}-${row.status}`)" /></template>

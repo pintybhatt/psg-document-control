@@ -9,6 +9,14 @@ use Illuminate\Validation\Rule;
 
 class DocumentSearchRequest extends FormRequest
 {
+    protected function prepareForValidation(): void
+    {
+        $revision = $this->input('revision');
+        if (is_string($revision) && preg_match('/^R([0-9]{2,6})$/D', $revision, $matches)) {
+            $this->merge(['revision' => $matches[1]]);
+        }
+    }
+
     public function authorize(): bool
     {
         return true;

@@ -118,7 +118,7 @@ class ReportAuditHistoryTest extends TestCase
         [$record, $actor] = $this->fixture('controlled');
         $scope = $record->profile->documentScope();
         $this->grant($actor, $scope->authorizationScope(), ['documents.audit.view']);
-        $this->getJson($this->report($record, ['event' => 'created']))->assertOk()->assertJsonPath('data.0.revision_identifier', '00');
+        $this->getJson($this->report($record, ['event' => 'created']))->assertOk()->assertJsonPath('data.0.revision_identifier', 'R00');
         $custody = app(ManagePhysicalCustody::class);
         $location = $custody->location($actor, $scope, 'controlled', (string) $record->id, ['room' => 'Synthetic archive']);
         $copy = $custody->create($actor, $scope, 'controlled', (string) $record->id, $record->revisions->first()->id, ['identifier' => 'AUDIT/ORIGINAL', 'kind' => 'original', 'location_id' => $location->id, 'reason' => 'Synthetic original']);

@@ -8,7 +8,7 @@ import lo from '../../resources/js/localization/lo.js';
 
 const scope = { key: '7:site', company_id: 4, site_id: 7, department_id: null, permissions: ['controlled.drafts.manage', 'controlled.register', 'controlled.release', 'controlled.status.manage', 'numbering.issue'] };
 const type = { id: 9, name_en: 'SOP', name_lo: 'ລະບຽບ', category: { id: 8, name_en: 'Procedures', name_lo: 'ຂັ້ນຕອນ' } };
-const revision = { id: 11, revision_number: 0, identifier: '00', status: 'draft', title_en: '<script>Safety procedure</script>', title_lo: 'ລະບຽບຄວາມປອດໄພ', owner_id: 5, custodian_id: 5, owner_name: 'Example owner', custodian_name: 'Example owner', issue_date: '2026-10-25', effective_date: '2026-10-26', review_date: '2027-10-26', revision_reason: 'Initial', change_description: 'Initial issue', released_at: null };
+const revision = { id: 11, revision_number: 0, identifier: 'R00', display_identifier: 'XPPL/SOP/001-R00', status: 'draft', title_en: '<script>Safety procedure</script>', title_lo: 'ລະບຽບຄວາມປອດໄພ', owner_id: 5, custodian_id: 5, owner_name: 'Example owner', custodian_name: 'Example owner', issue_date: '2026-10-25', effective_date: '2026-10-26', review_date: '2027-10-26', revision_reason: 'Initial', change_description: 'Initial issue', released_at: null };
 const draft = { id: 1, document_code: 'XPPL/SOP/001', type_id: 9, type, category: type.category, internal_number: null, classification: 'normal', registered_at: null, lock_version: 1, status: 'draft', current_revision_id: null, authoritative_revision_id: null, revisions: [revision] };
 enableAutoUnmount(afterEach);
 beforeEach(() => localStorage.clear());
@@ -30,7 +30,7 @@ function server({ registered = false, released = false, mutationError = null, de
         if (path.endsWith('/approvals')) { approvals.push({ id: approvals.length + 1, revision_id: 11, actor_id: 5, recorded_at: '2026-10-28T10:00:00Z', snapshot: { revision: structuredClone(record.revisions[0]) }, ...body }); }
         else if (path.endsWith('/register')) { record.registered_at = '2026-10-26T10:00:00Z'; record.internal_number = 'TEST/CD/2026/000001'; }
         else if (path.endsWith('/release')) { record.status = 'current'; record.current_revision_id = record.authoritative_revision_id = 11; record.revisions[0].status = 'current'; record.revisions[0].released_at = '2026-10-26T10:01:00Z'; }
-        else if (path.endsWith('/revisions')) { record.revisions.push({ ...revision, id: 12, identifier: '01', revision_number: 1, ...body }); }
+        else if (path.endsWith('/revisions')) { record.revisions.push({ ...revision, id: 12, identifier: 'R01', display_identifier: 'XPPL/SOP/001-R01', revision_number: 1, ...body }); }
         else if (path.endsWith('/status')) { record.status = body.status; record.authoritative_revision_id = null; }
         else { Object.assign(record.revisions.at(-1), body); }
         record.lock_version++;
@@ -129,11 +129,22 @@ it('prepares the next revision without resubmitting released metadata and preser
     const body = JSON.parse(fetch.mock.calls.find(([, options]) => options.method === 'POST')[1].body);
     expect(body).toMatchObject({ lock_version: 3, revision_reason: 'Annual review', change_description: 'Updated precautions' });
     expect(body).not.toHaveProperty('title_en');
-    expect(wrapper.text()).toContain('Revision 01');
+    expect(wrapper.text()).toContain('Revision R01');
+    expect(wrapper.get('#controlled-detail-title').text()).toBe('XPPL/SOP/001');
+    expect(wrapper.text()).toContain(`${en.controlledRevisionIdentifier}: XPPL/SOP/001-R01`);
     expect(wrapper.text()).toContain(en.controlledAuthoritative);
     await button(wrapper, en.controlledEdit).trigger('click');
     expect(wrapper.find('#controlled-document_code').exists()).toBe(false);
     expect(wrapper.find('#controlled-classification').exists()).toBe(false);
+});
+it('preserves ambiguous stored codes and displays the revision label separately', async () => {
+    const fetch = server(); const wrapper = await render();
+    fetch.mockImplementationOnce(async () => response({ data: { ...structuredClone(draft), document_code: 'LEGACY001R00', revisions: [{ ...revision, display_identifier: null }] }, audits: [], related: [], approvals: [] }));
+    await show(wrapper);
+    expect(wrapper.get('#controlled-detail-title').text()).toBe('LEGACY001R00');
+    expect(wrapper.text()).toContain('Revision R00');
+    expect(wrapper.text()).not.toContain(en.controlledRevisionIdentifier);
+    expect(wrapper.text()).not.toContain('LEGACY001R00-R00');
 });
 it('renders Lao status, history and dd/mm/yyyy dates without untranslated keys', async () => {
     server({ released: true }); const wrapper = await render(); await show(wrapper);

@@ -24,7 +24,7 @@ it.each(registers.flatMap(register => ['en', 'lo'].map(language => ({ ...registe
     const dictionary = language === 'lo' ? lo : en;
     const scope = { key: '7:site', company_id: 4, site_id: 7, department_id: null, permissions: [`${kind}.drafts.manage`, 'documents.attachments.manage'] };
     const endpoint = `/${kind}`, storageUrl = `/storage/${kind}/1`;
-    const revision = { id: 11, identifier: '00', status: 'draft', title_en: 'Example procedure', issue_date: '2026-10-25', effective_date: '2026-10-26' };
+    const revision = { id: 11, identifier: 'R00', status: 'draft', title_en: 'Example procedure', issue_date: '2026-10-25', effective_date: '2026-10-26' };
     let record = null, attachment = null;
     const fetch = vi.fn(async (url, options = {}) => {
         const path = new URL(url, 'http://localhost').pathname;
