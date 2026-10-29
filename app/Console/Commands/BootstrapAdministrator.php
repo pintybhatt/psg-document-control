@@ -63,7 +63,7 @@ class BootstrapAdministrator extends Command
 
         $password = $this->secret('Password', false);
         $confirmation = $this->secret('Confirm password', false);
-        $minimumPasswordLength = app()->environment('local') ? 8 : 16;
+        $minimumPasswordLength = 8;
         $validator = Validator::make(['password' => $password, 'password_confirmation' => $confirmation], [
             'password' => [
                 'bail', 'required', 'string', Password::min($minimumPasswordLength), 'confirmed',
