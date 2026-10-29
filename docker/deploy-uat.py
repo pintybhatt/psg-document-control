@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fixed UAT app replacement. Root-enrolled approvals only; no bootstrap or migrations."""
+"""Fixed UAT app replacement authorized by GitHub OIDC; no bootstrap or migrations."""
 import datetime
 import fcntl
 import hashlib
@@ -21,10 +21,11 @@ PROJECT = 'dcms-uat-xppl'
 ENVIRONMENT = {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'HOME': '/root',
                'DOCKER_CONFIG': str(ROOT/'registry'), 'DOCKER_HOST': 'unix:///var/run/docker.sock'}
 DOCKER = ['/usr/bin/docker', '--host', 'unix:///var/run/docker.sock']
-SPEC = importlib.util.spec_from_file_location('release_evidence', Path(__file__).with_name('verify-uat-release.py'))
-evidence = importlib.util.module_from_spec(SPEC)
-SPEC.loader.exec_module(evidence)
-require = evidence.require
+SPEC = importlib.util.spec_from_file_location('github_uat_auth', Path(__file__).with_name('github-uat-auth.py'))
+auth = importlib.util.module_from_spec(SPEC)
+SPEC.loader.exec_module(auth)
+evidence = auth.evidence
+require = auth.require
 
 # Read-only query, fixed source. Never evaluates request data or executes migration classes.
 SCHEMA_PROBE = r'''
@@ -54,47 +55,25 @@ def read_json(path):
 
 
 def request_from(stream):
-    payload = stream.read(4097)
-    require(len(payload) <= 4096, 'Oversized request.')
-    request = json.loads(payload)
-    require(isinstance(request, dict) and set(request) == {'request_id', 'release_run_id', 'release_run_attempt',
-            'release_artifact_id', 'image', 'manifest_sha256'}, 'Unexpected request fields.')
-    require(isinstance(request['request_id'], str)
-            and re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9_-]{2,63}', request['request_id']), 'Invalid request ID.')
-    for key in ('release_run_id', 'release_run_attempt', 'release_artifact_id'):
-        require(type(request[key]) is int and 0 < request[key] < 10**20, 'Invalid release ID.')
-    require(isinstance(request['image'], str) and re.fullmatch(evidence.IMAGE, request['image']), 'Invalid digest.')
-    require(isinstance(request['manifest_sha256'], str)
-            and re.fullmatch(r'[a-f0-9]{64}', request['manifest_sha256']), 'Invalid manifest hash.')
-    return request
+    payload = stream.read(32769)
+    require(len(payload) <= 32768, 'Oversized request.')
+    envelope = auth.parse_json(payload)
+    require(isinstance(envelope, dict) and set(envelope) == {'request', 'oidc_token', 'github_token'}, 'Unexpected authorization envelope.')
+    auth.validate_request(envelope['request'])
+    require(isinstance(envelope['oidc_token'], str) and len(envelope['oidc_token']) <= 16384, 'Invalid OIDC token.')
+    return envelope
 
 
-def validate_approval(request, approval, policy, current, manifest, backup):
-    for key in request:
-        require(approval.get(key) == request[key], 'Request does not match enrolled approval.')
-    require(approval['approved_by'] in policy['owners'], 'Enrolled owner approval required.')
-    require(approval.get('previous_image') == current['image']
-            and current['image'] != manifest['image'], 'Previous digest mismatch or no-op.')
-    require(approval.get('operation') in ('deploy', 'rollback'), 'Explicit deployment operation required.')
-    require(approval.get('schema_mode') in ('unchanged', 'reviewed-applied'), 'Explicit schema review required.')
-    require(approval.get('schema_compatible') is True, 'Schema compatibility approval required.')
-    reference = approval.get('schema_compatibility_reference', '')
-    require(isinstance(reference, str) and re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9._/-]{2,127}', reference),
-            'Compatibility reference required, including rollback.')
-    if approval['schema_mode'] == 'unchanged':
-        require(manifest['migration_inventory'] == current['migration_inventory'], 'Schema inventory changed.')
-    else:
-        for key in ('backup_reference', 'restoration_plan_reference', 'migration_authorization_reference'):
-            value = approval.get(key, '')
-            require(isinstance(value, str) and re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9._/-]{2,127}', value),
-                    'Reviewed backup, restoration plan and migration authorization required.')
-            require(backup.get(key) == value, 'Backup review does not match approval.')
-        require(backup.get('reviewed_by') in policy['owners'] and backup.get('verified') is True
-                and backup.get('paired_database_documents_private_config') is True
-                and backup.get('off_host_verified') is True and backup.get('restore_drill_reference'),
-                'Verified paired backup and restoration evidence required.')
-        require(backup.get('previous_image') == current['image'] and backup.get('image') == manifest['image'],
-                'Backup review release mismatch.')
+def authorize(envelope, policy, current, previous):
+    auth.validate_policy(policy)
+    request = envelope['request']
+    auth.validate_request(request)
+    claims = auth.verify_oidc(envelope['oidc_token'], request, policy)
+    api = auth.GitHub(envelope['github_token'])
+    auth.workflow_current(api, request, claims, policy)
+    release = api.release(request['release_run_id'], request['release_artifact_id'])
+    manifest = auth.validate_release(api, request, release, policy, current, previous)
+    return api, claims, release, manifest
 
 
 class Deployment:
@@ -165,18 +144,13 @@ class Deployment:
                 and labels.get('org.opencontainers.image.source') == 'https://github.com/'+evidence.REPOSITORY,
                 'Running container image/source mismatch.')
 
-    def schema(self, manifest, approval):
+    def schema(self, manifest):
         status = json.loads(self.dc('run', '--rm', '--no-deps', '--pull', 'never', '-T', '--entrypoint', 'php',
                                    'app', '-r', SCHEMA_PROBE))
         require(status['inventory'] == manifest['migration_inventory'], 'Image migration hashes differ from manifest.')
         expected = [Path(row['path']).stem for row in manifest['migration_inventory']]
-        if approval['operation'] == 'rollback' and approval['schema_mode'] == 'reviewed-applied':
-            reviewed = approval.get('live_migrations')
-            require(isinstance(reviewed, list) and all(isinstance(name, str) and re.fullmatch(r'[a-zA-Z0-9_]+', name) for name in reviewed)
-                    and len(set(reviewed)) == len(reviewed) and set(expected) <= set(reviewed),
-                    'Explicit resulting schema inventory required for rollback.')
-            expected = reviewed
-        require(sorted(status['ran']) == sorted(expected), 'Pending, missing or unexpected live migrations; manual review required.')
+        if sorted(status['ran']) != sorted(expected):
+            raise auth.SchemaReviewRequired('Live schema mismatch; separate controlled migration/recovery required.')
 
     def storage(self, app, db):
         expected = {'/var/www/html/storage/app/document-vault': 'documents',
@@ -234,43 +208,47 @@ def write_json(path, value):
     path.write_text(json.dumps(value, indent=2)+'\n')
 
 
-def execute(request):
+def execute(envelope):
     require(os.geteuid() == 0 and len(sys.argv) == 1, 'Fixed root entry point required.')
     os.umask(0o077)
     protected(ROOT/'release/docker/deploy-uat.py')
     protected(ROOT/'history')
-    protected(ROOT/'requests')
     protected(ROOT/'deployment.lock', True)
     with (ROOT/'deployment.lock').open('r+') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        bundle = protected(ROOT/'requests'/request['request_id'])
-        manifest_file = protected(bundle/'manifest.json', True)
-        manifest_bytes = manifest_file.read_bytes()
-        manifest = json.loads(manifest_bytes)
-        approval = read_json(bundle/'approval.json')
+        recovery_flag = ROOT/'config/recovery-required.json'
+        require(not recovery_flag.exists(), 'Previous deployment requires administrator recovery inspection.')
         policy = read_json(ROOT/'config/automation.json')
         current = read_json(ROOT/'config/current.json')
-        require(isinstance(policy.get('owners'), list) and policy['owners'], 'Owner allowlist required.')
+        previous_file = ROOT/'config/previous.json'
+        previous = read_json(previous_file) if previous_file.exists() else None
         require(re.fullmatch(r'https://[a-z0-9]+(?:[.-][a-z0-9]+)*:8444/up', policy.get('health_url', '')), 'Approved HTTPS UAT health URL required.')
         require(policy.get('enabled') is True and policy.get('target') == 'uat'
                 and policy.get('project') == PROJECT, 'UAT automation is not enrolled/enabled.')
-        backup = read_json(bundle/'backup-review.json') if approval.get('schema_mode') == 'reviewed-applied' else {}
-        validate_approval(request, approval, policy, current, manifest, backup)
+        protected(ROOT/'release/docker/github-uat-auth.py')
+        api, claims, release, manifest = authorize(envelope, policy, current, previous)
+        request = envelope['request']
+        request_id = 'gha-'+str(request['deployment_run_id'])+'-'+str(request['deployment_run_attempt'])
 
         def verify():
-            evidence.verify(manifest_bytes, approval, read_json(bundle/'run.json'), read_json(bundle/'jobs.json'),
-                            read_json(bundle/'artifacts.json'), datetime.datetime.now(datetime.timezone.utc))
+            require(read_json(ROOT/'config/automation.json') == policy, 'Server authorization policy changed; stop and review.')
+            auth.workflow_current(api, request, claims, policy)
+            api.release_current(release['run'])
+            artifact = api.get('actions/artifacts/'+str(request['release_artifact_id']))
+            require(artifact.get('id') == request['release_artifact_id'] and artifact.get('expired') is False
+                    and artifact.get('workflow_run', {}).get('id') == request['release_run_id'], 'Release artifact expired/removed.')
 
-        verify()
-        # mkdir is an atomic single-use reservation. Failed attempts need a new owner-enrolled ID.
-        history = ROOT/'history'/request['request_id']
+        # A dispatch run/attempt is single-use, including after partial failure.
+        history = ROOT/'history'/request_id
         history.mkdir(mode=0o700)
-        for filename in ('manifest.json', 'approval.json', 'run.json', 'jobs.json', 'artifacts.json'):
-            shutil.copyfile(bundle/filename, history/filename)
-        if backup:
-            shutil.copyfile(bundle/'backup-review.json', history/'backup-review.json')
+        manifest_file = history/'manifest.json'
+        manifest_file.write_bytes(release['manifest'])
+        for name in ('run', 'jobs', 'artifacts'):
+            write_json(history/(name+'.json'), release[name])
         write_json(history/'previous-manifest.json', current)
         write_json(history/'request.json', request)
+        write_json(history/'authorization.json', claims)
+        write_json(history/'policy.json', policy)
         write_json(history/'result.json', {'status': 'started', 'time': datetime.datetime.now(datetime.timezone.utc).isoformat()})
         deployment = None
         maintenance = False
@@ -308,22 +286,22 @@ def execute(request):
             old_app = deployment.container('app')
             deployment.running_image(old_app, current)
             deployment.storage(old_app, before)
-            if approval['schema_mode'] == 'reviewed-applied':
-                deployment.maintenance_active()
             deployment.run(DOCKER+['pull', manifest['image']], timeout=600)
             deployment.image(manifest)
-            deployment.schema(manifest, approval)
+            deployment.schema(manifest)
             verify()
+            write_json(recovery_flag, {'request_id': request_id, 'previous_image': current['image'], 'image': manifest['image']})
             maintenance = True
             deployment.dc('exec', '-T', 'app', 'php', 'artisan', 'down', '--no-interaction')
             deployment.maintenance_active()
+            verify()
             deployment.replace()
             new_app = deployment.container('app')
             deployment.running_image(new_app, manifest)
             require(sorted(new_app['Mounts'], key=lambda row: row['Destination']) == sorted(old_app['Mounts'], key=lambda row: row['Destination']), 'Application persistent mounts changed.')
             deployment.maintenance_active()
             deployment.health()
-            deployment.schema(manifest, approval)
+            deployment.schema(manifest)
             deployment.invariant(before)
             verify()
             deployment.dc('exec', '-T', 'app', 'php', 'artisan', 'up', '--no-interaction')
@@ -341,12 +319,16 @@ def execute(request):
             deployment.invariant(before)
             verify()
             # Commit state only after verification. No secret/key/env rewrite.
+            prior = ROOT/'config/previous.json.next'
+            write_json(prior, current)
+            os.replace(prior, ROOT/'config/previous.json')
             staged = ROOT/'config/current.json.next'
             write_json(staged, manifest)
             os.replace(staged, ROOT/'config/current.json')
             os.replace(candidate_env, compose_env)
             write_json(history/'result.json', {'status': 'deployed', 'image': manifest['image'],
                                               'time': datetime.datetime.now(datetime.timezone.utc).isoformat()})
+            recovery_flag.unlink()
             print('UAT app deployment completed. Formal XPPL acceptance remains separate.')
         except (Exception, KeyboardInterrupt):
             signal.alarm(0)
@@ -369,10 +351,13 @@ def main():
         signal.signal(signum, interrupted)
     try:
         signal.alarm(15)
-        request = request_from(sys.stdin.buffer)
+        envelope = request_from(sys.stdin.buffer)
         signal.alarm(900)
-        execute(request)
+        execute(envelope)
         signal.alarm(0)
+    except auth.SchemaReviewRequired:
+        sys.exit('STOP: UAT schema mismatch. A separate controlled migration/recovery is required. '
+                 'No automatic migrations were run. Inspect protected history and maintenance state.')
     except (Exception, KeyboardInterrupt):
         # Do not expose arbitrary request, Docker, application or secret material over SSH.
         sys.exit('STOP: UAT deployment refused/failed. Administrator must inspect protected history and maintenance state.')

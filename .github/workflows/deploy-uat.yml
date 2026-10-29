@@ -2,25 +2,28 @@ name: Deploy DCMS UAT
 on:
   workflow_dispatch:
     inputs:
-      request_id:
-        description: Owner-enrolled, single-use UAT approval request ID
-        required: true
-        type: string
       release_run_id:
         description: Successful Authorized release image run ID
         required: true
         type: string
       release_artifact_id:
-        description: Approved release-manifest artifact ID from that run
+        description: Release-manifest artifact ID from that successful run
         required: true
         type: string
-      image:
-        description: Approved ghcr.io/pintybhatt/psg-document-control@sha256 digest
+      operation:
+        description: Deploy forward, or return to the recorded previous release with identical schema
         required: true
+        type: choice
+        options: [deploy, rollback]
+        default: deploy
+      rollback_compatibility_reference:
+        description: Rollback only - operator review confirming previous app supports current data/schema
+        required: false
         type: string
 permissions:
   contents: read
   actions: read
+  id-token: write
 concurrency:
   group: dcms-uat-xppl-deployment
   cancel-in-progress: false
@@ -34,16 +37,20 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
-      - name: Validate selected published release using current GitHub evidence
+      - name: Authenticate dispatch and derive image from current GitHub release evidence
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REQUEST_ID: ${{ inputs.request_id }}
           RELEASE_RUN_ID: ${{ inputs.release_run_id }}
           RELEASE_ARTIFACT_ID: ${{ inputs.release_artifact_id }}
-          IMAGE: ${{ inputs.image }}
+          OPERATION: ${{ inputs.operation }}
+          ROLLBACK_COMPATIBILITY_REFERENCE: ${{ inputs.rollback_compatibility_reference }}
         run: |
           umask 077
-          python3 -B docker/prepare-uat-request.py > "$RUNNER_TEMP/uat-request.json"
+          set -euo pipefail
+          request_dir=$(mktemp -d "$RUNNER_TEMP/dcms-uat-request.XXXXXXXX")
+          trap 'rm -rf -- "$request_dir"' EXIT
+          python3 -I -B docker/prepare-uat-request.py > "$request_dir/request.json"
+          install -m 0600 "$request_dir/request.json" "$RUNNER_TEMP/uat-request.json"
       - name: Invoke only the enrolled UAT entry point
         env:
           UAT_SSH_KEY: ${{ secrets.UAT_SSH_KEY }}
@@ -71,3 +78,7 @@ jobs:
             -o ClearAllForwardings=yes -o RequestTTY=no -o ConnectTimeout=15 \
             -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
             "dcms-deploy@$UAT_HOST" deploy-dcms-uat < "$RUNNER_TEMP/uat-request.json"
+      - name: Remove transient authorization envelope
+        if: always()
+        shell: bash
+        run: rm -f -- "$RUNNER_TEMP/uat-request.json"
