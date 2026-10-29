@@ -2,6 +2,7 @@
 """Fixed UAT app replacement. Root-enrolled approvals only; no bootstrap or migrations."""
 import datetime
 import fcntl
+import hashlib
 import importlib.util
 import json
 import os
@@ -127,13 +128,42 @@ class Deployment:
         return info
 
     def image(self, manifest):
+        require(re.fullmatch(evidence.IMAGE, manifest['image'])
+                and re.fullmatch(r'sha256:[a-f0-9]{64}', manifest['tested_image_id'])
+                and manifest.get('platform') == 'linux/amd64', 'Invalid immutable image identity/platform.')
+        # Buildx uses the protected DOCKER_CONFIG credentials. Hash the exact raw bytes,
+        # never formatted JSON or a tag, before trusting the configuration descriptor.
+        raw = self.run(DOCKER+['buildx', 'imagetools', 'inspect', '--raw', manifest['image']])
+        repository_digest = manifest['image'].split('@', 1)[1]
+        require('sha256:'+hashlib.sha256(raw.encode('utf-8')).hexdigest() == repository_digest,
+                'Registry manifest digest mismatch.')
+        registry = json.loads(raw)
+        require(registry.get('schemaVersion') == 2 and registry.get('mediaType') in (
+                    'application/vnd.oci.image.manifest.v1+json',
+                    'application/vnd.docker.distribution.manifest.v2+json')
+                and 'manifests' not in registry, 'Single-platform image manifest required.')
+        config = registry.get('config', {})
+        require(config.get('mediaType') in ('application/vnd.oci.image.config.v1+json',
+                                           'application/vnd.docker.container.image.v1+json')
+                and config.get('digest') == manifest['tested_image_id'],
+                'Registry configuration differs from smoke-tested publication.')
         info = json.loads(self.run(DOCKER+['image', 'inspect', manifest['image']]))[0]
-        require(info['Id'] == manifest['tested_image_id'] and manifest['image'] in info['RepoDigests'],
+        # Classic stores identify images by config; containerd stores may use the manifest.
+        require(info['Id'] in (config['digest'], repository_digest) and manifest['image'] in info['RepoDigests'],
                 'Image differs from smoke-tested publication.')
         require(info['Os'] == 'linux' and info['Architecture'] == 'amd64'
                 and info['Config']['Labels'].get('org.opencontainers.image.revision') == manifest['source_commit']
                 and info['Config']['Labels'].get('org.opencontainers.image.source') == 'https://github.com/'+evidence.REPOSITORY,
                 'Image platform/source mismatch.')
+        return info['Id']
+
+    def running_image(self, container, manifest):
+        local_id = self.image(manifest)
+        labels = container['Config']['Labels']
+        require(container['Config']['Image'] == manifest['image'] and container['Image'] == local_id
+                and labels.get('org.opencontainers.image.revision') == manifest['source_commit']
+                and labels.get('org.opencontainers.image.source') == 'https://github.com/'+evidence.REPOSITORY,
+                'Running container image/source mismatch.')
 
     def schema(self, manifest, approval):
         status = json.loads(self.dc('run', '--rm', '--no-deps', '--pull', 'never', '-T', '--entrypoint', 'php',
@@ -276,8 +306,7 @@ def execute(request):
             before = deployment.container('db')
             require(before['State']['Health']['Status'] == 'healthy', 'Healthy existing database required.')
             old_app = deployment.container('app')
-            require(old_app['Config']['Image'] == current['image'] and old_app['Image'] == current['tested_image_id'],
-                    'Running previous image mismatch.')
+            deployment.running_image(old_app, current)
             deployment.storage(old_app, before)
             if approval['schema_mode'] == 'reviewed-applied':
                 deployment.maintenance_active()
@@ -290,8 +319,7 @@ def execute(request):
             deployment.maintenance_active()
             deployment.replace()
             new_app = deployment.container('app')
-            require(new_app['Config']['Image'] == manifest['image'] and new_app['Image'] == manifest['tested_image_id'],
-                    'Replacement image mismatch.')
+            deployment.running_image(new_app, manifest)
             require(sorted(new_app['Mounts'], key=lambda row: row['Destination']) == sorted(old_app['Mounts'], key=lambda row: row['Destination']), 'Application persistent mounts changed.')
             deployment.maintenance_active()
             deployment.health()
