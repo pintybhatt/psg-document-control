@@ -1,4 +1,9 @@
 export default {
+    userManagementTitle: 'Users', userCreate: 'Create user', userEdit: 'Edit user', userSearch: 'Search users', userFind: 'Search',
+    userName: 'Name', userEmail: 'Email', userLanguage: 'Language', userActive: 'Active account', userInitialPassword: 'Initial password',
+    userResetPassword: 'New password (leave blank to keep current)', userConfirmPassword: 'Confirm password', userPasswordHelp: 'Use at least 8 characters. Passwords must match and must not exceed 72 bytes.',
+    userSave: 'Save user', userSaved: 'User saved.', userNone: 'No users found.', userPrevious: 'Previous', userNext: 'Next',
+    userRequestFailed: 'Unable to load or save users.', userMembershipHelp: 'To give this user access, open Organization Memberships and Role Assignments after creating their account.',
     templatePublish: 'Publish approved template',
     templatePublishReason: 'Publication approval / reason',
     templatePublishConfirm: 'Publish this immutable source version within this site? Its source must have completed approval and release. Each download will recheck source permissions and integrity.',

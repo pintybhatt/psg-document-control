@@ -1,4 +1,10 @@
 export default {
+    userManagementTitle: 'ຜູ້ໃຊ້', userCreate: 'ສ້າງຜູ້ໃຊ້', userEdit: 'ແກ້ໄຂຜູ້ໃຊ້', userSearch: 'ຄົ້ນຫາຜູ້ໃຊ້', userFind: 'ຄົ້ນຫາ',
+    userName: 'ຊື່', userEmail: 'ອີເມວ', userLanguage: 'ພາສາ', userActive: 'ບັນຊີເປີດໃຊ້', userInitialPassword: 'ລະຫັດຜ່ານເລີ່ມຕົ້ນ',
+    userResetPassword: 'ລະຫັດຜ່ານໃໝ່ (ປະໄວ້ວ່າງເພື່ອບໍ່ປ່ຽນ)', userConfirmPassword: 'ຢືນຢັນລະຫັດຜ່ານ',
+    userPasswordHelp: 'ຢ່າງໜ້ອຍ 8 ຕົວອັກສອນ ແລະ ບໍ່ເກີນ 72 ໄບຕ໌.', userSave: 'ບັນທຶກຜູ້ໃຊ້', userSaved: 'ບັນທຶກຜູ້ໃຊ້ແລ້ວ', userNone: 'ບໍ່ພົບຜູ້ໃຊ້',
+    userPrevious: 'ກ່ອນໜ້າ', userNext: 'ຕໍ່ໄປ', userRequestFailed: 'ບໍ່ສາມາດໂຫຼດ ຫຼື ບັນທຶກຜູ້ໃຊ້',
+    userMembershipHelp: 'ຫຼັງສ້າງຜູ້ໃຊ້ ໃຫ້ກຳນົດສະມາຊິກອົງກອນ ແລະ ບົດບາດ.',
     templatePublish: 'ເຜີຍແຜ່ແບບເອກະສານທີ່ອະນຸມັດ',
     templatePublishReason: 'ການອະນຸມັດ / ເຫດຜົນເຜີຍແຜ່',
     templatePublishConfirm: 'ເຜີຍແຜ່ສະບັບໄຟລ໌ຄົງທີ່ນີ້ໃນສະຖານທີ່ນີ້ບໍ? ຕົ້ນສະບັບຕ້ອງອະນຸມັດຄົບ ແລະ ປະກາດໃຊ້ແລ້ວ. ທຸກການດາວໂຫຼດຈະກວດສິດ ແລະ ຄວາມຄົບຖ້ວນຂອງໄຟລ໌.',

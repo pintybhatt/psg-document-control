@@ -60,7 +60,7 @@ class PermissionCatalog
             'memberships.manage' => ['area' => 'memberships', 'name_en' => 'Manage organization memberships', 'name_lo' => 'ຈັດການສະມາຊິກອົງກອນ', 'available' => true],
             'organization.access' => ['area' => 'organization', 'name_en' => 'Use an assigned organization context', 'name_lo' => 'ໃຊ້ຂອບເຂດອົງກອນທີ່ໄດ້ຮັບມອບໝາຍ', 'available' => true],
             'users.view' => ['area' => 'users', 'name_en' => 'View eligible account identities', 'name_lo' => 'ເບິ່ງບັນຊີທີ່ມີສິດ', 'available' => true],
-            'users.manage' => ['area' => 'users', 'name_en' => 'Manage accounts (planned)', 'name_lo' => 'ຈັດການບັນຊີ (ຢູ່ໃນແຜນ)', 'available' => false],
+            'users.manage' => ['area' => 'users', 'name_en' => 'Manage user accounts', 'name_lo' => 'ຈັດການບັນຊີຜູ້ໃຊ້', 'available' => true],
             'roles.view' => ['area' => 'roles', 'name_en' => 'View roles and permissions', 'name_lo' => 'ເບິ່ງບົດບາດ ແລະ ສິດ', 'available' => true],
             'roles.manage' => ['area' => 'roles', 'name_en' => 'Configure roles and permissions', 'name_lo' => 'ຕັ້ງຄ່າບົດບາດ ແລະ ສິດ', 'available' => true],
             'assignments.view' => ['area' => 'assignments', 'name_en' => 'View role assignments', 'name_lo' => 'ເບິ່ງການມອບໝາຍບົດບາດ', 'available' => true],

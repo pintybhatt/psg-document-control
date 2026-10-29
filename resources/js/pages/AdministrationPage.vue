@@ -9,6 +9,7 @@ import DataTable from '../components/ui/DataTable.vue';
 import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
 import ToastNotifications from '../components/ui/ToastNotifications.vue';
 import MembershipManagement from '../components/MembershipManagement.vue';
+import UserManagement from '../components/UserManagement.vue';
 import DocumentMasterDataManagement from '../components/DocumentMasterDataManagement.vue';
 import OrganizationManagement from '../components/OrganizationManagement.vue';
 import AdministrationHistory from '../components/AdministrationHistory.vue';
@@ -31,9 +32,11 @@ const selectedKey = ref('');
 const section = ref('people');
 const selected = computed(() => contexts.value.find(scope => scope.scope_key === selectedKey.value));
 const can = permission => selected.value?.permissions.includes(permission) ?? false;
+const canManageUsers = computed(() => contexts.value.some(scope => scope.scope_type === 'global' && scope.permissions.includes('users.manage')));
 const sections = computed(() => [
     { key: 'organization', label: 'orgTitle', available: !!props.endpoints.organization && canManageOrganization.value && selected.value?.scope_type === 'global' },
     { key: 'people', label: 'adminPeople', available: can('memberships.view') },
+    { key: 'users', label: 'userManagementTitle', available: !!props.endpoints.userManagement && canManageUsers.value },
     { key: 'documents', label: 'adminDocuments', available: selected.value?.scope_type !== 'global' && can('master-data.view') },
     { key: 'numbering', label: 'adminNumbering', available: selected.value?.scope_type !== 'global' && can('numbering.view') },
     { key: 'templates', label: 'templateTitle', available: !!props.endpoints.templates && selected.value?.scope_type === 'site' && can('templates.view') },
@@ -296,6 +299,7 @@ onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
             <OrganizationManagement v-if="section === 'organization' && canManageOrganization && selected?.scope_type === 'global'" :endpoint="endpoints.organization" :csrf-token="csrfToken" @saved="organizationSaved" @unauthorized="handleError" />
             <AdministrationHistory v-if="section === 'history' && selected && can('security.audit.view')" :scope="selected" :endpoint="endpoints.history" :can-manage-organization="canManageOrganization" :csrf-token="csrfToken" @unauthorized="handleError" />
             <MembershipManagement v-show="section === 'people'" v-if="selected && can('memberships.view')" :scope="selected" :endpoints="endpoints" :csrf-token="csrfToken" @unauthorized="handleError" />
+            <UserManagement v-if="section === 'users' && canManageUsers" :endpoint="endpoints.userManagement" :current-user-id="endpoints.currentUserId" :csrf-token="csrfToken" />
             <DocumentMasterDataManagement v-show="section === 'documents'" v-if="selected && selected.scope_type !== 'global' && can('master-data.view')" :scope="selected" :endpoints="endpoints.masterData" :csrf-token="csrfToken" @unauthorized="handleError" />
             <NumberingManagement v-show="section === 'numbering'" v-if="selected && selected.scope_type !== 'global' && can('numbering.view')" :scope="selected" :endpoint="endpoints.numbering" :csrf-token="csrfToken" @unauthorized="handleError" />
             <TemplateCatalogue v-if="section === 'templates' && selected?.scope_type === 'site' && can('templates.view')" :scope="selected" :endpoint="endpoints.templates" :csrf-token="csrfToken" @unauthorized="handleError" />

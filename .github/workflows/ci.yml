@@ -132,8 +132,11 @@ jobs:
         run: test "$FRONTEND" = success && test "$PHP" = success
 
   mysql:
-    name: MySQL 8.4
-    if: github.event_name != 'pull_request' || inputs.source_commit != ''
+    name: MySQL 8.4 (shard ${{ matrix.shard }}/4)
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     needs: frontend
     runs-on: ubuntu-24.04
     timeout-minutes: 15
@@ -168,8 +171,10 @@ jobs:
           php tests/prepare-mysql.php
           docker compose -f compose.mysql-testing.yaml up -d --wait --wait-timeout 180
           sh tests/capture-mysql-identity.sh
-      - name: Complete MySQL suite including migration and concurrency protections
-        run: DCMS_MYSQL_TESTING=1 vendor/bin/phpunit --configuration phpunit.mysql.xml --log-junit "$RUNNER_TEMP/mysql-results.xml"
+      - name: Run isolated MySQL shard
+        run: |
+          python3 tests/mysql-shard.py --shard ${{ matrix.shard }} --total 4 --output "$RUNNER_TEMP/mysql-shard.xml"
+          DCMS_MYSQL_TESTING=1 vendor/bin/phpunit --configuration "$RUNNER_TEMP/mysql-shard.xml" --log-junit "$RUNNER_TEMP/mysql-results.xml"
       - name: Dispose runner-only MySQL resources
         if: always()
         run: docker compose -f compose.mysql-testing.yaml down --volumes
@@ -177,7 +182,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: mysql-test-results
+          name: mysql-test-results-shard-${{ matrix.shard }}
           path: ${{ runner.temp }}/mysql-results.xml
           if-no-files-found: warn
           retention-days: 3
@@ -212,7 +217,6 @@ jobs:
           load: true
           push: false
           pull: true
-          no-cache: ${{ inputs.retain_image == true }}
           provenance: false
           tags: dcms-ci:validation
           labels: org.opencontainers.image.source=https://github.com/pintybhatt/psg-document-control
