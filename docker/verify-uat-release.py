@@ -39,6 +39,19 @@ def verify(manifest_bytes, approval, run, jobs, artifacts, now):
     expires_at = datetime.datetime.fromisoformat(approval.get('expires_at', ''))
     require(approved_at.tzinfo is not None and expires_at.tzinfo is not None
             and approved_at <= now < expires_at, 'Approval is expired, future-dated or lacks timezone.')
+    require(str(run.get('id')) == str(approval.get('release_run_id')), 'Approved release run mismatch.')
+    require(str(run.get('run_attempt')) == str(approval.get('release_run_attempt')), 'Approved release attempt mismatch.')
+    return verify_publication(manifest_bytes, run, jobs, artifacts, approval.get('release_artifact_id'))
+
+
+def verify_publication(manifest_bytes, run, jobs, artifacts, artifact_id):
+    manifest = json.loads(manifest_bytes)
+    image, source, version = manifest['image'], manifest['source_commit'], manifest['version']
+    require(re.fullmatch(IMAGE, image) and re.fullmatch(r'[a-f0-9]{40}', source), 'Invalid DCMS digest/source.')
+    require(re.fullmatch(r'v[0-9]+\.[0-9]+\.[0-9]+(?:-rc\.[0-9]+)?', version), 'Invalid release version.')
+    require(manifest.get('repository') == REPOSITORY and manifest.get('platform') == 'linux/amd64', 'Manifest identity mismatch.')
+    require(re.fullmatch(r'sha256:[a-f0-9]{64}', manifest.get('tested_image_id', ''))
+            and manifest.get('migration_inventory'), 'Missing tested image/migration identity.')
     require(run.get('repository', {}).get('full_name') == REPOSITORY
             and run.get('head_repository', {}).get('full_name') == REPOSITORY, 'Workflow repository mismatch.')
     require(run.get('path') == '.github/workflows/release-image.yml'
@@ -46,22 +59,29 @@ def verify(manifest_bytes, approval, run, jobs, artifacts, now):
     require(run.get('status') == 'completed' and run.get('conclusion') == 'success', 'Release workflow did not succeed.')
     require(run.get('head_sha') == manifest.get('release_workflow_commit')
             and re.fullmatch(r'[a-f0-9]{40}', run.get('head_sha', '')), 'Release workflow revision mismatch.')
-    require(str(run.get('id')) == str(manifest.get('github_run_id')) == str(approval.get('release_run_id'))
+    require(str(run.get('id')) == str(manifest.get('github_run_id'))
             and str(run.get('id', '')).isdigit(), 'Release run identity mismatch.')
-    require(str(run.get('run_attempt')) == str(manifest.get('github_run_attempt')) == str(approval.get('release_run_attempt'))
+    require(str(run.get('run_attempt')) == str(manifest.get('github_run_attempt'))
             and str(run.get('run_attempt', '')).isdigit(), 'Release attempt mismatch; refresh evidence/approval after reruns.')
     rows = jobs.get('jobs', [])
     require(jobs.get('total_count') == len(rows), 'Incomplete job evidence; fetch every page.')
-    for name in ('ci / Fast CI', 'ci / MySQL 8.4', 'ci / Image / smoke', 'ci / Full release validation', 'publish'):
+    mysql_names = [row.get('name', '') for row in rows if row.get('name', '').startswith('ci / MySQL')]
+    shards = ['ci / MySQL 8.4 (shard '+str(number)+'/4)' for number in range(1, 5)]
+    # Historical RC evidence predates sharding. Never mix layouts or accept partial shards.
+    required_mysql = ['ci / MySQL 8.4'] if mysql_names == ['ci / MySQL 8.4'] else shards
+    require(sorted(mysql_names) == sorted(required_mysql), 'Incomplete or ambiguous MySQL release evidence.')
+    for name in ('ci / Fast CI', 'ci / Image / smoke', 'ci / Full release validation', 'publish', *required_mysql):
         matches = [row for row in rows if row.get('name') == name]
         require(len(matches) == 1 and matches[0].get('run_id') == run['id']
+                and matches[0].get('run_attempt', run['run_attempt']) == run['run_attempt']
                 and matches[0].get('status') == 'completed' and matches[0].get('conclusion') == 'success', 'Required release job absent, failed, skipped or ambiguous: '+name)
     image_job = next(row for row in rows if row['name'] == 'ci / Image / smoke')
     require(any(step.get('name') == 'Test that exact image in a disposable stack' and step.get('conclusion') == 'success'
                 for step in image_job.get('steps', [])), 'Successful exact-image smoke evidence required.')
+    require(artifacts.get('total_count', len(artifacts.get('artifacts', []))) == len(artifacts.get('artifacts', [])), 'Incomplete artifact evidence.')
     matches = [row for row in artifacts.get('artifacts', []) if row.get('name') == 'release-manifest-'+version+'-'+source]
     require(len(matches) == 1 and matches[0].get('expired') is False
-            and matches[0].get('id') == approval.get('release_artifact_id')
+            and matches[0].get('id') == artifact_id
             and matches[0].get('workflow_run', {}).get('id') == run['id'], 'Approved release manifest artifact mismatch/expired.')
     return image
 

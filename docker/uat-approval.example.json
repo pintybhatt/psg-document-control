@@ -1,4 +1,12 @@
 {
+  "request_id": "REPLACE_WITH_SINGLE_USE_REQUEST_ID",
+  "operation": "deploy",
+  "schema_mode": "unchanged",
+  "schema_compatible": false,
+  "schema_compatibility_reference": "REPLACE_WITH_REVIEWED_COMPATIBILITY_REFERENCE",
+  "backup_reference": null,
+  "restoration_plan_reference": null,
+  "migration_authorization_reference": null,
   "target": "uat",
   "project": "dcms-uat-xppl",
   "decision": "pending",

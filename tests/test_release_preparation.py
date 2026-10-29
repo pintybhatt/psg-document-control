@@ -120,6 +120,58 @@ class UatReleaseEvidenceTests(unittest.TestCase):
     def test_matching_successful_release_and_explicit_uat_approval_pass(self):
         self.assertEqual(self.verify(), DIGEST)
 
+    def sharded_jobs(self):
+        mysql = next(row for row in self.jobs['jobs'] if row['name'] == 'ci / MySQL 8.4')
+        rows = [row for row in self.jobs['jobs'] if row is not mysql]
+        rows += [dict(mysql, name='ci / MySQL 8.4 (shard '+str(number)+'/4)') for number in range(1, 5)]
+        return {'total_count': len(rows), 'jobs': rows}
+
+    def test_all_four_successful_mysql_shards_are_accepted(self):
+        self.jobs = self.sharded_jobs()
+        self.assertEqual(self.verify(), DIGEST)
+
+    def test_historical_single_mysql_rc2_evidence_is_accepted(self):
+        self.manifest['version'] = 'v1.0.0-rc.2'
+        self.manifest_bytes = json.dumps(self.manifest).encode()
+        self.approval['manifest_sha256'] = hashlib.sha256(self.manifest_bytes).hexdigest()
+        self.artifacts['artifacts'][0]['name'] = 'release-manifest-v1.0.0-rc.2-'+SOURCE
+        self.assertEqual(self.verify(), DIGEST)
+
+    def test_every_mysql_shard_must_be_present_unique_completed_and_successful(self):
+        original = self.sharded_jobs()
+        for number in range(4):
+            for failure in ('missing', 'duplicate', 'skipped', 'cancelled', 'failure', 'running', 'foreign'):
+                with self.subTest(shard=number+1, failure=failure):
+                    self.jobs = copy.deepcopy(original)
+                    index = 4+number
+                    if failure == 'missing':
+                        self.jobs['jobs'].pop(index)
+                    elif failure == 'duplicate':
+                        self.jobs['jobs'].append(copy.deepcopy(self.jobs['jobs'][index]))
+                    elif failure == 'running':
+                        self.jobs['jobs'][index]['status'] = 'in_progress'
+                    elif failure == 'foreign':
+                        self.jobs['jobs'][index]['run_id'] = 999
+                    else:
+                        self.jobs['jobs'][index]['conclusion'] = failure
+                    self.jobs['total_count'] = len(self.jobs['jobs'])
+                    with self.assertRaises(ValueError):
+                        self.verify()
+
+    def test_mixed_unexpected_and_incompletely_paginated_shards_are_refused(self):
+        original = self.sharded_jobs()
+        for name in ('ci / MySQL 8.4', 'ci / MySQL 8.4 (shard 5/4)', 'ci / MySQL 8.4 (shard 1/2)'):
+            with self.subTest(name=name):
+                self.jobs = copy.deepcopy(original)
+                self.jobs['jobs'].append(dict(self.jobs['jobs'][-1], name=name))
+                self.jobs['total_count'] += 1
+                with self.assertRaises(ValueError):
+                    self.verify()
+        self.jobs = copy.deepcopy(original)
+        self.jobs['total_count'] += 1
+        with self.assertRaises(ValueError):
+            self.verify()
+
     def test_production_wrong_source_digest_and_missing_recovery_are_refused(self):
         original = copy.deepcopy(self.approval)
         for key, value in [('target', 'production'), ('project', 'netbox'), ('source_commit', 'f'*40),

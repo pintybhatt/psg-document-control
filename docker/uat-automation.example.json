@@ -1,0 +1,9 @@
+{
+  "enabled": false,
+  "target": "uat",
+  "project": "dcms-uat-xppl",
+  "owners": [],
+  "health_url": "https://REPLACE_WITH_APPROVED_HOST:8444/up",
+  "minimum_free_memory_mib": null,
+  "minimum_free_disk_bytes": null
+}

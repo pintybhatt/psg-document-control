@@ -1,0 +1,73 @@
+name: Deploy DCMS UAT
+on:
+  workflow_dispatch:
+    inputs:
+      request_id:
+        description: Owner-enrolled, single-use UAT approval request ID
+        required: true
+        type: string
+      release_run_id:
+        description: Successful Authorized release image run ID
+        required: true
+        type: string
+      release_artifact_id:
+        description: Approved release-manifest artifact ID from that run
+        required: true
+        type: string
+      image:
+        description: Approved ghcr.io/pintybhatt/psg-document-control@sha256 digest
+        required: true
+        type: string
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: dcms-uat-xppl-deployment
+  cancel-in-progress: false
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'pintybhatt/psg-document-control' && vars.ENABLE_UAT_DEPLOYMENT == 'true'
+    environment: uat
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Validate selected published release using current GitHub evidence
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REQUEST_ID: ${{ inputs.request_id }}
+          RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+          RELEASE_ARTIFACT_ID: ${{ inputs.release_artifact_id }}
+          IMAGE: ${{ inputs.image }}
+        run: |
+          umask 077
+          python3 -B docker/prepare-uat-request.py > "$RUNNER_TEMP/uat-request.json"
+      - name: Invoke only the enrolled UAT entry point
+        env:
+          UAT_SSH_KEY: ${{ secrets.UAT_SSH_KEY }}
+          UAT_KNOWN_HOSTS: ${{ secrets.UAT_KNOWN_HOSTS }}
+          UAT_HOST: ${{ vars.UAT_HOST }}
+          UAT_SSH_PORT: ${{ vars.UAT_SSH_PORT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$UAT_HOST" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]+$ ]]
+          [[ "$UAT_SSH_PORT" =~ ^[0-9]{1,5}$ ]]
+          (( 10#$UAT_SSH_PORT > 0 && 10#$UAT_SSH_PORT <= 65535 ))
+          test -n "$UAT_SSH_KEY" && test -n "$UAT_KNOWN_HOSTS"
+          umask 077
+          ssh_dir=$(mktemp -d "$RUNNER_TEMP/dcms-uat-ssh.XXXXXXXX")
+          trap 'rm -rf -- "$ssh_dir"; rm -f -- "$RUNNER_TEMP/uat-request.json"' EXIT
+          printf '%s\n' "$UAT_SSH_KEY" > "$ssh_dir/key"
+          printf '%s\n' "$UAT_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          unset UAT_SSH_KEY UAT_KNOWN_HOSTS
+          ssh -F /dev/null -T -p "$UAT_SSH_PORT" -i "$ssh_dir/key" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+            -o GlobalKnownHostsFile=/dev/null -o UpdateHostKeys=no \
+            -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no \
+            -o ClearAllForwardings=yes -o RequestTTY=no -o ConnectTimeout=15 \
+            -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+            "dcms-deploy@$UAT_HOST" deploy-dcms-uat < "$RUNNER_TEMP/uat-request.json"
