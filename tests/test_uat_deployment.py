@@ -14,19 +14,32 @@ from unittest.mock import patch
 import zipfile
 
 import test_release_preparation as release_fixtures
-from test_release_preparation import load, DIGEST, SOURCE, IMAGE_ID
+from test_release_preparation import load, SOURCE, IMAGE_ID
 
 
 deploy = load('uat_deployment', 'deploy-uat.py')
 prepare = load('uat_request', 'prepare-uat-request.py')
-OLD = DIGEST[:-1]+'d'
+REGISTRY_MANIFEST = {'schemaVersion': 2, 'mediaType': 'application/vnd.oci.image.manifest.v1+json',
+                     'config': {'mediaType': 'application/vnd.oci.image.config.v1+json', 'digest': IMAGE_ID, 'size': 100},
+                     'layers': []}
+RAW_MANIFEST = json.dumps(REGISTRY_MANIFEST)
+OLD_RAW_MANIFEST = json.dumps(dict(REGISTRY_MANIFEST, annotations={'test.previous': 'true'}))
+DIGEST = 'ghcr.io/pintybhatt/psg-document-control@sha256:'+hashlib.sha256(RAW_MANIFEST.encode()).hexdigest()
+OLD = 'ghcr.io/pintybhatt/psg-document-control@sha256:'+hashlib.sha256(OLD_RAW_MANIFEST.encode()).hexdigest()
+
+
+def release_fixture():
+    fixture = release_fixtures.UatReleaseEvidenceTests()
+    fixture.setUp()
+    fixture.manifest['image'] = fixture.approval['image'] = DIGEST
+    fixture.manifest_bytes = json.dumps(fixture.manifest).encode()
+    fixture.approval['manifest_sha256'] = hashlib.sha256(fixture.manifest_bytes).hexdigest()
+    return fixture
 
 
 class RequestPreparationTests(unittest.TestCase):
     def fixture(self):
-        fixture = release_fixtures.UatReleaseEvidenceTests()
-        fixture.setUp()
-        return fixture
+        return release_fixture()
 
     def archive(self, payload):
         data = io.BytesIO()
@@ -83,8 +96,7 @@ class UatDeploymentTests(unittest.TestCase):
         self.root = Path(self.temporary.name)
         for folder in ('history', 'requests/CHG-123', 'release/docker', 'config', 'registry'):
             (self.root/folder).mkdir(parents=True, exist_ok=True)
-        self.fixture = release_fixtures.UatReleaseEvidenceTests()
-        self.fixture.setUp()
+        self.fixture = release_fixture()
         self.fixture.approval.update(request_id='CHG-123', operation='deploy', schema_mode='unchanged',
                                      schema_compatible=True, schema_compatibility_reference='COMPAT-123', previous_image=OLD)
         self.current = dict(self.fixture.manifest, image=OLD)
@@ -107,6 +119,7 @@ class UatDeploymentTests(unittest.TestCase):
         self.calls = []
         self.replaced = False
         self.failure = None
+        self.image_store = 'classic'
         self.db_identity = 'a'*64
         self.volume = {'Type': 'volume', 'Name': deploy.PROJECT+'_documents',
                        'Destination': '/var/www/html/storage/app/document-vault'}
@@ -147,15 +160,23 @@ class UatDeploymentTests(unittest.TestCase):
         if 'container' in command:
             service = 'app' if command[-1] == 'b'*64 else 'db'
             image = DIGEST if self.replaced else OLD
-            return json.dumps([{'Id': command[-1], 'Image': IMAGE_ID,
+            image_id = IMAGE_ID if self.image_store == 'classic' else image.split('@')[1]
+            if self.replaced and self.failure == 'container-image':
+                image_id = 'sha256:'+'f'*64
+            return json.dumps([{'Id': command[-1], 'Image': image_id,
                                 'Config': {'Image': image, 'Labels': {'com.docker.compose.project': deploy.PROJECT,
-                                           'com.docker.compose.service': service}},
+                                           'com.docker.compose.service': service,
+                                           'org.opencontainers.image.revision': SOURCE,
+                                           'org.opencontainers.image.source': 'https://github.com/'+deploy.evidence.REPOSITORY}},
                                 'State': {'Running': True, 'StartedAt': 'synthetic-start', 'Health': {'Status': 'healthy'}},
                                 'Mounts': [self.volume]}])
         if 'image' in command and 'inspect' in command:
-            return json.dumps([{'Id': IMAGE_ID, 'RepoDigests': [DIGEST], 'Os': 'linux', 'Architecture': 'amd64',
+            image_id = IMAGE_ID if self.image_store == 'classic' else command[-1].split('@')[1]
+            return json.dumps([{'Id': image_id, 'RepoDigests': [command[-1]], 'Os': 'linux', 'Architecture': 'amd64',
                                 'Config': {'Labels': {'org.opencontainers.image.revision': SOURCE,
                                   'org.opencontainers.image.source': 'https://github.com/'+deploy.evidence.REPOSITORY}}}])
+        if command[3:7] == ['buildx', 'imagetools', 'inspect', '--raw']:
+            return OLD_RAW_MANIFEST if command[-1] == OLD else RAW_MANIFEST
         if command[0] == '/usr/bin/curl':
             if command[-1].endswith('/storage/private-check'):
                 return '403'
@@ -186,6 +207,15 @@ class UatDeploymentTests(unittest.TestCase):
         self.assertEqual(json.loads((self.root/'config/current.json').read_text())['image'], DIGEST)
         self.assertEqual(json.loads((self.root/'history/CHG-123/result.json').read_text())['status'], 'deployed')
         self.assertTrue((self.root/'history/CHG-123/previous-manifest.json').exists())
+
+    def test_containerd_store_validates_previous_candidate_and_replacement_images(self):
+        self.image_store = 'containerd'
+
+        self.execute()
+
+        references = [call[-1] for call in self.calls if call[3:7] == ['buildx', 'imagetools', 'inspect', '--raw']]
+        self.assertEqual(references, [OLD, DIGEST, DIGEST])
+        self.assertEqual(json.loads((self.root/'history/CHG-123/result.json').read_text())['status'], 'deployed')
 
     def test_owner_previous_digest_approval_expiry_and_request_tampering_fail_before_commands(self):
         original = copy.deepcopy(self.fixture.approval)
@@ -244,7 +274,7 @@ class UatDeploymentTests(unittest.TestCase):
         self.assertFalse(any('down' in call for call in self.calls))
 
     def test_replacement_health_and_redirect_failures_retain_previous_state_and_request_maintenance(self):
-        for failure in ('replace', 'health', 'redirect'):
+        for failure in ('replace', 'health', 'redirect', 'container-image'):
             with self.subTest(failure=failure):
                 self.failure = failure
                 self.replaced = False
@@ -284,6 +314,91 @@ class UatDeploymentTests(unittest.TestCase):
         with patch.object(runner, 'dc', return_value=json.dumps({'inventory': self.fixture.manifest['migration_inventory'],
                                                                'ran': ['synthetic', 'added']})), self.assertRaises(ValueError):
             runner.schema(self.fixture.manifest, approval)
+
+
+class ImageIdentityTests(unittest.TestCase):
+    def setUp(self):
+        self.runner = deploy.Deployment(Path('/unused'), Path('/unused'))
+        self.manifest = {'image': DIGEST, 'tested_image_id': IMAGE_ID, 'source_commit': SOURCE, 'platform': 'linux/amd64'}
+        self.local = {'Id': IMAGE_ID, 'RepoDigests': [DIGEST], 'Os': 'linux', 'Architecture': 'amd64',
+                      'Config': {'Labels': {'org.opencontainers.image.revision': SOURCE,
+                                'org.opencontainers.image.source': 'https://github.com/'+deploy.evidence.REPOSITORY}}}
+
+    def test_classic_and_containerd_ids_require_the_same_authenticated_configuration_digest(self):
+        for local_id in (IMAGE_ID, DIGEST.split('@')[1]):
+            with self.subTest(local_id=local_id), \
+                    patch.object(self.runner, 'run', side_effect=[RAW_MANIFEST, json.dumps([dict(self.local, Id=local_id)])]) as run:
+                self.assertEqual(self.runner.image(self.manifest), local_id)
+                self.assertEqual(run.call_args_list[0].args[0],
+                                 deploy.DOCKER+['buildx', 'imagetools', 'inspect', '--raw', DIGEST])
+        self.assertEqual(self.runner.environment['DOCKER_CONFIG'], '/srv/dcms-uat/registry')
+
+    def test_config_mismatch_is_refused_even_when_docker_id_matches_published_digest(self):
+        registry = copy.deepcopy(REGISTRY_MANIFEST)
+        registry['config']['digest'] = 'sha256:'+'f'*64
+        raw = json.dumps(registry)
+        manifest = dict(self.manifest, image='ghcr.io/pintybhatt/psg-document-control@sha256:'+hashlib.sha256(raw.encode()).hexdigest())
+        with patch.object(self.runner, 'run', return_value=raw) as run, self.assertRaisesRegex(ValueError, 'configuration differs'):
+            self.runner.image(manifest)
+        self.assertEqual(run.call_count, 1)
+
+    def test_raw_manifest_must_hash_to_the_approved_digest_without_normalization(self):
+        for raw in (RAW_MANIFEST+'\n', json.dumps(REGISTRY_MANIFEST, indent=2), '{}'):
+            with self.subTest(raw=raw), patch.object(self.runner, 'run', return_value=raw), \
+                    self.assertRaisesRegex(ValueError, 'manifest digest mismatch'):
+                self.runner.image(self.manifest)
+
+    def test_unavailable_registry_or_buildx_refuses_without_local_id_fallback(self):
+        for error in (OSError('synthetic missing Buildx'), subprocess.CalledProcessError(1, ['docker']),
+                      subprocess.TimeoutExpired(['docker'], 180)):
+            with self.subTest(error=type(error)), patch.object(self.runner, 'run', side_effect=error) as run, \
+                    self.assertRaises(type(error)):
+                self.runner.image(self.manifest)
+            self.assertEqual(run.call_count, 1)
+
+    def test_indexes_malformed_manifests_and_missing_config_descriptors_are_refused(self):
+        invalid = [dict(REGISTRY_MANIFEST, mediaType='application/vnd.oci.image.index.v1+json', manifests=[]),
+                   dict(REGISTRY_MANIFEST, manifests=[]), dict(REGISTRY_MANIFEST, schemaVersion=1),
+                   dict(REGISTRY_MANIFEST, config={}),
+                   dict(REGISTRY_MANIFEST, config={'mediaType': 'untrusted', 'digest': IMAGE_ID}),
+                   dict(REGISTRY_MANIFEST, mediaType='untrusted')]
+        for registry in invalid:
+            raw = json.dumps(registry)
+            manifest = dict(self.manifest, image='ghcr.io/pintybhatt/psg-document-control@sha256:'+hashlib.sha256(raw.encode()).hexdigest())
+            with self.subTest(registry=registry), patch.object(self.runner, 'run', return_value=raw), self.assertRaises(ValueError):
+                self.runner.image(manifest)
+
+    def test_docker_schema2_manifest_config_is_supported(self):
+        registry = copy.deepcopy(REGISTRY_MANIFEST)
+        registry['mediaType'] = 'application/vnd.docker.distribution.manifest.v2+json'
+        registry['config']['mediaType'] = 'application/vnd.docker.container.image.v1+json'
+        raw = json.dumps(registry)
+        manifest = dict(self.manifest, image='ghcr.io/pintybhatt/psg-document-control@sha256:'+hashlib.sha256(raw.encode()).hexdigest())
+        local = dict(self.local, RepoDigests=[manifest['image']])
+        with patch.object(self.runner, 'run', side_effect=[raw, json.dumps([local])]):
+            self.assertEqual(self.runner.image(manifest), IMAGE_ID)
+
+    def test_mutable_or_unrelated_references_are_refused_before_registry_access(self):
+        for image in ('ghcr.io/pintybhatt/psg-document-control:latest', DIGEST.replace('pintybhatt', 'untrusted')):
+            with self.subTest(image=image), patch.object(self.runner, 'run') as run, self.assertRaises(ValueError):
+                self.runner.image(dict(self.manifest, image=image))
+            run.assert_not_called()
+
+    def test_running_container_must_match_verified_local_id_reference_and_source(self):
+        for local_id in (IMAGE_ID, DIGEST.split('@')[1]):
+            container = {'Image': local_id, 'Config': {'Image': DIGEST, 'Labels': self.local['Config']['Labels']}}
+            local = dict(self.local, Id=local_id)
+            with self.subTest(local_id=local_id), patch.object(self.runner, 'run', side_effect=[RAW_MANIFEST, json.dumps([local])]):
+                self.runner.running_image(container, self.manifest)
+            invalid = [dict(container, Image='sha256:'+'f'*64),
+                       dict(container, Image=DIGEST.split('@')[1] if local_id == IMAGE_ID else IMAGE_ID),
+                       dict(container, Config=dict(container['Config'], Image=OLD)),
+                       dict(container, Config=dict(container['Config'], Image='dcms:latest')),
+                       dict(container, Config=dict(container['Config'], Labels={}))]
+            for changed in invalid:
+                with self.subTest(local_id=local_id, container=changed), \
+                        patch.object(self.runner, 'run', side_effect=[RAW_MANIFEST, json.dumps([local])]), self.assertRaises(ValueError):
+                    self.runner.running_image(changed, self.manifest)
 
 
 class DeploymentBoundaryTests(unittest.TestCase):
@@ -350,13 +465,13 @@ class DeploymentBoundaryTests(unittest.TestCase):
 
     def test_server_rejects_pulled_image_with_wrong_tested_identity_source_or_platform(self):
         runner = deploy.Deployment(Path('/unused'), Path('/unused'))
-        manifest = {'image': DIGEST, 'tested_image_id': IMAGE_ID, 'source_commit': SOURCE}
+        manifest = {'image': DIGEST, 'tested_image_id': IMAGE_ID, 'source_commit': SOURCE, 'platform': 'linux/amd64'}
         original = {'Id': IMAGE_ID, 'RepoDigests': [DIGEST], 'Os': 'linux', 'Architecture': 'amd64',
                     'Config': {'Labels': {'org.opencontainers.image.revision': SOURCE,
                               'org.opencontainers.image.source': 'https://github.com/'+deploy.evidence.REPOSITORY}}}
         for field, value in [('Id', 'sha256:'+'f'*64), ('RepoDigests', []), ('Architecture', 'arm64'),
                              ('Config', {'Labels': {'org.opencontainers.image.revision': 'f'*40}})]:
-            with self.subTest(field=field), patch.object(runner, 'run', return_value=json.dumps([dict(original, **{field: value})])), \
+            with self.subTest(field=field), patch.object(runner, 'run', side_effect=[RAW_MANIFEST, json.dumps([dict(original, **{field: value})])]), \
                     self.assertRaises(ValueError):
                 runner.image(manifest)
 
