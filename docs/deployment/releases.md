@@ -1,5 +1,7 @@
 # Private GHCR and controlled UAT release
 
+> The prepared, disabled GitHub Actions deployment path is now documented in [GitHub UAT automation](github-uat.md). It supersedes manual-only automation statements below; existing bootstrap, backup and ingress procedures remain applicable. No server or GitHub control was activated.
+
 Preparation candidate: `a7e0a5ded145319c5c60fd7e122cc42e14599c10`, verified against clean local main, origin/main and GitHub main on 2026-10-28. Includes SOP B1 numbering PR #5 and MySQL assertion correction PR #6. **Publication and deployment remain off.** This change moves the disabled publisher into `.github/workflows/release-image.yml` for PR review; no dispatch, registry write, setting change or server access is authorized by this preparation.
 
 ## Candidate evidence and GitHub readiness (2026-10-28)
@@ -92,7 +94,7 @@ gh run download "$release_run" --repo "$repo" --name "release-manifest-$version-
 sha256sum "$evidence_dir/manifest/release-manifest.json" > "$evidence_dir/manifest-file.sha256"
 ```
 
-Inspect successful non-skipped `ci / Full release validation`, `ci / MySQL 8.4`, `ci / Image / smoke` including the exact-image smoke step, `ci / Fast CI` and `publish`; verify source against the approved main ancestry and manifest. The workflow run's `head_sha` identifies the **workflow revision on main**, which can differ from the explicitly selected source ancestor. The trusted release workflow verifies that source through CI/archive/OCI checks. API evidence must be fetched directly from the approved GitHub repository and current run attempt; if job count exceeds 100, obtain all pages and merge to one complete jobs object before verification. No best-effort acceptance of truncated jobs.
+Inspect successful non-skipped `ci / Full release validation`, `ci / MySQL 8.4 (shard 1/4)` through `(shard 4/4)` (or the historical single `ci / MySQL 8.4`), `ci / Image / smoke` including the exact-image smoke step, `ci / Fast CI` and `publish`; verify source against the approved main ancestry and manifest. The workflow run's `head_sha` identifies the **workflow revision on main**, which can differ from the explicitly selected source ancestor. The trusted release workflow verifies that source through CI/archive/OCI checks. API evidence must be fetched directly from the approved GitHub repository and current run attempt; if job count exceeds 100, obtain all pages and merge to one complete jobs object before verification. No best-effort acceptance of truncated jobs.
 
 Owner reviews `docker/uat-approval.example.json`, fills **outside Git** with exact digest/source, manifest file hash, release run/attempt/artifact ID, previous UAT digest (or explicit null for first release), recovery and migration-review references, approver/reference, timezone-aware approval time and explicitly approved expiry. Default decision is **pending**. The owner must make the real authorization decision; never generate an `approved` record merely because tests passed. Approval period/backup retention are organizational decisions, not defaults imposed here.
 

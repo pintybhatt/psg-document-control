@@ -1,5 +1,7 @@
 # XPPL UAT preparation — inactive operator runbook
 
+> The prepared, disabled GitHub Actions deployment path is now documented in [GitHub UAT automation](github-uat.md). It supersedes manual-only automation statements below; existing bootstrap, backup and ingress procedures remain applicable. No server or GitHub control was activated.
+
 This is local preparation, **not permission to execute these commands**. No server was contacted. Current approved source candidate is `a7e0a5ded145319c5c60fd7e122cc42e14599c10`. [Exact-source main push CI 40637101021](https://github.com/pintybhatt/psg-document-control/actions/runs/40637101021) passed all six jobs including MySQL and Docker smoke; archive retention/upload were skipped. It is not retained-image release or UAT acceptance evidence.
 
 The publisher is prepared in `.github/workflows/release-image.yml` for review, with the publishing switch absent and no release environment configured. See the [release readiness record](releases.md) for verified settings, unresolved plan capabilities, proposed `v1.0.0-rc.1`, first-private-package approval and separate publication/deployment gates. All server blocks below remain future operator instructions. These templates do not claim UAT load capacity or acceptance.
