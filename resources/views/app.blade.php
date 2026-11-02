@@ -38,6 +38,7 @@
             'administration' => $canAccessAdministration ? [
                 'organization' => route('api.v1.organization.index', ['kind' => 'companies'], false),
                 'history' => route('api.v1.administration.history', [], false),
+                'confidentiality' => preg_replace('~/contexts$~', '', route('api.v1.confidentiality.contexts', [], false)),
                 'numbering' => route('api.v1.numbering.index', [], false),
                 'contexts' => route('api.v1.authorization.contexts', ['administration' => 1], false),
                 'roles' => route('api.v1.roles.index', [], false),

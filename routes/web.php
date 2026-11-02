@@ -3,6 +3,7 @@
 use App\Http\Controllers\AdministrationHistoryController;
 use App\Http\Controllers\AuthenticatedSessionController;
 use App\Http\Controllers\AuthorizationContextController;
+use App\Http\Controllers\ConfidentialityAdministrationController;
 use App\Http\Controllers\ControlledDocumentController;
 use App\Http\Controllers\CurrentUserController;
 use App\Http\Controllers\DashboardController;
@@ -64,6 +65,17 @@ Route::middleware(['auth:web', EnsureActiveUserSession::class])->group(function 
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
     Route::get('/api/v1/user', CurrentUserController::class)->name('api.v1.user');
     Route::prefix('api/v1')->name('api.v1.')->group(function (): void {
+        Route::prefix('confidentiality')->name('confidentiality.')->controller(ConfidentialityAdministrationController::class)->group(function (): void {
+            Route::get('contexts', 'contexts')->name('contexts');
+            Route::get('users', 'users')->name('users');
+            Route::get('clearances', 'clearances')->name('clearances.index');
+            Route::post('clearances', 'grantClearance')->name('clearances.store');
+            Route::delete('clearances/{clearance}', 'revokeClearance')->whereNumber('clearance')->name('clearances.revoke');
+            Route::get('documents', 'documents')->name('documents');
+            Route::get('documents/{type}/{document}/grants', 'grants')->whereIn('type', ['incoming', 'outgoing', 'controlled'])->whereNumber('document')->name('grants.index');
+            Route::post('documents/{type}/{document}/grants', 'grantDocument')->whereIn('type', ['incoming', 'outgoing', 'controlled'])->whereNumber('document')->name('grants.store');
+            Route::delete('documents/{type}/{document}/grants/{grant}', 'revokeDocument')->whereIn('type', ['incoming', 'outgoing', 'controlled'])->whereNumber('document')->whereNumber('grant')->name('grants.revoke');
+        });
         Route::get('document-search/lookups', [DocumentSearchController::class, 'lookups'])->name('document-search.lookups');
         Route::get('document-search', [DocumentSearchController::class, 'index'])->name('document-search');
         Route::get('reports/lookups', [ManagementReportController::class, 'lookups'])->name('reports.lookups');

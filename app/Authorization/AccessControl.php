@@ -83,10 +83,12 @@ class AccessControl
     /** @return Collection<int, AuthorizationScope> */
     public function administrationContexts(User $user): Collection
     {
-        return $this->contexts($user)->filter(function (AuthorizationScope $scope) use ($user): bool {
+        $securitySites = app(ConfidentialityAdministration::class)->contexts($user)->map(fn (DocumentScope $scope): AuthorizationScope => $scope->authorizationScope())->keyBy('scope_key');
+
+        return $this->contexts($user)->keyBy('scope_key')->union($securitySites)->filter(function (AuthorizationScope $scope) use ($user, $securitySites): bool {
             $permissions = $this->permissions($user, $scope);
 
-            return array_intersect(['roles.view', 'assignments.view', 'memberships.view'], $permissions) !== []
+            return $securitySites->has($scope->scope_key) || array_intersect(['roles.view', 'assignments.view', 'memberships.view'], $permissions) !== []
                 || ($scope->scope_type !== 'global' && array_intersect(['master-data.view', 'numbering.view'], $permissions) !== []);
         })->values();
     }

@@ -8,6 +8,7 @@ import CheckboxInput from '../components/ui/CheckboxInput.vue';
 import DataTable from '../components/ui/DataTable.vue';
 import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
 import ToastNotifications from '../components/ui/ToastNotifications.vue';
+import ConfidentialityAccess from '../components/ConfidentialityAccess.vue';
 import MembershipManagement from '../components/MembershipManagement.vue';
 import UserManagement from '../components/UserManagement.vue';
 import DocumentMasterDataManagement from '../components/DocumentMasterDataManagement.vue';
@@ -37,6 +38,7 @@ const sections = computed(() => [
     { key: 'users', label: 'userManagementTitle', available: !!props.endpoints.userManagement && canManageUsers.value },
     { key: 'documents', label: 'adminDocuments', available: selected.value?.scope_type !== 'global' && can('master-data.view') },
     { key: 'numbering', label: 'adminNumbering', available: selected.value?.scope_type !== 'global' && can('numbering.view') },
+    { key: 'confidentiality', label: 'confidentialityTitle', available: !!props.endpoints.confidentiality && selected.value?.can_manage_document_security === true },
     { key: 'history', label: 'adminHistory', available: !!props.endpoints.history && can('security.audit.view') },
     { key: 'roles', label: 'adminRoles', available: can('roles.view') || can('assignments.view') },
 ].filter(item => item.available));
@@ -170,7 +172,7 @@ function handleError(error) {
         loading.value = false; searchLoading.value = false;
         roles.value = []; assignments.value = []; users.value = []; permissions.value = []; roleOptions.value = [];
         recommendations.value = {}; recommendationPreview.value = false; recommendationApplied.value = false;
-        if (selected.value) { selected.value.permissions = []; }
+        if (selected.value) { selected.value.permissions = []; selected.value.can_manage_document_security = false; }
         editorOpen.value = false;
         confirmationOpen.value = false;
     }
@@ -375,6 +377,7 @@ onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
 
             <nav :aria-label="t('administration')" class="flex flex-wrap gap-2 border-b border-slate-200 pb-3"><UiButton v-for="item in sections" :key="item.key" :variant="section === item.key ? 'primary' : 'secondary'" :aria-pressed="section === item.key" @click="section = item.key">{{ t(item.label) }}</UiButton></nav>
             <OrganizationManagement v-if="section === 'organization' && canManageOrganization && selected?.scope_type === 'global'" :endpoint="endpoints.organization" :csrf-token="csrfToken" @saved="organizationSaved" @unauthorized="handleError" />
+            <ConfidentialityAccess v-if="section === 'confidentiality' && selected?.can_manage_document_security" :key="selectedKey" :scope="selected" :endpoint="endpoints.confidentiality" :csrf-token="csrfToken" @unauthorized="handleError" />
             <AdministrationHistory v-if="section === 'history' && selected && can('security.audit.view')" :scope="selected" :endpoint="endpoints.history" :can-manage-organization="canManageOrganization" :csrf-token="csrfToken" @unauthorized="handleError" />
             <MembershipManagement v-show="section === 'people'" v-if="selected && can('memberships.view')" :scope="selected" :endpoints="endpoints" :csrf-token="csrfToken" @unauthorized="handleError" />
             <UserManagement v-if="section === 'users' && canManageUsers" :endpoint="endpoints.userManagement" :access-endpoints="{ units: endpoints.membershipUnits, roles: endpoints.roles, permissions: endpoints.permissions }" :current-user-id="endpoints.currentUserId" :csrf-token="csrfToken" />
