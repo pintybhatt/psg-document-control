@@ -1,5 +1,6 @@
 # Publication remains off until separately approved ENABLE_IMAGE_PUBLISHING=true.
 name: Authorized release image
+run-name: DCMS release ${{ inputs.version }} ${{ inputs.source_commit }}
 on:
   workflow_dispatch:
     inputs:
@@ -53,7 +54,7 @@ jobs:
       retain_image: true
   publish:
     needs: ci
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'pintybhatt/psg-document-control' && vars.ENABLE_IMAGE_PUBLISHING == 'true'
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'pintybhatt/psg-document-control'
     environment: release-image
     permissions:
       contents: read
@@ -61,6 +62,14 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
+      - name: Require explicit publication authorization
+        env:
+          ENABLED: ${{ vars.ENABLE_IMAGE_PUBLISHING }}
+        run: |
+          if [[ "$ENABLED" != true ]]; then
+            echo '::error::Image publication is disabled: ENABLE_IMAGE_PUBLISHING must be true.'
+            exit 1
+          fi
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           ref: ${{ inputs.source_commit }}

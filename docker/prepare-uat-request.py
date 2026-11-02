@@ -21,6 +21,11 @@ def prepare(run_id, artifact_id, operation, rollback_reference=''):
     api = auth.GitHub(os.environ['GH_TOKEN'])
     release = api.release(int(run_id), int(artifact_id))
     manifest = auth.parse_json(release['manifest'])
+    branch = api.get('branches/main')
+    auth.require(branch.get('protected') is True and branch['commit']['sha'] == os.environ['GITHUB_SHA'],
+                 'Dispatch must match current protected main.')
+    if operation == 'deploy':
+        auth.require(manifest['source_commit'] == os.environ['GITHUB_SHA'], 'Forward deployment must use current main source.')
     request = {'deployment_run_id': int(os.environ['GITHUB_RUN_ID']),
                'deployment_run_attempt': int(os.environ['GITHUB_RUN_ATTEMPT']),
                'release_run_id': int(run_id), 'release_run_attempt': release['run']['run_attempt'],
