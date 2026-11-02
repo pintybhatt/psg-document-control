@@ -2,7 +2,12 @@
   "enabled": false,
   "target": "uat",
   "project": "dcms-uat-xppl",
-  "owners": [],
+  "authorization": "github-oidc",
+  "repository_id": null,
+  "operator_ids": [],
+  "runner_ids": [],
+  "maximum_release_age_hours": 168,
+  "recovery_reference": null,
   "health_url": "https://REPLACE_WITH_APPROVED_HOST:8444/up",
   "minimum_free_memory_mib": null,
   "minimum_free_disk_bytes": null
