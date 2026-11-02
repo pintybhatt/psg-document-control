@@ -13,7 +13,7 @@ const names = (id, name) => ({ id, name_en: name, name_lo: `ຕົວຢ່າ�
 const role = { ...names(10, 'Document Controller'), code: 'DOCUMENT_CONTROLLER', active: true, assignable: true, permission_keys: ['organization.access', 'documents.metadata.view'] };
 const existingUser = { id: 2, name: 'Existing User', email: 'existing@example.test', preferred_language: 'en', active: true };
 
-function server({ user = null, failSave = false } = {}) {
+function server({ user = null, failSave = false, unconfiguredRoles = false } = {}) {
     const users = user ? [structuredClone(user)] : [];
     const currentAccess = { memberships: [{ ...names(20, 'Membership'), company: names(1, 'Example Company'), site: names(2, 'Existing Site'), effective: true, revoke_url: '/memberships/20?scope_type=site' }],
         assignments: [{ id: 30, role, scope_key: 'site:2', effective: true, revoke_url: '/assignments/30?scope_type=site' }] };
@@ -39,6 +39,7 @@ function server({ user = null, failSave = false } = {}) {
             return response({ data: rows, last_page: 1 });
         }
         if (parsed.pathname === '/roles') {
+            if (unconfiguredRoles) { return response({ data: [{ ...role, permission_keys: [] }], meta: { last_page: 1 } }); }
             return response({ data: [role, { ...role, id: 14, code: 'DEPARTMENT_USER' }, { ...role, id: 11, permission_keys: [] }, { ...role, id: 12, code: 'SECURITY_ADMINISTRATOR' }, { ...role, id: 13, active: false }], meta: { last_page: 1 } });
         }
         if (parsed.pathname === '/permissions') { return response({ data: role.permission_keys.map(key => ({ key, available: true, delegatable: true })) }); }
@@ -68,6 +69,18 @@ async function selectSite(wrapper) {
 }
 
 describe('combined user onboarding', () => {
+    it('explains why an unconfigured Document Controller is excluded and describes combined onboarding', async () => {
+        const fetch = server({ unconfiguredRoles: true });
+        const wrapper = await render();
+        await button(wrapper, 'Create user').trigger('click'); await flushPromises();
+        await field(wrapper, 'Company').setValue(1); await flushPromises();
+        await field(wrapper, 'Site').setValue(2); await flushPromises();
+        expect(field(wrapper, 'Role').findAll('option')).toHaveLength(1);
+        expect(wrapper.text()).toContain('No eligible workspace roles');
+        expect(wrapper.text()).toContain('membership and role together');
+        expect(wrapper.text()).not.toContain('after creating their account');
+        expect(fetch.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
+    });
     it.each([false, true])('submits account, exact membership and role together (department %s)', async department => {
         const fetch = server();
         const wrapper = await render();

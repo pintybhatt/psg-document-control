@@ -37,7 +37,7 @@ afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals(); });
 
 function response(data, status = 200) { return { ok: status < 400, status, json: async () => structuredClone(data) }; }
 
-function server({ contexts = [globalScope], roles = [sampleRole], assignments = [], mutationError = null, canManageOrganization = false } = {}) {
+function server({ contexts = [globalScope], roles = [sampleRole], assignments = [], catalog = permissionRows, mutationError = null, canManageOrganization = false } = {}) {
     const roleState = structuredClone(roles);
     const assignmentState = structuredClone(assignments);
     const fetch = vi.fn(async (url, options = {}) => {
@@ -46,7 +46,7 @@ function server({ contexts = [globalScope], roles = [sampleRole], assignments = 
         if (method !== 'GET' && mutationError) { return response(mutationError.body, mutationError.status); }
         if (path === endpoints.contexts) { return response({ data: contexts, can_manage_organization: canManageOrganization }); }
         if (path === endpoints.organization) { return response({ data: [], meta: { total: 0 } }); }
-        if (path === endpoints.permissions) { return response({ data: permissionRows }); }
+        if (path === endpoints.permissions) { return response({ data: catalog }); }
         if (path === endpoints.users) { return response({ data: [sampleAssignment.user], total: 1 }); }
         if (path === endpoints.roles && method === 'GET') { return response({ data: roleState, meta: { total: roleState.length } }); }
         if (path.startsWith(endpoints.roles) && ['POST', 'PATCH'].includes(method)) {
@@ -100,6 +100,90 @@ async function newRole(wrapper) {
 }
 
 describe('scoped role administration', () => {
+    it('groups business permissions and explains workspace setup without selecting or saving grants automatically', async () => {
+        const catalog = [...permissionRows,
+            { key: 'organization.access', area: 'organization', name_en: 'Use a workspace', name_lo: 'ພື້ນທີ່ເຮັດວຽກ', available: true, delegatable: true },
+            { key: 'documents.metadata.view', area: 'document-security', name_en: 'View details', name_lo: 'ລາຍລະອຽດ', available: true, delegatable: true },
+            { key: 'incoming.register', area: 'documents', name_en: 'Register incoming correspondence', name_lo: 'ລົງທະບຽນໜັງສືເຂົ້າ', available: true, delegatable: true },
+            { key: 'controlled.register', area: 'documents', name_en: 'Register controlled documents', name_lo: 'ລົງທະບຽນເອກະສານຄວບຄຸມ', available: true, delegatable: true },
+            { key: 'reports.view', area: 'reports', name_en: 'View reports', name_lo: 'ເບິ່ງລາຍງານ', available: true, delegatable: true },
+            { key: 'numbering.issue', area: 'numbering', name_en: 'Issue numbers (planned)', name_lo: 'ອອກເລກ (ຢູ່ໃນແຜນ)', available: true, delegatable: true },
+            { key: 'security.audit.view', area: 'document-security', name_en: 'View security events', name_lo: 'ເບິ່ງເຫດການຄວາມປອດໄພ', available: true, delegatable: true },
+            { key: 'future.review', area: 'future', name_en: 'Future review capability (planned)', name_lo: 'ຄວາມສາມາດໃນອະນາຄົດ (ຢູ່ໃນແຜນ)', available: false, delegatable: false },
+        ];
+        const fetch = server({ roles: [{ ...sampleRole, code: 'DOCUMENT_CONTROLLER', name_en: 'Document Controller', permission_keys: [] }], catalog });
+        const wrapper = await render();
+        const list = wrapper.get('section[aria-labelledby="roles-heading"]');
+        expect(list.text()).toContain('Document Controller');
+        expect(list.text()).toContain('Authorization scope');
+        expect(list.text()).toContain('Group / Global');
+        expect(list.text()).toContain('Workspace setup needed');
+        await button(wrapper, 'Edit').trigger('click');
+        expect(wrapper.get('form [role="status"]').text()).toContain('cannot be selected during user creation');
+        expect(wrapper.findAll('form input[value]').every(input => !input.element.checked)).toBe(true);
+        const workspaceGroup = wrapper.get('[data-permission-group="workspace"]');
+        expect(workspaceGroup.attributes('open')).toBeDefined();
+        expect(workspaceGroup.text()).not.toContain('organization.access');
+        expect(wrapper.get('[data-permission-group="correspondence"]').attributes('open')).toBeUndefined();
+        expect(wrapper.get('[data-permission-group="controlled"]').text()).toContain('Controlled Documents');
+        expect(wrapper.get('[data-permission-group="reports"]').text()).toContain('Search & Reports');
+        expect(wrapper.get('[data-permission-group="security"]').text()).toContain('Security');
+        expect(wrapper.get('[data-permission-group="document-tools"]').text()).not.toContain('planned');
+        const advanced = wrapper.get('[data-permission-advanced]');
+        expect(advanced.attributes('open')).toBeUndefined();
+        expect(advanced.text()).toContain('organization.access');
+        expect(advanced.get('input[value="documents.register"]').element.disabled).toBe(true);
+        expect(advanced.text()).not.toContain('Register documents (planned)');
+        expect(advanced.text()).toContain('Future review capability (planned)');
+        expect(advanced.get('input[value="future.review"]').element.disabled).toBe(true);
+        expect(fetch.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
+        await wrapper.get('input[value="organization.access"]').setValue(true);
+        await wrapper.get('input[value="documents.metadata.view"]').setValue(true);
+        expect(workspaceGroup.text()).toContain('2 of 2 selected');
+        expect(wrapper.get('form [role="status"]').text()).toContain('Workspace permissions are configured');
+        await wrapper.get('form').trigger('submit'); await flushPromises();
+        const updates = fetch.mock.calls.filter(([, options]) => options.method === 'PATCH');
+        expect(updates).toHaveLength(1);
+        expect(JSON.parse(updates[0][1].body)).toMatchObject({ scope_type: 'global', permission_keys: ['organization.access', 'documents.metadata.view'] });
+        expect(JSON.parse(updates[0][1].body)).not.toHaveProperty('code');
+    });
+
+    it('explains the owning scope of shared roles without enabling edits or moving ownership', async () => {
+        const siteScope = { ...globalScope, scope_key: 'site:10', scope_type: 'site', company_id: 7, site_id: 10, company: { name_en: 'Example Company', name_lo: 'ຕົວຢ່າງ' }, site: { name_en: 'Example Site', name_lo: 'ສະຖານທີ່' } };
+        const fetch = server({ contexts: [siteScope], roles: [{ ...sampleRole, editable: false }] });
+        const wrapper = await render();
+        await button(wrapper, 'Details').trigger('click');
+        const editor = wrapper.get('form');
+        expect(editor.text()).toContain('Owned by: Group / Global');
+        expect(editor.text()).toContain('Select that scope above');
+        expect(editor.text()).not.toContain('Save changes');
+        expect(editor.get('input[value="roles.view"]').element.disabled).toBe(true);
+        expect(control(wrapper, 'Authorization scope').element.value).toBe('site:10');
+        expect(fetch.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
+    });
+
+    it('translates business groups, report headings and advanced details into Lao', async () => {
+        server({ catalog: [...permissionRows, { key: 'reports.view', area: 'reports', name_en: 'View reports', name_lo: 'ເບິ່ງລາຍງານ', available: true, delegatable: true }] });
+        const wrapper = await render();
+        await button(wrapper, 'Edit').trigger('click');
+        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        expect(wrapper.get('[data-permission-group="reports"]').text()).toContain('ຄົ້ນຫາ ແລະ ລາຍງານ');
+        expect(wrapper.get('[data-permission-advanced] summary').text()).toContain('ຂັ້ນສູງ');
+        expect(wrapper.get('form').text()).toContain('ບັນທຶກການປ່ຽນແປງ');
+        expect(wrapper.text()).not.toContain('rbacArea-');
+        expect(wrapper.text()).not.toContain('rbacGroup-');
+    });
+
+    it.each([
+        [{ active: false }, 'inactive and cannot be selected'],
+        [{ code: 'SECURITY_ADMINISTRATOR' }, 'excluded from simplified user onboarding'],
+    ])('explains onboarding exclusions for protected or inactive roles (%j)', async (changes, explanation) => {
+        server({ roles: [{ ...sampleRole, ...changes }] });
+        const wrapper = await render();
+        await button(wrapper, 'Edit').trigger('click');
+        expect(wrapper.get('form [role="status"]').text()).toContain(explanation);
+    });
+
     it('shows System Administrator in English and Lao for roles and assignments', async () => {
         const systemRole = { ...sampleRole, code: 'SECURITY_ADMINISTRATOR', name_en: 'System Administrator', name_lo: 'ຜູ້ບໍລິຫານລະບົບ' };
         server({ roles: [systemRole], assignments: [{ ...sampleAssignment, role: systemRole }] });
@@ -216,7 +300,7 @@ describe('scoped role administration', () => {
         const code = wrapper.get('input[name="role-code"]');
         expect(document.activeElement).toBe(code.element);
 
-        button(wrapper, 'Save role').element.focus();
+        button(wrapper, 'Save changes').element.focus();
         await wrapper.get('form').trigger('submit');
         await flushPromises();
 
@@ -235,7 +319,7 @@ describe('scoped role administration', () => {
         server({ mutationError: { status: 422, body: { errors: { name_lo: ['rbacValidation'] } } } });
         const wrapper = await render();
         await newRole(wrapper);
-        button(wrapper, 'Save role').element.focus();
+        button(wrapper, 'Save changes').element.focus();
         await wrapper.get('form').trigger('submit');
         await flushPromises();
         const field = wrapper.get('input[name="role-name-lo"]');
@@ -257,7 +341,7 @@ describe('scoped role administration', () => {
         expect(document.activeElement).toBe(wrapper.get('form h3').element);
         expect(wrapper.get('input[name="role-name-en"]').element.readOnly).toBe(true);
         expect(wrapper.get('input[value="roles.view"]').element.disabled).toBe(true);
-        expect(wrapper.text()).not.toContain('Save role');
+        expect(wrapper.text()).not.toContain('Save changes');
         expect(wrapper.text()).toContain('This shared definition can be edited only');
     });
 

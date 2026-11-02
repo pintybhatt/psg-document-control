@@ -75,9 +75,9 @@ const label = record => record?.[language.value === 'lo' ? 'name_lo' : 'name_en'
 const scopeLabel = scope => scope.scope_type === 'global' ? t('rbacGlobal')
     : `${t(scope.scope_type === 'company' ? 'company' : 'site')}: ${label(scope.company)}${scope.site ? ` / ${label(scope.site)}` : ''}`;
 const scopeOptions = computed(() => contexts.value.map(scope => ({ value: scope.scope_key, label: scopeLabel(scope) })));
-const roleRows = computed(() => roles.value.map(role => ({ ...role, display_name: label(role), status: t(role.active ? 'rbacActive' : 'rbacInactive') })));
+const roleRows = computed(() => roles.value.map(role => ({ ...role, display_name: label(role), display_scope: roleScopeLabel(role), status: t(role.active ? 'rbacActive' : 'rbacInactive') })));
 const roleColumns = computed(() => [
-    { key: 'code', label: t('rbacCode'), type: 'reference' }, { key: 'display_name', label: t('rbacRole') },
+    { key: 'display_name', label: t('rbacRole') }, { key: 'display_scope', label: t('rbacScope') },
     { key: 'status', label: t('uiStatus') }, { key: 'actions', label: t('rbacActions') },
 ]);
 const assignmentRows = computed(() => assignments.value.map(assignment => ({ ...assignment, user_name: assignment.user.name, role_name: label(assignment.role), status: t(assignment.active ? 'rbacActive' : 'rbacInactive') })));
@@ -85,10 +85,49 @@ const assignmentColumns = computed(() => [
     { key: 'user_name', label: t('rbacAccount') }, { key: 'role_name', label: t('rbacRole') },
     { key: 'scope_key', label: t('rbacScope') }, { key: 'status', label: t('uiStatus') }, { key: 'actions', label: t('rbacActions') },
 ]);
-const permissionGroups = computed(() => Object.entries(permissions.value.reduce((groups, permission) => {
-    (groups[permission.area] ??= []).push(permission);
-    return groups;
-}, {})));
+const businessGroups = ['workspace', 'correspondence', 'controlled', 'document-tools', 'reports', 'administration', 'security'];
+const permissionGroups = computed(() => businessGroups.map(key => ({ key, permissions: permissions.value.filter(permission => permissionGroup(permission) === key) })).filter(group => group.permissions.length));
+const advancedPermissions = computed(() => permissions.value.filter(permission => permissionGroup(permission) === null));
+const workspaceNotice = computed(() => {
+    if (roleForm.code === 'SECURITY_ADMINISTRATOR') { return 'rbacWorkspaceAdministrator'; }
+    if (!roleForm.active) { return 'rbacWorkspaceInactive'; }
+    if (missingWorkspacePermissions(roleForm)) { return 'rbacWorkspaceMissing'; }
+    if (!roleForm.permission_keys.every(key => permissions.value.some(permission => permission.key === key && permission.available && permission.delegatable))) { return 'rbacWorkspaceUnavailable'; }
+    return 'rbacWorkspaceConfigured';
+});
+
+function permissionGroup(permission) {
+    if (!permission.available) { return null; }
+    const key = permission.key;
+    if (['organization.access', 'documents.metadata.view', 'documents.content.preview', 'documents.attachments.download'].includes(key)) { return 'workspace'; }
+    if (/^(incoming|outgoing)\./.test(key)) { return 'correspondence'; }
+    if (key.startsWith('controlled.')) { return 'controlled'; }
+    if (['documents.attachments.manage', 'documents.custody.manage', 'numbering.issue', 'storage-locations.manage'].includes(key)) { return 'document-tools'; }
+    if (key === 'documents.audit.view' || key.startsWith('reports.')) { return 'reports'; }
+    if (/^(users|roles|assignments|memberships|master-data|numbering)\./.test(key)) { return 'administration'; }
+    if (key === 'security.audit.view' || key.startsWith('clearances.') || key.startsWith('document-access.')) { return 'security'; }
+    return null;
+}
+
+function permissionLabel(permission) {
+    if (permission.key === 'organization.access') { return t('rbacWorkspaceAccessLabel'); }
+    if (permission.key === 'documents.metadata.view') { return t('rbacWorkspaceDocumentsLabel'); }
+    const implementedOrLegacy = permission.available || ['documents.view', 'documents.register', 'documents.control'].includes(permission.key);
+    return implementedOrLegacy ? label(permission).replace(/\s*\((planned|ຢູ່ໃນແຜນ)\)/g, '') : label(permission);
+}
+
+function missingWorkspacePermissions(role) {
+    return ['organization.access', 'documents.metadata.view'].some(key => !role.permission_keys.includes(key) || !permissions.value.some(permission => permission.key === key && permission.available));
+}
+
+function roleScopeLabel(role) {
+    const owner = contexts.value.find(scope => scope.scope_key === role?.scope_key);
+    if (owner) { return scopeLabel(owner); }
+    if (role?.scope_key === 'global') { return t('rbacGlobal'); }
+    return role?.scope_key?.startsWith('company:') ? `${t('company')}: ${label(selected.value?.company)}` : t('rbacSiteRoleScope');
+}
+
+function selectedPermissions(group) { return group.filter(permission => roleForm.permission_keys.includes(permission.key)).length; }
 const candidateUsers = computed(() => [{ value: '', label: t('uiChoose') }, ...users.value.map(user => ({ value: user.id, label: `${user.name} (${user.email})` }))]);
 const candidateRoles = computed(() => [{ value: '', label: t('uiChoose') }, ...roleOptions.value.filter(role => role.assignable !== false && role.active && role.permission_keys.every(key => permissions.value.some(permission => permission.key === key && permission.available && permission.delegatable))).map(role => ({ value: role.id, label: `${label(role)} (${role.code})` }))]);
 const confirmationMessage = computed(() => {
@@ -302,13 +341,15 @@ onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
             <section v-show="section === 'roles'" v-if="can('roles.view')" class="flex flex-col gap-4" aria-labelledby="roles-heading">
                 <div class="flex flex-wrap items-center justify-between gap-3"><h3 id="roles-heading" class="font-semibold">{{ t('rbacRoles') }}</h3><UiButton v-if="can('roles.manage')" :disabled="loading || saving" @click="showRole()">{{ t('rbacCreateRole') }}</UiButton></div>
                 <DataTable v-model:page="rolePage" :rows="roleRows" :columns="roleColumns" :caption="t('rbacRoles')" :loading="loading" server-side :total="roleTotal" :per-page="10" @change="changeRolePage">
+                    <template #cell-display_name="{ row }"><span class="font-semibold">{{ row.display_name }}</span><span v-if="row.code !== 'SECURITY_ADMINISTRATOR' && missingWorkspacePermissions(row)" class="block text-xs text-amber-800">{{ t('rbacWorkspaceSetupNeeded') }}</span></template>
                     <template #cell-actions="{ row }"><UiButton variant="secondary" :disabled="saving" @click="showRole(row)">{{ t(row.editable ? 'rbacEdit' : 'rbacDetails') }}</UiButton></template>
                 </DataTable>
             </section>
 
             <form v-show="section === 'roles'" v-if="editorOpen" ref="roleEditor" novalidate class="flex flex-col gap-5 rounded-xl border border-slate-200 bg-white p-6" @submit.prevent="saveRole">
                 <h3 tabindex="-1" class="font-semibold">{{ t(editingRole ? 'rbacRoleDetails' : 'rbacCreateRole') }}</h3>
-                <p v-if="readOnly || securityReadOnly" class="text-sm text-slate-500">{{ t(readOnly ? 'rbacInheritedReadOnly' : 'rbacSelfRoleReadOnly') }}</p>
+                <p v-if="editingRole" class="text-sm font-medium">{{ label(editingRole) }} · {{ t('rbacRoleOwner', { scope: roleScopeLabel(editingRole) }) }}</p>
+                <p v-if="readOnly || securityReadOnly" class="text-sm text-slate-500">{{ t(readOnly ? 'rbacInheritedReadOnly' : 'rbacSelfRoleReadOnly', { scope: roleScopeLabel(editingRole) }) }}</p>
                 <div class="grid gap-5 sm:grid-cols-2">
                     <TextInput v-model="roleForm.code" name="role-code" :label="t('rbacCode')" :helper="t('rbacCodeHelp')" :readonly="!!editingRole || readOnly" :error-key="fieldError('code')" required maxlength="64" />
                     <TextInput v-model="roleForm.name_en" name="role-name-en" :label="t('rbacNameEn')" :readonly="readOnly" :error-key="fieldError('name_en')" required lang="en" maxlength="255" />
@@ -316,15 +357,34 @@ onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
                     <CheckboxInput v-model="roleForm.active" :label="t('rbacActive')" :disabled="securityReadOnly" />
                 </div>
                 <TextareaInput v-model="roleForm.description" :label="t('rbacDescription')" :readonly="readOnly" maxlength="2000" />
-                <fieldset v-for="[area, group] in permissionGroups" :key="area" class="rounded-lg border border-slate-200 p-4" :disabled="securityReadOnly">
-                    <legend class="px-2 text-sm font-semibold">{{ t(`rbacArea-${area}`) }}</legend>
-                    <div class="grid gap-4 sm:grid-cols-2">
-                        <label v-for="permission in group" :key="permission.key" class="flex items-start gap-3 text-sm">
-                            <input v-model="roleForm.permission_keys" type="checkbox" :value="permission.key" :disabled="securityReadOnly || !permission.available || !permission.delegatable" class="mt-1 size-4 shrink-0 accent-teal-700" />
-                            <span class="wrap-anywhere">{{ label(permission) }}<span class="block text-xs text-slate-500">{{ permission.key }} {{ !permission.available ? `· ${t('planned')}` : '' }}</span></span>
+                <p class="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm leading-7" role="status">{{ t(workspaceNotice) }}</p>
+                <p class="text-sm text-slate-600">{{ t('rbacPermissionHelp') }}</p>
+                <details v-for="group in permissionGroups" :key="group.key" :open="group.key === 'workspace'" :data-permission-group="group.key" class="rounded-lg border border-slate-200 p-4">
+                    <summary class="cursor-pointer text-sm font-semibold">{{ t(`rbacGroup-${group.key}`) }} <span class="font-normal text-slate-500">· {{ t('rbacPermissionCount', { selected: selectedPermissions(group.permissions), total: group.permissions.length }) }}</span></summary>
+                    <fieldset class="mt-4 grid gap-4 sm:grid-cols-2" :disabled="securityReadOnly">
+                        <legend class="sr-only">{{ t(`rbacGroup-${group.key}`) }}</legend>
+                        <label v-for="permission in group.permissions" :key="permission.key" class="flex items-start gap-3 text-sm">
+                            <input v-model="roleForm.permission_keys" type="checkbox" :value="permission.key" :disabled="securityReadOnly || !permission.delegatable" class="mt-1 size-4 shrink-0 accent-teal-700" />
+                            <span class="wrap-anywhere">{{ permissionLabel(permission) }}<span v-if="!permission.delegatable" class="block text-xs text-slate-500">{{ t('rbacPermissionNotDelegatable') }}</span></span>
                         </label>
-                    </div>
-                </fieldset>
+                    </fieldset>
+                </details>
+                <details data-permission-advanced class="rounded-lg border border-slate-200 p-4">
+                    <summary class="cursor-pointer text-sm font-semibold">{{ t('rbacPermissionAdvanced') }}</summary>
+                    <p class="mt-3 text-sm text-slate-600">{{ t('rbacPermissionAdvancedHelp') }}</p>
+                    <div class="mt-3 overflow-x-auto"><table class="w-full text-left text-sm">
+                        <caption class="sr-only">{{ t('rbacPermissionAdvanced') }}</caption>
+                        <thead><tr><th class="p-2">{{ t('rbacPermissionName') }}</th><th class="p-2">{{ t('rbacPermissionCode') }}</th><th class="p-2">{{ t('uiStatus') }}</th></tr></thead>
+                        <tbody><tr v-for="permission in permissions" :key="permission.key" class="border-t border-slate-100"><td class="p-2">{{ permissionLabel(permission) }}</td><td class="p-2 font-mono">{{ permission.key }}</td><td class="p-2">{{ t(!permission.available ? 'rbacPermissionUnavailable' : roleForm.permission_keys.includes(permission.key) ? 'rbacPermissionSelected' : 'rbacPermissionNotSelected') }}</td></tr></tbody>
+                    </table></div>
+                    <fieldset v-if="advancedPermissions.length" class="mt-4 flex flex-col gap-4" :disabled="securityReadOnly">
+                        <legend class="mb-3 text-sm font-semibold">{{ t('rbacPermissionOther') }}</legend>
+                        <label v-for="permission in advancedPermissions" :key="permission.key" class="flex items-start gap-3 text-sm">
+                            <input v-model="roleForm.permission_keys" type="checkbox" :value="permission.key" :disabled="securityReadOnly || !permission.available || !permission.delegatable" class="mt-1 size-4 shrink-0 accent-teal-700" />
+                            <span>{{ permissionLabel(permission) }}<span v-if="!permission.available" class="block text-xs text-slate-500">{{ t('rbacPermissionUnavailable') }}</span></span>
+                        </label>
+                    </fieldset>
+                </details>
                 <p v-if="fieldError('permission_keys')" role="alert" class="text-sm text-red-700">{{ t(fieldError('permission_keys')) }}</p>
                 <div class="flex flex-wrap gap-3"><UiButton v-if="can('roles.manage') && !readOnly" type="submit" :loading="saving">{{ t('rbacSaveRole') }}</UiButton><UiButton variant="secondary" :disabled="saving" @click="editorOpen = false">{{ t('uiCancel') }}</UiButton></div>
             </form>
