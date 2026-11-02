@@ -54,6 +54,7 @@ class AuthorizationProgress:
             'OIDC_REF_TYPE_MISMATCH', 'OIDC_VISIBILITY_MISMATCH', 'OIDC_SUBJECT_MISMATCH',
             'OIDC_RUNNER_ENVIRONMENT_MISMATCH', 'OIDC_WORKFLOW_REF_MISMATCH',
             'OIDC_RUN_ID_MISMATCH', 'OIDC_RUN_ATTEMPT_MISMATCH', 'OIDC_OPERATOR_MISMATCH',
+            'OIDC_JOB_WORKFLOW_REF_MISMATCH', 'OIDC_JOB_WORKFLOW_SHA_MISMATCH',
             'OIDC_WORKFLOW_REVISION_INVALID', 'OIDC_CHECK_RUN_ID_INVALID',
         },
         'github_credential': {'GITHUB_CREDENTIAL_INVALID'},
@@ -259,10 +260,17 @@ def verify_oidc(token, request, policy, now=None, progress=None):
         progress.mark('oidc_identity', reason)
         require(claims.get(key) == value, 'Unauthorized GitHub workflow identity.')
     progress.mark('oidc_identity', 'OIDC_OPERATOR_MISMATCH')
-    require('job_workflow_ref' not in claims and claims.get('actor_id') in [str(value) for value in policy['operator_ids']], 'Unauthorized workflow/operator.')
+    require(claims.get('actor_id') in [str(value) for value in policy['operator_ids']], 'Unauthorized operator.')
     progress.mark('oidc_identity', 'OIDC_WORKFLOW_REVISION_INVALID')
     require(re.fullmatch(r'[a-f0-9]{40}', claims.get('sha', '')) and claims.get('workflow_sha') == claims['sha'],
             'Incomplete workflow revision/job identity.')
+    # Optional job claims must identify this same main-only deployment, never another called workflow.
+    if 'job_workflow_ref' in claims:
+        progress.mark('oidc_identity', 'OIDC_JOB_WORKFLOW_REF_MISMATCH')
+        require(claims['job_workflow_ref'] == expected['workflow_ref'], 'Unauthorized job workflow identity.')
+    if 'job_workflow_sha' in claims:
+        progress.mark('oidc_identity', 'OIDC_JOB_WORKFLOW_SHA_MISMATCH')
+        require(claims['job_workflow_sha'] == claims['workflow_sha'], 'Unauthorized job workflow revision.')
     progress.mark('oidc_identity', 'OIDC_CHECK_RUN_ID_INVALID')
     require(re.fullmatch(r'[1-9][0-9]{0,19}', claims.get('check_run_id', '')), 'Incomplete workflow revision/job identity.')
     return claims
