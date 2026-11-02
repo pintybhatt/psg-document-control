@@ -35,7 +35,8 @@ def claims_for(payload):
     return {'iss': auth.ISSUER, 'aud': auth.audience(payload), 'iat': NOW-10, 'nbf': NOW-10, 'exp': NOW+290,
             'repository': auth.REPOSITORY, 'repository_id': '42', 'event_name': 'workflow_dispatch',
             'ref': 'refs/heads/main', 'ref_type': 'branch', 'repository_visibility': 'private',
-            'sub': 'repo:'+auth.REPOSITORY+':environment:uat', 'runner_environment': 'self-hosted',
+            'sub': 'repo:pintybhatt@8923839/psg-document-control@1435463595:environment:uat',
+            'runner_environment': 'self-hosted',
             'workflow_ref': auth.REPOSITORY+'/'+auth.WORKFLOW+'@refs/heads/main', 'workflow_sha': 'd'*40,
             'sha': 'd'*40, 'run_id': str(payload['deployment_run_id']), 'run_attempt': str(payload['deployment_run_attempt']),
             'actor_id': '100', 'check_run_id': '555'}
@@ -77,22 +78,42 @@ class OidcVerificationTests(unittest.TestCase):
         signature = subprocess.check_output(['/usr/bin/openssl', 'dgst', '-sha256', '-sign', str(self.key)], input=content, timeout=10)
         return content.decode()+'.'+base64.urlsafe_b64encode(signature).decode().rstrip('=')
 
-    def verify(self, token, payload=None, jwks=None, progress=None):
+    def verify(self, token, payload=None, jwks=None, progress=None, policy=None):
         with patch.object(auth, 'read_https', return_value=json.dumps({'keys': [self.jwk] if jwks is None else jwks}).encode()) as read:
-            result = auth.verify_oidc(token, request() if payload is None else payload, POLICY, now=NOW, progress=progress)
+            result = auth.verify_oidc(token, request() if payload is None else payload,
+                                      POLICY if policy is None else policy, now=NOW, progress=progress)
         read.assert_called_once_with(auth.ISSUER+'/.well-known/jwks', limit=128*1024)
         return result
 
     def test_signed_request_bound_trusted_workflow_passes_real_openssl_verification(self):
         self.assertEqual(self.verify(self.token())['actor_id'], '100')
 
-    def test_immutable_subject_is_identified_without_accepting_a_different_trust_subject(self):
-        claims = claims_for(request())
-        claims['sub'] = 'repo:pintybhatt@8923839/psg-document-control@1435463595:environment:uat'
-        progress = auth.AuthorizationProgress()
-        with self.assertRaisesRegex(ValueError, 'identity'):
-            self.verify(self.token(claims), progress=progress)
-        self.assertEqual((progress.stage, progress.reason), ('oidc_identity', 'OIDC_SUBJECT_MISMATCH'))
+    def test_exact_immutable_subject_and_verified_github_identity_pass_signed_verification(self):
+        claims = dict(claims_for(request()), repository_id='1435463595', actor_id='8923839',
+                      repository_owner='pintybhatt', repository_owner_id='8923839', environment='uat')
+        policy = dict(POLICY, repository_id=1435463595, operator_ids=[8923839], runner_ids=[21])
+        verified = self.verify(self.token(claims), policy=policy)
+        self.assertEqual(verified['sub'], 'repo:pintybhatt@8923839/psg-document-control@1435463595:environment:uat')
+        self.assertEqual(verified['repository_id'], '1435463595')
+        self.assertEqual(verified['actor_id'], '8923839')
+
+    def test_wrong_subject_owner_repository_environment_and_legacy_format_are_audited_and_refused(self):
+        subjects = [
+            'repo:pintybhatt@8923840/psg-document-control@1435463595:environment:uat',
+            'repo:pintybhatt@8923839/psg-document-control@1435463596:environment:uat',
+            'repo:pintybhatt@8923839/psg-document-control@1435463595:environment:production',
+            'repo:pintybhatt@8923839/psg-document-control@1435463595:environment:UAT',
+            'repo:other-owner@8923839/psg-document-control@1435463595:environment:uat',
+            'repo:pintybhatt@8923839/other-repository@1435463595:environment:uat',
+            'repo:'+auth.REPOSITORY+':environment:uat',
+            'repo:pintybhatt@8923839/psg-document-control@1435463595:ref:refs/heads/main',
+            'repo:pintybhatt@8923839/psg-document-control@1435463595:environment:uat:extra',
+        ]
+        for subject in subjects:
+            progress = auth.AuthorizationProgress()
+            with self.subTest(subject=subject), self.assertRaisesRegex(ValueError, 'identity'):
+                self.verify(self.token(dict(claims_for(request()), sub=subject)), progress=progress)
+            self.assertEqual((progress.stage, progress.reason), ('oidc_identity', 'OIDC_SUBJECT_MISMATCH'))
 
     def test_each_identity_mismatch_has_a_fixed_reason_without_storing_claim_values(self):
         reasons = {'iss': 'OIDC_ISSUER_MISMATCH', 'aud': 'OIDC_AUDIENCE_MISMATCH',
