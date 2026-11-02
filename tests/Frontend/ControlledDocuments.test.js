@@ -14,8 +14,9 @@ enableAutoUnmount(afterEach);
 beforeEach(() => localStorage.clear());
 afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals(); });
 function response(data, status = 200) { return { ok: status < 400, status, json: async () => structuredClone(data) }; }
-function server({ registered = false, released = false, mutationError = null, detailError = null } = {}) {
+function server({ registered = false, released = false, mutationError = null, detailError = null, xppl = false } = {}) {
     let record = structuredClone(draft);
+    if (xppl) { record.xppl_namespaces = [{ id: 4, prefix: 'XPPL-ADM-SOP' }]; }
     if (registered || released) { record.registered_at = '2026-10-26T10:00:00Z'; record.internal_number = 'TEST/CD/2026/000001'; record.lock_version = 2; }
     if (released) { record.status = 'current'; record.current_revision_id = record.authoritative_revision_id = 11; record.revisions[0].status = 'current'; record.revisions[0].released_at = '2026-10-26T10:01:00Z'; record.revisions[0].released_by = 5; record.lock_version = 3; }
     const fetch = vi.fn(async (url, options = {}) => {
@@ -26,7 +27,7 @@ function server({ registered = false, released = false, mutationError = null, de
         if (method === 'GET') { return detailError ? response(detailError.body, detailError.status) : response({ data: record, audits: [{ id: 1, action: 'created', actor_id: 5, created_at: '2026-10-26T10:00:00Z' }], related: [] }); }
         if (mutationError) { return response(mutationError.body, mutationError.status); }
         const body = JSON.parse(options.body);
-        if (path.endsWith('/register')) { record.registered_at = '2026-10-26T10:00:00Z'; record.internal_number = 'TEST/CD/2026/000001'; }
+        if (path.endsWith('/register')) { record.registered_at = '2026-10-26T10:00:00Z'; record.internal_number = body.namespace_id ? 'XPPL-ADM-SOP-0001' : 'TEST/CD/2026/000001'; if (body.namespace_id) { record.revisions[0].full_identifier = 'XPPL-ADM-SOP-0001-R00'; } }
         else if (path.endsWith('/release')) { record.status = 'current'; record.current_revision_id = record.authoritative_revision_id = 11; record.revisions[0].status = 'current'; record.revisions[0].released_at = '2026-10-26T10:01:00Z'; }
         else if (path.endsWith('/revisions')) { record.revisions.push({ ...revision, id: 12, identifier: '01', revision_number: 1, ...body }); }
         else if (path.endsWith('/status')) { record.status = body.status; record.authoritative_revision_id = null; }
@@ -152,4 +153,17 @@ it('opens the existing controlled detail directly from a document search link', 
     } finally {
         window.history.replaceState({}, '', '/');
     }
+});
+
+it('selects an approved XPPL mapping explicitly and displays the full revision identifier', async () => {
+    const fetch = server({ xppl: true }); const wrapper = await render(); await show(wrapper);
+    const label = wrapper.findAll('label').find(item => item.text().trim() === en.numberingSelection);
+    const select = wrapper.get(`#${label.attributes('for')}`);
+    expect(select.element.value).toBe('');
+    await select.setValue(4);
+    await button(wrapper, en['controlledAction-register']).trigger('click');
+    await wrapper.get('#controlled-action-form').trigger('submit'); await flushPromises();
+    const body = JSON.parse(fetch.mock.calls.find(([, options]) => options.method === 'POST')[1].body);
+    expect(body).toMatchObject({ namespace_id: 4, lock_version: 1 });
+    expect(wrapper.get('#controlled-detail-title').text()).toBe('XPPL-ADM-SOP-0001-R00');
 });

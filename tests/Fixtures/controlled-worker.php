@@ -2,6 +2,7 @@
 
 use App\Authorization\DocumentScope;
 use App\Authorization\ManageControlledDocuments;
+use App\Models\ControlledDocument;
 use App\Models\User;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Support\Facades\DB;
@@ -27,7 +28,9 @@ if ($driver === 'sqlite') {
     ]]);
 }
 $actor = User::query()->findOrFail((int) $actorId);
-$scope = new DocumentScope((int) $companyId, (int) $siteId);
+$departmentId = ControlledDocument::query()->findOrFail((int) $recordId)->profile->department_id;
+$scope = new DocumentScope((int) $companyId, (int) $siteId, $departmentId);
+$namespaceId = isset($argv[13]) && $argv[13] !== '' ? (int) $argv[13] : null;
 file_put_contents($barrier.'.ready-'.$worker, 'ready');
 $deadline = microtime(true) + 20;
 while (! is_file($barrier.'.go')) {
@@ -37,9 +40,12 @@ while (! is_file($barrier.'.go')) {
     usleep(10000);
 }
 try {
-    $record = DB::transaction(function () use ($actor, $scope, $recordId, $operation, $version, $revisionId, $rollback) {
+    $record = DB::transaction(function () use ($actor, $scope, $recordId, $operation, $version, $revisionId, $rollback, $namespaceId) {
         $manager = app(ManageControlledDocuments::class);
         $data = ['lock_version' => (int) $version];
+        if ($operation === 'register' && $namespaceId !== null) {
+            $data['namespace_id'] = $namespaceId;
+        }
         $record = match ($operation) {
             'register' => $manager->register($actor, $scope, $recordId, $data),
             'revise' => $manager->revise($actor, $scope, $recordId, $data + ['revision_reason' => 'Concurrent review', 'change_description' => 'Updated procedure']),

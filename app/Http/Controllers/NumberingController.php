@@ -5,8 +5,12 @@ namespace App\Http\Controllers;
 use App\Authorization\ManageNumbering;
 use App\Authorization\NumberingFormat;
 use App\Authorization\NumberingResetPolicy;
+use App\Authorization\XpplNumbering;
 use App\Http\Requests\NumberingRequest;
 use App\Http\Resources\NumberingSeriesResource;
+use App\Models\AuthorizationScope;
+use App\Models\Department;
+use App\Models\DocumentType;
 use App\Models\NumberingSeries;
 use App\Models\RegisterConfiguration;
 use Illuminate\Http\JsonResponse;
@@ -16,6 +20,34 @@ use Illuminate\Validation\ValidationException;
 
 class NumberingController extends Controller
 {
+    public function xpplOptions(NumberingRequest $request): JsonResponse
+    {
+        $scope = $request->scopeContext();
+        abort_unless($scope->scope_type === 'company', 422, 'numberingXpplCompany');
+        $scopes = AuthorizationScope::query()->where('company_id', $scope->company_id)->where('scope_type', 'site')->select('id');
+
+        return response()->json([
+            'departments' => Department::query()->where('company_id', $scope->company_id)->where('active', true)->orderBy('id')->get(['id', 'site_id', 'code', 'name_en', 'name_lo']),
+            'types' => DocumentType::query()->whereIn('scope_id', $scopes)->where('active', true)->orderBy('id')->get(['id', 'scope_id', 'code', 'name_en', 'name_lo']),
+            'series' => NumberingSeries::query()->whereIn('scope_id', $scopes)->with('scope.site', 'register')->orderBy('id')->get()->map(fn (NumberingSeries $series): array => [
+                'id' => $series->id, 'scope_id' => $series->scope_id, 'site_id' => $series->scope->site_id, 'site_name_en' => $series->scope->site?->name_en, 'site_name_lo' => $series->scope->site?->name_lo, 'register' => $series->register->register_key, 'purpose' => $series->purpose]),
+            'mappings' => DB::table('xppl_numbering_mappings as m')->join('xppl_numbering_namespaces as n', 'n.id', '=', 'm.namespace_id')->where('n.company_id', $scope->company_id)
+                ->get(['n.prefix', 'm.series_id', 'm.department_id', 'm.type_id', 'm.confirmed_by', 'm.created_at']),
+            'history' => DB::table('xppl_numbering_counters as c')->join('xppl_numbering_namespaces as n', 'n.id', '=', 'c.namespace_id')->where('n.company_id', $scope->company_id)
+                ->get(['n.prefix', 'n.format', 'c.period', 'c.baseline', 'c.value', 'c.confirmed_by', 'c.confirmed_at']),
+        ]);
+    }
+
+    public function xpplReview(NumberingRequest $request, XpplNumbering $manager): JsonResponse
+    {
+        return response()->json($manager->review($request->user(), $request->scopeContext(), $request->validated()));
+    }
+
+    public function xpplConfirm(NumberingRequest $request, XpplNumbering $manager): JsonResponse
+    {
+        return response()->json($manager->review($request->user(), $request->scopeContext(), $request->validated(), true));
+    }
+
     public function index(NumberingRequest $request): AnonymousResourceCollection
     {
         return NumberingSeriesResource::collection(NumberingSeries::query()->where('scope_id', $request->scopeContext()->id)

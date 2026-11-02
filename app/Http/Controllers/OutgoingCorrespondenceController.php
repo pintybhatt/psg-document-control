@@ -97,6 +97,6 @@ class OutgoingCorrespondenceController extends Controller
 
     public function register(OutgoingCorrespondenceRequest $request, string $record, ManageOutgoingCorrespondence $outgoing): OutgoingCorrespondenceResource
     {
-        return new OutgoingCorrespondenceResource($outgoing->register($request->user(), $request->documentScope(), $record));
+        return new OutgoingCorrespondenceResource($outgoing->register($request->user(), $request->documentScope(), $record, $request->filled('namespace_id') ? $request->integer('namespace_id') : null));
     }
 }

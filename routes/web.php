@@ -114,6 +114,9 @@ Route::middleware(['auth:web', EnsureActiveUserSession::class])->group(function 
         Route::post('incoming-correspondence/{record}/register', [IncomingCorrespondenceController::class, 'register'])->name('incoming.register');
         Route::get('incoming-correspondence/{record}/operation-options', [IncomingOperationController::class, 'options'])->name('incoming.operation-options');
         Route::post('incoming-correspondence/{record}/operations', [IncomingOperationController::class, 'operate'])->name('incoming.operations');
+        Route::get('numbering-series/xppl/options', [NumberingController::class, 'xpplOptions'])->name('numbering.xppl-options');
+        Route::post('numbering-series/xppl/review', [NumberingController::class, 'xpplReview'])->name('numbering.xppl-review');
+        Route::post('numbering-series/xppl/confirm', [NumberingController::class, 'xpplConfirm'])->name('numbering.xppl-confirm');
         Route::get('numbering-series', [NumberingController::class, 'index'])->name('numbering.index');
         Route::get('numbering-series/registers', [NumberingController::class, 'registers'])->name('numbering.registers');
         Route::post('numbering-series/preview', [NumberingController::class, 'preview'])->name('numbering.preview');

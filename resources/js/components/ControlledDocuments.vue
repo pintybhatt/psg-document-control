@@ -20,6 +20,8 @@ const request = createJsonClient(props.csrfToken);
 const { items, notify, dismiss } = useNotifications();
 const rows = ref([]), types = ref([]), people = ref([]), total = ref(0), page = ref(1);
 const search = ref(''), status = ref(''), typeFilter = ref('');
+const namespaceId = ref('');
+const namespaceOptions = computed(() => [{ value: '', label: t('numberingLegacy') }, ...(detail.value?.xppl_namespaces ?? []).map(item => ({ value: item.id, label: item.prefix }))]);
 const detail = ref(null), audits = ref([]), related = ref([]), editing = ref(false), action = ref('');
 const loading = ref(false), saving = ref(false), error = ref(''), fields = ref({});
 const replacements = ref([]), replacementSearch = ref('');
@@ -44,7 +46,7 @@ const terminalOptions = computed(() => (detail.value?.status === 'current' ? ['o
 const classificationOptions = computed(() => ['normal', 'confidential', 'highly_confidential'].map(value => ({ value, label: t(`confidentiality-${value}`) })));
 const replacementOptions = computed(() => [{ value: '', label: t('uiChoose') }, ...replacements.value.filter(item => item.id !== detail.value?.id).map(item => ({ value: item.id, label: item.document_code }))]);
 const columns = computed(() => [{ key: 'document_code', label: t('controlled-document_code') }, { key: 'title', label: t('controlledTitleLabel') }, { key: 'revision', label: t('controlledRevision') }, { key: 'status', label: t('uiStatus') }, { key: 'actions', label: t('rbacActions') }]);
-const displayRows = computed(() => rows.value.map(item => { const revision = item.revisions.find(revision => revision.id === item.authoritative_revision_id) ?? item.revisions.at(-1); return { ...item, title: label(revision?.title_en ? { name_en: revision.title_en, name_lo: revision.title_lo } : null), revision: revision?.identifier ?? '—' }; }));
+const displayRows = computed(() => rows.value.map(item => { const revision = item.revisions.find(revision => revision.id === item.authoritative_revision_id) ?? item.revisions.at(-1); return { ...item, title: label(revision?.title_en ? { name_en: revision.title_en, name_lo: revision.title_lo } : null), display_identifier: revision?.full_identifier || item.document_code, revision: revision?.identifier ?? '—' }; }));
 function scopeData() { return { company_id: props.scope.company_id, site_id: props.scope.site_id, department_id: props.scope.department_id }; }
 function url(path = '', extra = {}) { return `${props.endpoint}${path}?${new URLSearchParams(Object.entries({ ...scopeData(), ...extra }).filter(([, value]) => value != null && value !== ''))}`; }
 function fail(failure) {
@@ -119,12 +121,14 @@ async function findReplacements() {
 async function submitAction() {
     if (saving.value || !detail.value) { return; }
     const body = { lock_version: detail.value.lock_version };
+    if (action.value === 'register' && namespaceId.value) { body.namespace_id = Number(namespaceId.value); }
     if (action.value === 'revisions') { Object.assign(body, { revision_reason: actionForm.revision_reason, change_description: actionForm.change_description }); }
     if (action.value === 'release') { Object.assign(body, { revision_id: draft.value.id, reason: actionForm.reason }); }
     if (action.value === 'status') { Object.assign(body, { status: actionForm.status, reason: actionForm.reason }); if (actionForm.status === 'superseded') { body.replaced_by_id = actionForm.replaced_by_id; } }
     await mutate(`/${detail.value.id}/${action.value}`, body);
 }
 watch(() => props.scope.key, reset, { immediate: true });
+watch(() => detail.value?.id, () => { namespaceId.value = ''; });
 onBeforeUnmount(() => controller?.abort());
 </script>
 
@@ -141,7 +145,7 @@ onBeforeUnmount(() => controller?.abort());
                 <UiButton type="submit" variant="secondary" :disabled="loading">{{ t('incomingApplyFilters') }}</UiButton>
             </form>
             <DataTable v-model:page="page" :rows="displayRows" :columns="columns" :caption="t('controlledTitle')" :loading="loading" :error="error" server-side :total="total" :per-page="10" @change="load()">
-                <template #cell-document_code="{ row }"><button type="button" :disabled="loading" class="text-left font-semibold text-teal-800 hover:underline" @click="show(row)">{{ row.document_code }}</button><span class="block font-mono text-xs text-slate-500">{{ row.internal_number || '—' }}</span></template>
+                <template #cell-document_code="{ row }"><button type="button" :disabled="loading" class="text-left font-semibold text-teal-800 hover:underline" @click="show(row)">{{ row.display_identifier }}</button><span class="block font-mono text-xs text-slate-500">{{ row.internal_number || '—' }}</span></template>
                 <template #cell-status="{ row }"><StatusBadge :status="row.status" :label="t(`controlledStatus-${row.status}`)" /></template>
                 <template #cell-actions="{ row }"><UiButton variant="secondary" :disabled="loading" @click="show(row)">{{ t('rbacDetails') }}</UiButton></template>
             </DataTable>
@@ -162,15 +166,16 @@ onBeforeUnmount(() => controller?.abort());
             <div class="flex gap-3"><UiButton type="submit" :loading="saving">{{ t('controlledSave') }}</UiButton><UiButton variant="secondary" :disabled="saving" @click="editing = false">{{ t('uiCancel') }}</UiButton></div>
         </form>
         <section v-else-if="detail" class="flex flex-col gap-5 rounded-2xl border border-slate-200 bg-white p-5" aria-labelledby="controlled-detail-title">
-            <div class="flex flex-wrap items-center justify-between gap-3"><h2 id="controlled-detail-title" tabindex="-1" class="text-lg font-semibold">{{ detail.document_code }}</h2><StatusBadge :status="detail.status" :label="t(`controlledStatus-${detail.status}`)" /></div>
+            <div class="flex flex-wrap items-center justify-between gap-3"><h2 id="controlled-detail-title" tabindex="-1" class="text-lg font-semibold">{{ authoritative?.full_identifier || draft?.full_identifier || detail.document_code }}</h2><StatusBadge :status="detail.status" :label="t(`controlledStatus-${detail.status}`)" /></div>
             <dl class="grid gap-4 md:grid-cols-2">
                 <div><dt class="text-sm text-slate-600">{{ t('controlledNumber') }}</dt><dd class="font-mono">{{ detail.internal_number || '—' }}</dd></div>
                 <div><dt class="text-sm text-slate-600">{{ t('controlledType') }}</dt><dd>{{ label(detail.category) }} / {{ label(detail.type) }}</dd></div>
                 <div><dt class="text-sm text-slate-600">{{ t('outgoingClassification') }}</dt><dd>{{ t(`confidentiality-${detail.classification}`) }}</dd></div>
-                <div><dt class="text-sm text-slate-600">{{ t('controlledAuthoritative') }}</dt><dd class="font-semibold">{{ authoritative ? `${authoritative.identifier} · ${language === 'lo' ? authoritative.title_lo || authoritative.title_en : authoritative.title_en}` : t('controlledNoAuthority') }}</dd></div>
+                <div><dt class="text-sm text-slate-600">{{ t('controlledAuthoritative') }}</dt><dd class="font-semibold">{{ authoritative ? `${authoritative.full_identifier || authoritative.identifier} · ${language === 'lo' ? authoritative.title_lo || authoritative.title_en : authoritative.title_en}` : t('controlledNoAuthority') }}</dd></div>
             </dl>
             <div v-if="!action" class="flex flex-wrap gap-3">
                 <UiButton v-if="draft && editable && can('controlled.drafts.manage')" variant="secondary" :disabled="saving || loading" @click="edit()">{{ t('controlledEdit') }}</UiButton>
+                <SelectInput v-if="!detail.registered_at && detail.xppl_namespaces?.length" v-model="namespaceId" :label="t('numberingSelection')" :options="namespaceOptions" :disabled="saving || loading" />
                 <UiButton v-if="!detail.registered_at && canRegister" :disabled="saving || loading" @click="beginAction('register')">{{ t('controlledAction-register') }}</UiButton>
                 <UiButton v-if="draft && editable && detail.registered_at && can('controlled.release')" :disabled="saving || loading" @click="beginAction('release')">{{ t('controlledAction-release') }}</UiButton>
                 <UiButton v-if="!draft && detail.status === 'current' && can('controlled.drafts.manage')" variant="secondary" :disabled="saving || loading" @click="beginAction('revisions')">{{ t('controlledAction-revisions') }}</UiButton>
@@ -190,7 +195,7 @@ onBeforeUnmount(() => controller?.abort());
             <DocumentStorage v-if="detail.storage_url" :key="detail.id" :endpoint="detail.storage_url" :scope="scope" :csrf-token="csrfToken" :revisions="detail.revisions" :authoritative-revision="detail.authoritative_revision_id" @failure="fail" />
             <h3 class="font-semibold">{{ t('controlledHistory') }}</h3>
             <details v-for="revision in detail.revisions.toReversed()" :key="revision.id" :open="revision.id === detail.authoritative_revision_id || (!authoritative && revision.status === 'draft')" class="rounded-xl border border-slate-200 p-4">
-                <summary class="cursor-pointer font-semibold">{{ t('controlledRevision') }} {{ revision.identifier }} · {{ t(`controlledStatus-${revision.status}`) }} · {{ language === 'lo' ? revision.title_lo || revision.title_en : revision.title_en }}</summary>
+                <summary class="cursor-pointer font-semibold">{{ revision.full_identifier || `${t('controlledRevision')} ${revision.identifier}` }} · {{ t(`controlledStatus-${revision.status}`) }} · {{ language === 'lo' ? revision.title_lo || revision.title_en : revision.title_en }}</summary>
                 <dl class="mt-4 grid gap-4 md:grid-cols-2"><div v-for="field in detailFields" :key="field"><dt class="text-sm text-slate-600">{{ t(`controlled-${field}`) }}</dt><dd class="whitespace-pre-wrap wrap-anywhere">{{ field.endsWith('_date') ? formatDate(revision[field]) : revision[field] || '—' }}</dd></div>
                     <template v-if="revision.released_at"><div><dt class="text-sm text-slate-600">{{ t('controlledReleased') }}</dt><dd>{{ formatDateTime(revision.released_at) }} · {{ t('controlledActor') }} {{ revision.released_by }}</dd></div><div><dt class="text-sm text-slate-600">{{ t('controlledReason') }}</dt><dd class="whitespace-pre-wrap wrap-anywhere">{{ revision.release_reason }}</dd></div></template>
                 </dl>

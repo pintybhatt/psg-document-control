@@ -25,12 +25,14 @@ afterAll(() => {
     }
 });
 function response(data, status = 200) { return { ok: status < 400, status, json: async () => structuredClone(data) }; }
-function server({ rows = [series], error = null, registerRows = registers, history = [configuration] } = {}) {
+function server({ rows = [series], error = null, registerRows = registers, history = [configuration], ambiguous = false } = {}) {
     const state = structuredClone(rows);
     const fetch = vi.fn(async (url, options = {}) => {
         const path = new URL(url, 'http://localhost').pathname;
         const method = options.method ?? 'GET';
         if (path === '/contexts') { return response({ data: [{ ...scope, company: { name_en: 'Example Company', name_lo: 'ບໍລິສັດຕົວຢ່າງ' }, site: { name_en: 'Example Site', name_lo: 'ສະຖານທີ່ຕົວຢ່າງ' } }] }); }
+        if (path.endsWith('/xppl/options')) { return response({ departments: [{ id: 21, site_id: 7, code: 'ADM', name_en: 'Administration', name_lo: 'ບໍລິຫານ' }], types: [{ id: 31, scope_id: 8, code: 'SOP', name_en: 'Procedure', name_lo: 'ລະບຽບ' }], series: [{ id: 1, site_id: 7, scope_id: 8, register: 'controlled', purpose: 'internal_register' }], history: [] }); }
+        if (/\/xppl\/(review|confirm)$/.test(path)) { return response({ prefix: 'XPPL-ADM-SOP', format: 'xppl_controlled', preview: 'XPPL-ADM-SOP-0043', historical_maximum: 42, next_sequence: 43, ambiguous, collision_count: 0, token: 'review-token' }); }
         if (method === 'GET' && path === endpoint) { return response({ data: state, meta: { total: state.length } }); }
         if (method === 'GET' && path.endsWith('/registers')) { return response({ data: registerRows }); }
         if (method === 'GET' && path.endsWith('/history')) { return response({ data: history, total: history.length }); }
@@ -117,6 +119,41 @@ describe('numbering administration', () => {
         const [, options] = fetch.mock.calls.find(([url]) => url.endsWith('/preview'));
         expect(JSON.parse(options.body)).toEqual({ scope_type: 'site', company_id: 4, site_id: 7, series_id: 1 });
         expect(wrapper.text()).toContain('does not reserve a number');
+    });
+
+    it('requires an explicit reviewed baseline confirmation and translates XPPL controls', async () => {
+        const fetch = server();
+        const wrapper = await render({ ...scope, scope_type: 'company', site_id: null, scope_key: 'company:4' });
+        await control(wrapper, 'Site numbering series').setValue('1');
+        await control(wrapper, 'Originating department').setValue('21');
+        await control(wrapper, 'Document type code').setValue('31');
+        await button(wrapper, 'Reconcile and preview').trigger('click');
+        await flushPromises();
+        expect(wrapper.text()).toContain('XPPL-ADM-SOP-0043-R00');
+        const confirm = button(wrapper, 'Confirm mapping and baseline');
+        expect(confirm.element.disabled).toBe(true);
+        await control(wrapper, 'I reviewed the reconciliation and explicitly approve this mapping and cutover baseline.').setValue(true);
+        await confirm.trigger('click');
+        await flushPromises();
+        const [, options] = fetch.mock.calls.find(([url]) => url.endsWith('/xppl/confirm'));
+        expect(JSON.parse(options.body)).toMatchObject({ token: 'review-token', next_sequence: 43, confirm: true, format: 'xppl_controlled', department_id: 21, type_id: 31 });
+        expect(confirm.element.disabled).toBe(true);
+        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        expect(wrapper.text()).toContain('ຂອບເຂດເລກ XPPL');
+    });
+
+    it('blocks ambiguous mappings and clears a reconciliation when its master selection changes', async () => {
+        server({ ambiguous: true });
+        const wrapper = await render({ ...scope, scope_type: 'company', site_id: null, scope_key: 'company:4' });
+        await control(wrapper, 'Site numbering series').setValue('1');
+        await control(wrapper, 'Originating department').setValue('21');
+        await control(wrapper, 'Document type code').setValue('31');
+        await button(wrapper, 'Reconcile and preview').trigger('click');
+        await flushPromises();
+        expect(button(wrapper, 'Confirm mapping and baseline').element.disabled).toBe(true);
+        expect(control(wrapper, 'I reviewed the reconciliation and explicitly approve this mapping and cutover baseline.').element.disabled).toBe(true);
+        await control(wrapper, 'Document type code').setValue('');
+        expect(wrapper.text()).not.toContain('XPPL-ADM-SOP-0043-R00');
     });
 
     it('creates a continuous official series only after confirmation with scope and CSRF', async () => {

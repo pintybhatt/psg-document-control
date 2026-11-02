@@ -117,9 +117,10 @@ class ManageOutgoingCorrespondence
         }, 1);
     }
 
-    public function register(User $actor, DocumentScope $scope, string $id): OutgoingCorrespondence
+    public function register(User $actor, DocumentScope $scope, string $id, ?int $namespaceId = null): OutgoingCorrespondence
     {
-        return DB::transaction(function () use ($actor, $scope, $id): OutgoingCorrespondence {
+        return DB::transaction(function () use ($actor, $scope, $id, $namespaceId): OutgoingCorrespondence {
+            XpplNumbering::lockCompany($scope->companyId);
             if (DB::getDriverName() === 'sqlite') {
                 DB::table('numbering_series')->whereIn('scope_id', AuthorizationScope::query()->where('scope_key', 'site:'.$scope->siteId)->select('id'))->update(['id' => DB::raw('id')]);
             }
@@ -132,10 +133,15 @@ class ManageOutgoingCorrespondence
             if (! $internal || ! $official || $internal->register_id !== $official->register_id) {
                 throw ValidationException::withMessages(['outgoing' => 'outgoingNumberingUnavailable']);
             }
+            $xppl = null;
+            if ($namespaceId !== null) {
+                $draft = $this->find($actor, $scope, $id);
+                $xppl = ['namespace_id' => $namespaceId, 'department_id' => $draft->profile->department_id, 'type_id' => $draft->type_id];
+            }
             $record = null;
             $officialIssuance = null;
             // Both callbacks persist one complete formal identity; neither number survives an outer rollback.
-            $internalIssuance = $this->numbering->register($actor, $canonical, $internal->id, function (string $internalNumber) use ($actor, $scope, $canonical, $official, $id, &$record, &$officialIssuance): OutgoingCorrespondence {
+            $internalIssuance = $this->numbering->register($actor, $canonical, $internal->id, function (string $internalNumber) use ($actor, $scope, $canonical, $official, $id, &$record, &$officialIssuance, $xppl): OutgoingCorrespondence {
                 $officialIssuance = $this->numbering->register($actor, $canonical, $official->id, function (string $officialNumber) use ($actor, $scope, $id, $internalNumber, &$record): OutgoingCorrespondence {
                     // Preserve register -> series -> correspondence lock ordering on every registration request.
                     $record = $this->find($actor, $scope, $id, true);
@@ -158,7 +164,7 @@ class ManageOutgoingCorrespondence
                     $this->audit($actor, $record, 'registered', ['status', 'internal_number', 'official_number', 'registered_by', 'registered_at']);
 
                     return $record;
-                });
+                }, $xppl);
 
                 return $record;
             });

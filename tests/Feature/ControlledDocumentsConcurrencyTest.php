@@ -5,11 +5,15 @@ namespace Tests\Feature;
 use App\Authorization\DocumentScope;
 use App\Authorization\ManageControlledDocuments;
 use App\Authorization\ManageNumbering;
+use App\Authorization\XpplNumbering;
 use App\Models\AuthorizationScope;
+use App\Models\Company;
 use App\Models\ControlledDocument;
 use App\Models\ControlledRevision;
+use App\Models\Department;
 use App\Models\DocumentCategory;
 use App\Models\DocumentType;
+use App\Models\NumberingSeries;
 use App\Models\OrganizationMembership;
 use App\Models\RegisterConfiguration;
 use App\Models\Site;
@@ -17,6 +21,7 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabaseState;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\TestWith;
 use Tests\Concerns\InteractsWithRbac;
 use Tests\TestCase;
 
@@ -24,7 +29,11 @@ class ControlledDocumentsConcurrencyTest extends TestCase
 {
     use InteractsWithRbac;
 
-    public function test_separate_connections_serialize_registration_revision_preparation_and_release_with_rollback(): void
+    private ?int $namespaceId = null;
+
+    #[TestWith([false])]
+    #[TestWith([true])]
+    public function test_separate_connections_serialize_registration_revision_preparation_and_release_with_rollback(bool $xppl): void
     {
         $directory = storage_path('framework/testing');
         if (! is_dir($directory)) {
@@ -44,15 +53,31 @@ class ControlledDocumentsConcurrencyTest extends TestCase
             $this->definitions();
             $site = Site::factory()->create();
             $scope = AuthorizationScope::context('site', $site->company_id, $site->id)->persist();
-            $unit = new DocumentScope($site->company_id, $site->id);
+            if ($xppl) {
+                Company::query()->findOrFail($site->company_id)->update(['code' => 'XPPL']);
+            }
+            $department = $xppl ? Department::factory()->create(['company_id' => $site->company_id, 'site_id' => $site->id, 'code' => 'ADM']) : null;
+            $unit = new DocumentScope($site->company_id, $site->id, $department?->id);
             $actor = User::factory()->create();
             OrganizationMembership::factory()->for($actor)->atSite($site)->create();
             $this->grant($actor, $scope, ['controlled.drafts.manage', 'controlled.register', 'controlled.release', 'documents.metadata.view', 'numbering.issue', 'numbering.manage']);
+            if ($xppl) {
+                OrganizationMembership::factory()->for($actor)->inDepartment($department)->create();
+                OrganizationMembership::factory()->for($actor)->create(['company_id' => $site->company_id]);
+                $this->grant($actor, AuthorizationScope::context('company', $site->company_id), ['numbering.view', 'numbering.manage']);
+            }
             $register = RegisterConfiguration::factory()->create(['scope_id' => $scope->id, 'register_key' => 'controlled']);
             $category = DocumentCategory::factory()->create(['scope_id' => $scope->id]);
-            $type = DocumentType::factory()->create(['scope_id' => $scope->id, 'category_id' => $category->id]);
+            $type = DocumentType::factory()->create(['scope_id' => $scope->id, 'category_id' => $category->id] + ($xppl ? ['code' => 'SOP'] : []));
             $type->registers()->attach($register->id, ['scope_id' => $scope->id]);
             app(ManageNumbering::class)->save($actor, $scope, ['register_id' => $register->id, 'purpose' => 'internal_register', 'reset_policy' => 'annual', 'prefix' => 'CONCURRENT/CD', 'padding' => 6, 'active' => true]);
+            if ($xppl) {
+                $series = NumberingSeries::query()->where('register_id', $register->id)->sole();
+                $data = ['series_id' => $series->id, 'department_id' => $department->id, 'type_id' => $type->id, 'format' => 'xppl_controlled'];
+                $companyScope = AuthorizationScope::context('company', $site->company_id);
+                $review = app(XpplNumbering::class)->review($actor, $companyScope, $data);
+                $this->namespaceId = app(XpplNumbering::class)->review($actor, $companyScope, $data + ['confirm' => true, 'token' => $review['token'], 'next_sequence' => 1], true)['namespace_id'];
+            }
             $manager = app(ManageControlledDocuments::class);
             $records = [];
             for ($i = 0; $i < 3; $i++) {
@@ -65,6 +90,11 @@ class ControlledDocumentsConcurrencyTest extends TestCase
             $this->assertTrue($results[3]['rollback']);
             $this->assertDatabaseCount('issued_document_numbers', 2);
             $this->assertSame(2, (int) DB::table('numbering_counters')->value('value'));
+            if ($xppl) {
+                $this->assertDatabaseCount('xppl_numbering_allocations', 2);
+                $this->assertSame(2, (int) DB::table('xppl_numbering_counters')->value('value'));
+                $this->assertSame(['XPPL-ADM-SOP-0001', 'XPPL-ADM-SOP-0002'], DB::table('issued_document_numbers')->orderBy('number')->pluck('number')->all());
+            }
             $this->assertDatabaseHas('controlled_documents', ['id' => $records[2]->id, 'lock_version' => 1, 'internal_number' => null]);
             $record = $records[0]->refresh();
             $revision = $record->revisions()->sole();
@@ -117,7 +147,7 @@ class ControlledDocumentsConcurrencyTest extends TestCase
             foreach ($records as $worker => [$record, $rollback]) {
                 $pipes = [];
                 $process = proc_open([PHP_BINARY, base_path('tests/Fixtures/controlled-worker.php'), $mysql ? 'mysql' : 'sqlite', $database,
-                    (string) $actor->id, (string) $site->company_id, (string) $site->id, (string) $record->id, $barrier, (string) $worker, $operation, (string) $record->lock_version, (string) $revisionId, $rollback ? 'yes' : 'no'],
+                    (string) $actor->id, (string) $site->company_id, (string) $site->id, (string) $record->id, $barrier, (string) $worker, $operation, (string) $record->lock_version, (string) $revisionId, $rollback ? 'yes' : 'no', (string) $this->namespaceId],
                     [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, base_path());
                 $this->assertIsResource($process);
                 fclose($pipes[0]);

@@ -55,7 +55,7 @@ class ManageControlledDocuments
         return $record;
     }
 
-    /** All writes use register -> series (registration only) -> document -> revision lock order. */
+    /** Numbering writes use company -> register -> series (registration only) -> document -> revision lock order. */
     private function lockRegister(DocumentScope $scope): RegisterConfiguration
     {
         if (DB::getDriverName() === 'sqlite') {
@@ -69,6 +69,7 @@ class ManageControlledDocuments
     public function save(User $actor, DocumentScope $scope, array $data, ?string $id = null): ControlledDocument
     {
         return DB::transaction(function () use ($actor, $scope, $data, $id): ControlledDocument {
+            XpplNumbering::lockCompany($scope->companyId);
             $register = $this->lockRegister($scope);
             $this->authorizeContext($actor, $scope, 'controlled.drafts.manage');
             $record = $id === null ? null : $this->find($actor, $scope, $id, true);
@@ -83,6 +84,13 @@ class ManageControlledDocuments
             $rules['classification'] = $record ? ['prohibited'] : ['required', Rule::enum(Confidentiality::class)];
             $this->rejectUnknown($data, [...array_keys($rules), ...($record ? ['lock_version'] : [])]);
             $validated = Validator::make($data, $rules, $this->messages())->validate();
+            if (isset($validated['document_code']) && $validated['document_code'] !== $record?->document_code) {
+                foreach (DB::table('xppl_numbering_namespaces')->where('company_id', $scope->companyId)->pluck('prefix') as $prefix) {
+                    if (str_starts_with(mb_strtoupper($validated['document_code']), $prefix.'-') || str_starts_with(mb_strtoupper($validated['document_code']), $prefix.'_')) {
+                        throw ValidationException::withMessages(['document_code' => 'numberingXpplReserved']);
+                    }
+                }
+            }
             $type = $record?->isFormallyRegistered() ? $record->type : DocumentType::query()->where('scope_id', $register->scope_id)->find($validated['type_id']);
             $this->applicable($type, $register);
             $this->validatePeople($scope, $validated);
@@ -122,12 +130,22 @@ class ManageControlledDocuments
         }, 1);
     }
 
+    /** @return array{namespace_id: int, department_id: ?int, type_id: int} */
+    private function xpplContext(User $actor, DocumentScope $scope, string $id, mixed $namespaceId): array
+    {
+        Validator::make(['namespace_id' => $namespaceId], ['namespace_id' => ['required', 'integer', 'min:1']])->validate();
+        $record = $this->find($actor, $scope, $id);
+
+        return ['namespace_id' => (int) $namespaceId, 'department_id' => $record->profile->department_id, 'type_id' => $record->type_id];
+    }
+
     /** @param array<string, mixed> $data */
     public function register(User $actor, DocumentScope $scope, string $id, array $data): ControlledDocument
     {
-        $this->rejectUnknown($data, ['lock_version']);
+        $this->rejectUnknown($data, ['lock_version', 'namespace_id']);
 
         return DB::transaction(function () use ($actor, $scope, $id, $data): ControlledDocument {
+            XpplNumbering::lockCompany($scope->companyId);
             $register = $this->lockRegister($scope);
             $this->authorizeContext($actor, $scope, 'controlled.register');
             $series = NumberingSeries::query()->where('register_id', $register->id)->where('purpose', NumberingPurpose::InternalRegister)->first();
@@ -147,7 +165,7 @@ class ManageControlledDocuments
                 $this->audit($actor, $record, null, 'registered', null, ['internal_number', 'registered_at', 'registered_by']);
 
                 return $record;
-            });
+            }, isset($data['namespace_id']) ? $this->xpplContext($actor, $scope, $id, $data['namespace_id']) : null);
             DB::table('controlled_registration_links')->insert(['document_id' => $record->id, 'issuance_id' => $issuance->id]);
 
             return $record->refresh();

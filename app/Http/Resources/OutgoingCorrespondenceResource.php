@@ -3,6 +3,7 @@
 namespace App\Http\Resources;
 
 use App\Authorization\ManageOutgoingOperations;
+use App\Authorization\XpplNumbering;
 use App\Models\OutgoingRecipient;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -14,6 +15,7 @@ class OutgoingCorrespondenceResource extends JsonResource
         $this->resource->loadMissing(['operation', 'recipients.delivery']);
 
         return [
+            'xppl_namespaces' => $this->registered_at === null ? XpplNumbering::options($this->scope_id, $this->profile->department_id, $this->type_id, 'xppl_letter') : [],
             'id' => $this->id, 'storage_url' => route('api.v1.storage.index', ['type' => 'outgoing', 'record' => $this->id], false), 'company_id' => $this->profile->company_id, 'site_id' => $this->profile->site_id,
             'department_id' => $this->profile->department_id, 'classification' => $this->profile->classification->value,
             'category' => $this->type->category->only(['id', 'name_en', 'name_lo']),

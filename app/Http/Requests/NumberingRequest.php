@@ -12,6 +12,11 @@ class NumberingRequest extends RbacScopeRequest
     public function rules(): array
     {
         $rules = parent::rules();
+        if (in_array($this->route()->getActionMethod(), ['xpplOptions', 'xpplReview', 'xpplConfirm'], true)) {
+            return $rules + ['series_id' => ['sometimes', 'integer'], 'department_id' => ['sometimes', 'integer'], 'type_id' => ['sometimes', 'integer'],
+                'format' => ['sometimes', Rule::in(['xppl_controlled', 'xppl_letter'])], 'token' => ['sometimes', 'string'],
+                'next_sequence' => ['sometimes', 'integer'], 'confirm' => ['sometimes', 'accepted']];
+        }
         foreach (['scope_id', 'created_by', 'issued_by', 'counter', 'value', 'sequence', 'version', 'effective_at', 'number', 'configuration_id', 'period', 'series_id', 'record_type', 'record_key'] as $field) {
             $rules[$field] = ['prohibited'];
         }
