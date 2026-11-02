@@ -15,6 +15,16 @@ const permissionRows = [
     { key: 'roles.manage', area: 'roles', name_en: 'Manage roles', name_lo: 'ຈັດການບົດບາດ', available: true, delegatable: true },
     { key: 'documents.register', area: 'documents', name_en: 'Register documents (planned)', name_lo: 'ລົງທະບຽນເອກະສານ (ຢູ່ໃນແຜນ)', available: false, delegatable: false },
 ];
+const recommendedProfiles = {
+    SECURITY_ADMINISTRATOR: { permission_keys: ['users.manage', 'roles.view', 'roles.manage'], scope_types: ['global'] },
+    DOCUMENT_CONTROLLER: { permission_keys: ['organization.access', 'documents.metadata.view', 'incoming.register'], scope_types: ['global', 'company', 'site'] },
+    DEPARTMENT_USER: { permission_keys: ['organization.access', 'documents.metadata.view', 'incoming.drafts.manage'], scope_types: ['global', 'company', 'site'] },
+    VIEWER: { permission_keys: ['organization.access', 'documents.metadata.view', 'reports.view'], scope_types: ['global', 'company', 'site'] },
+};
+const recommendationCatalog = [...permissionRows,
+    ...[...new Set(Object.values(recommendedProfiles).flatMap(profile => profile.permission_keys))].filter(key => !permissionRows.some(permission => permission.key === key)).map(key => ({ key, area: 'documents', name_en: `Permission ${key}`, name_lo: `ສິດ ${key}`, available: true, delegatable: true })),
+    { key: 'incoming.operations.reopen', area: 'documents', name_en: 'Reopen incoming correspondence', name_lo: 'ເປີດໜັງສືເຂົ້າຄືນ', available: true, delegatable: true },
+];
 const sampleRole = { id: 10, code: 'EXAMPLE_ROLE', name_en: 'Example Role', name_lo: 'ບົດບາດຕົວຢ່າງ', description: 'Fictional configuration', active: true, scope_key: 'global', permission_keys: ['roles.view'], editable: true, security_editable: true };
 const sampleAssignment = { id: 20, user: { id: 2, name: 'Example Account', email: 'example@example.test' }, role: sampleRole, scope_key: 'global', active: true, revocable: true };
 const dialogDescriptors = Object.getOwnPropertyDescriptors(HTMLDialogElement.prototype);
@@ -37,7 +47,7 @@ afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals(); });
 
 function response(data, status = 200) { return { ok: status < 400, status, json: async () => structuredClone(data) }; }
 
-function server({ contexts = [globalScope], roles = [sampleRole], assignments = [], catalog = permissionRows, mutationError = null, canManageOrganization = false } = {}) {
+function server({ contexts = [globalScope], roles = [sampleRole], assignments = [], catalog = permissionRows, recommendations = {}, mutationError = null, canManageOrganization = false } = {}) {
     const roleState = structuredClone(roles);
     const assignmentState = structuredClone(assignments);
     const fetch = vi.fn(async (url, options = {}) => {
@@ -46,7 +56,7 @@ function server({ contexts = [globalScope], roles = [sampleRole], assignments = 
         if (method !== 'GET' && mutationError) { return response(mutationError.body, mutationError.status); }
         if (path === endpoints.contexts) { return response({ data: contexts, can_manage_organization: canManageOrganization }); }
         if (path === endpoints.organization) { return response({ data: [], meta: { total: 0 } }); }
-        if (path === endpoints.permissions) { return response({ data: catalog }); }
+        if (path === endpoints.permissions) { return response({ data: catalog, recommendations }); }
         if (path === endpoints.users) { return response({ data: [sampleAssignment.user], total: 1 }); }
         if (path === endpoints.roles && method === 'GET') { return response({ data: roleState, meta: { total: roleState.length } }); }
         if (path.startsWith(endpoints.roles) && ['POST', 'PATCH'].includes(method)) {
@@ -100,6 +110,115 @@ async function newRole(wrapper) {
 }
 
 describe('scoped role administration', () => {
+    it.each(['DOCUMENT_CONTROLLER', 'DEPARTMENT_USER', 'VIEWER'])('previews %s recommendations and preserves custom selections until an explicit adjusted save', async code => {
+        const fetch = server({ roles: [{ ...sampleRole, code, permission_keys: ['incoming.operations.reopen'] }], catalog: recommendationCatalog, recommendations: recommendedProfiles });
+        const wrapper = await render();
+        await button(wrapper, 'Edit').trigger('click');
+        const current = wrapper.get('input[value="incoming.operations.reopen"]');
+        expect(current.element.checked).toBe(true);
+        for (const key of recommendedProfiles[code].permission_keys) { expect(wrapper.get(`input[value="${key}"]`).element.checked).toBe(false); }
+        await button(wrapper, 'Apply Recommended Permissions').trigger('click');
+        expect(wrapper.find('[data-recommendation-preview]').exists()).toBe(true);
+        expect(wrapper.get('[data-recommendation-preview]').text()).toContain('Will be added');
+        expect(fetch.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
+        for (const key of recommendedProfiles[code].permission_keys) { expect(wrapper.get(`input[value="${key}"]`).element.checked).toBe(false); }
+        await button(wrapper, 'Use these selections').trigger('click');
+        expect(current.element.checked).toBe(true);
+        for (const key of recommendedProfiles[code].permission_keys) { expect(wrapper.get(`input[value="${key}"]`).element.checked).toBe(true); }
+        expect(fetch.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
+        const removed = recommendedProfiles[code].permission_keys.at(-1);
+        await wrapper.get(`input[value="${removed}"]`).setValue(false);
+        await wrapper.get('form').trigger('submit'); await flushPromises();
+        const updates = fetch.mock.calls.filter(([, options]) => options.method === 'PATCH');
+        expect(updates).toHaveLength(1);
+        expect(JSON.parse(updates[0][1].body).permission_keys).toEqual(['incoming.operations.reopen', ...recommendedProfiles[code].permission_keys.filter(key => key !== removed)]);
+        expect(fetch.mock.calls.some(([url, options]) => url.startsWith(endpoints.assignments) && options.method !== 'GET')).toBe(false);
+    });
+
+    it('previews System Administrator recommendations while retaining own-role security protections', async () => {
+        const fetch = server({ roles: [{ ...sampleRole, code: 'SECURITY_ADMINISTRATOR', security_editable: false }], catalog: recommendationCatalog, recommendations: recommendedProfiles });
+        const wrapper = await render();
+        await button(wrapper, 'Edit').trigger('click');
+        await button(wrapper, 'Preview recommended permissions').trigger('click');
+        expect(wrapper.get('[data-recommendation-preview]').text()).toContain('users.manage');
+        expect(button(wrapper, 'Use these selections').element.disabled).toBe(true);
+        expect(wrapper.get('input[value="users.manage"]').element.checked).toBe(false);
+        expect(wrapper.text()).toContain('existing scope and self-edit protections');
+        expect(fetch.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
+    });
+
+    it('offers recommendations for a standard role during creation without assigning or saving automatically', async () => {
+        const fetch = server({ catalog: recommendationCatalog, recommendations: recommendedProfiles });
+        const wrapper = await render();
+        await newRole(wrapper);
+        await wrapper.get('input[name="role-code"]').setValue('VIEWER');
+        await button(wrapper, 'Apply Recommended Permissions').trigger('click');
+        await button(wrapper, 'Use these selections').trigger('click');
+        expect(fetch.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
+        await wrapper.get('form').trigger('submit'); await flushPromises();
+        const create = fetch.mock.calls.find(([url, options]) => url === endpoints.roles && options.method === 'POST');
+        expect(JSON.parse(create[1].body)).toMatchObject({ code: 'VIEWER', permission_keys: recommendedProfiles.VIEWER.permission_keys, scope_type: 'global' });
+    });
+
+    it.each(['unavailable', 'not-delegatable'])('blocks applying recommendations containing a permission that is %s', async blocked => {
+        const catalog = recommendationCatalog.map(permission => permission.key !== 'organization.access' ? permission : { ...permission, available: blocked !== 'unavailable', delegatable: blocked !== 'not-delegatable' });
+        const fetch = server({ roles: [{ ...sampleRole, code: 'VIEWER', permission_keys: [] }], catalog, recommendations: recommendedProfiles });
+        const wrapper = await render();
+        await button(wrapper, 'Edit').trigger('click');
+        await button(wrapper, 'Apply Recommended Permissions').trigger('click');
+        expect(wrapper.get('[data-recommendation-preview]').text()).toContain('This recommendation cannot be applied');
+        expect(button(wrapper, 'Use these selections').element.disabled).toBe(true);
+        expect(wrapper.get('input[value="documents.metadata.view"]').element.checked).toBe(false);
+        expect(fetch.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
+    });
+
+    it('does not apply System Administrator recommendations outside global scope', async () => {
+        const site = { ...globalScope, scope_key: 'site:10', scope_type: 'site', company_id: 7, site_id: 10, company: { name_en: 'Example Company' }, site: { name_en: 'Example Site' } };
+        const fetch = server({ contexts: [site], roles: [{ ...sampleRole, scope_key: site.scope_key, code: 'SECURITY_ADMINISTRATOR', permission_keys: [] }], catalog: recommendationCatalog, recommendations: recommendedProfiles });
+        const wrapper = await render();
+        await button(wrapper, 'Edit').trigger('click');
+        expect(wrapper.text()).toContain('available only for a Group / Global role definition');
+        expect(button(wrapper, 'Preview recommended permissions').element.disabled).toBe(true);
+        expect(wrapper.find('[data-recommendation-preview]').exists()).toBe(false);
+        expect(fetch.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
+    });
+
+    it('keeps shared-role recommendations read-only and translates their preview into Lao', async () => {
+        const fetch = server({ roles: [{ ...sampleRole, code: 'DOCUMENT_CONTROLLER', editable: false }], catalog: recommendationCatalog, recommendations: recommendedProfiles });
+        const wrapper = await render();
+        await button(wrapper, 'Details').trigger('click');
+        await button(wrapper, 'Preview recommended permissions').trigger('click');
+        expect(button(wrapper, 'Use these selections').element.disabled).toBe(true);
+        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        expect(wrapper.get('form').text()).toContain('ສິດທີ່ແນະນຳ');
+        expect(wrapper.get('[data-recommendation-preview]').text()).toContain('ກວດສອບສິດທີ່ແນະນຳ');
+        expect(wrapper.get('form').text()).not.toContain('rbacRecommendation');
+        expect(fetch.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
+    });
+
+    it('cancels a recommendation preview without changing existing selections', async () => {
+        const fetch = server({ roles: [{ ...sampleRole, code: 'VIEWER', permission_keys: ['incoming.operations.reopen'] }], catalog: recommendationCatalog, recommendations: recommendedProfiles });
+        const wrapper = await render();
+        await button(wrapper, 'Edit').trigger('click');
+        await button(wrapper, 'Apply Recommended Permissions').trigger('click');
+        await button(wrapper.get('[data-recommendation-preview]'), 'Cancel').trigger('click');
+        expect(wrapper.find('[data-recommendation-preview]').exists()).toBe(false);
+        expect(wrapper.get('input[value="incoming.operations.reopen"]').element.checked).toBe(true);
+        expect(wrapper.get('input[value="organization.access"]').element.checked).toBe(false);
+        expect(fetch.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
+    });
+
+    it('preserves ordinary custom-role editing without offering an unrelated standard recommendation', async () => {
+        const fetch = server({ catalog: recommendationCatalog, recommendations: recommendedProfiles });
+        const wrapper = await render();
+        await button(wrapper, 'Edit').trigger('click');
+        expect(wrapper.text()).not.toContain('Apply Recommended Permissions');
+        await wrapper.get('input[value="incoming.operations.reopen"]').setValue(true);
+        await wrapper.get('form').trigger('submit'); await flushPromises();
+        const update = fetch.mock.calls.find(([, options]) => options.method === 'PATCH');
+        expect(JSON.parse(update[1].body).permission_keys).toEqual(['roles.view', 'incoming.operations.reopen']);
+    });
+
     it('uses one prominent scope selector and explains global, company and site scope in both languages', async () => {
         server();
         const wrapper = await render();

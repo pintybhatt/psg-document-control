@@ -70,6 +70,6 @@ class RoleController extends Controller
                 'available' => $permission->active && PermissionCatalog::available($permission->key), 'delegatable' => in_array($permission->key, $held, true),
             ]);
 
-        return response()->json(['data' => $permissions]);
+        return response()->json(['data' => $permissions, 'recommendations' => PermissionCatalog::recommendations()]);
     }
 }

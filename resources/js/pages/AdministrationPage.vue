@@ -48,6 +48,9 @@ const errorKey = ref('');
 const fields = ref({});
 const roles = ref([]);
 const permissions = ref([]);
+const recommendations = ref({});
+const recommendationPreview = ref(false);
+const recommendationApplied = ref(false);
 const assignments = ref([]);
 const rolePage = ref(1);
 const roleTotal = ref(0);
@@ -68,6 +71,14 @@ const securityReadOnly = computed(() => readOnly.value || editingRole.value?.sec
 const owningScope = computed(() => readOnly.value && editingRole.value?.scope_key !== selectedKey.value
     ? contexts.value.find(scope => scope.scope_key === editingRole.value?.scope_key && scope.permissions.includes('roles.view') && scope.permissions.includes('roles.manage')) : null);
 const roleForm = reactive({ code: '', name_en: '', name_lo: '', description: '', active: true, permission_keys: [] });
+const roleRecommendation = computed(() => Object.hasOwn(recommendations.value, roleForm.code) ? recommendations.value[roleForm.code] : null);
+const recommendedPermissions = computed(() => (roleRecommendation.value?.permission_keys ?? []).map(key => permissions.value.find(permission => permission.key === key)
+    ?? { key, name_en: key, name_lo: key, available: false, delegatable: false }));
+const recommendationScopeAllowed = computed(() => roleRecommendation.value?.scope_types.includes(selected.value?.scope_type) ?? false);
+const recommendationBlocked = computed(() => recommendedPermissions.value.some(permission => !permission.available || !permission.delegatable));
+const canPreviewRecommendation = computed(() => can('roles.view') && recommendationScopeAllowed.value && !saving.value && !loading.value);
+const canApplyRecommendation = computed(() => canPreviewRecommendation.value && can('roles.manage') && !securityReadOnly.value);
+watch(() => roleForm.code, () => { recommendationPreview.value = false; recommendationApplied.value = false; });
 const confirmationOpen = ref(false);
 const pending = ref(null);
 const searchLoading = ref(false);
@@ -158,6 +169,7 @@ function handleError(error) {
         scopeController?.abort();
         loading.value = false; searchLoading.value = false;
         roles.value = []; assignments.value = []; users.value = []; permissions.value = []; roleOptions.value = [];
+        recommendations.value = {}; recommendationPreview.value = false; recommendationApplied.value = false;
         if (selected.value) { selected.value.permissions = []; }
         editorOpen.value = false;
         confirmationOpen.value = false;
@@ -181,6 +193,7 @@ async function loadScope() {
     scopeController = new AbortController();
     const signal = scopeController.signal;
     roles.value = []; assignments.value = []; permissions.value = []; users.value = []; roleOptions.value = [];
+    recommendations.value = {}; recommendationPreview.value = false; recommendationApplied.value = false;
     roleTotal.value = 0; assignmentTotal.value = 0; rolePage.value = 1; assignmentPage.value = 1;
     targetUser.value = ''; targetRole.value = ''; userSearch.value = ''; roleSearch.value = '';
     editorOpen.value = false; confirmationOpen.value = false; fields.value = {}; errorKey.value = '';
@@ -190,7 +203,7 @@ async function loadScope() {
     try {
         await Promise.all([
             loadRoles(signal), loadAssignments(signal),
-            can('roles.view') ? request(url(props.endpoints.permissions), { signal }).then(response => { permissions.value = response.data; }) : Promise.resolve(),
+            can('roles.view') ? request(url(props.endpoints.permissions), { signal }).then(response => { permissions.value = response.data; recommendations.value = response.recommendations ?? {}; }) : Promise.resolve(),
         ]);
     } catch (error) { handleError(error); }
     finally { if (!signal.aborted) { loading.value = false; } }
@@ -211,6 +224,7 @@ async function loadContexts() {
 
 async function showRole(role = null) {
     editingRole.value = role;
+    recommendationPreview.value = false; recommendationApplied.value = false;
     Object.assign(roleForm, { code: role?.code ?? '', name_en: role?.name_en ?? '', name_lo: role?.name_lo ?? '', description: role?.description ?? '', active: role?.active ?? true, permission_keys: [...(role?.permission_keys ?? [])] });
     fields.value = {}; errorKey.value = ''; editorOpen.value = true;
     await nextTick();
@@ -219,6 +233,16 @@ async function showRole(role = null) {
 }
 
 function fieldError(name) { return fields.value[name]?.[0] ?? ''; }
+
+function previewRecommendation() {
+    if (canPreviewRecommendation.value) { recommendationPreview.value = true; }
+}
+
+function applyRecommendation() {
+    if (!recommendationPreview.value || !canApplyRecommendation.value || recommendationBlocked.value) { return; }
+    roleForm.permission_keys = [...new Set([...roleForm.permission_keys, ...roleRecommendation.value.permission_keys])];
+    recommendationPreview.value = false; recommendationApplied.value = true;
+}
 
 async function switchToOwningScope() {
     if (!owningScope.value || saving.value || loading.value || confirmationOpen.value) { return; }
@@ -381,6 +405,25 @@ onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
                     <CheckboxInput v-model="roleForm.active" :label="t('rbacActive')" :disabled="securityReadOnly" />
                 </div>
                 <TextareaInput v-model="roleForm.description" :label="t('rbacDescription')" :readonly="readOnly" maxlength="2000" />
+                <p v-if="!editingRole" class="text-sm text-slate-600">{{ t('rbacStandardRoleHelp') }}</p>
+                <section v-if="roleRecommendation" class="flex flex-col gap-3 rounded-lg border border-teal-200 bg-teal-50 p-4" :aria-label="t('rbacRecommendedPermissions')">
+                    <h4 class="font-semibold">{{ t('rbacRecommendedPermissions') }}</h4>
+                    <p class="text-sm">{{ t(`rbacRecommendation-${roleForm.code}`) }}</p>
+                    <p class="text-sm text-slate-600">{{ t('rbacRecommendationHelp') }}</p>
+                    <p v-if="!recommendationScopeAllowed" class="text-sm text-amber-900">{{ t('rbacRecommendationGlobalOnly') }}</p>
+                    <p v-if="selected?.scope_type === 'global'" class="text-sm font-medium text-amber-900">{{ t('rbacGlobalWarning') }}</p>
+                    <p v-if="!canApplyRecommendation && recommendationScopeAllowed" class="text-sm text-slate-600">{{ t('rbacRecommendationReadOnly') }}</p>
+                    <div><UiButton :disabled="!canPreviewRecommendation" @click="previewRecommendation">{{ t(canApplyRecommendation ? 'rbacApplyRecommended' : 'rbacPreviewRecommended') }}</UiButton></div>
+                    <div v-if="recommendationPreview" data-recommendation-preview class="flex flex-col gap-3">
+                        <h5 class="text-sm font-semibold">{{ t('rbacRecommendationPreview') }}</h5>
+                        <ul class="grid max-h-72 gap-2 overflow-y-auto text-sm sm:grid-cols-2"><li v-for="permission in recommendedPermissions" :key="permission.key">
+                            {{ permissionLabel(permission) }} · {{ t(!permission.available ? 'rbacPermissionUnavailable' : !permission.delegatable ? 'rbacPermissionNotDelegatable' : roleForm.permission_keys.includes(permission.key) ? 'rbacPermissionSelected' : 'rbacRecommendationWillAdd') }}
+                        </li></ul>
+                        <p v-if="recommendationBlocked" role="status" class="text-sm text-amber-900">{{ t('rbacRecommendationBlocked') }}</p>
+                        <div class="flex flex-wrap gap-3"><UiButton :disabled="!canApplyRecommendation || recommendationBlocked" @click="applyRecommendation">{{ t('rbacUseRecommended') }}</UiButton><UiButton variant="secondary" :disabled="saving" @click="recommendationPreview = false">{{ t('uiCancel') }}</UiButton></div>
+                    </div>
+                    <p v-if="recommendationApplied" role="status" class="text-sm text-teal-900">{{ t('rbacRecommendationApplied') }}</p>
+                </section>
                 <p class="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm leading-7" role="status">{{ t(workspaceNotice) }}</p>
                 <p class="text-sm text-slate-600">{{ t('rbacPermissionHelp') }}</p>
                 <details v-for="group in permissionGroups" :key="group.key" :open="group.key === 'workspace'" :data-permission-group="group.key" class="rounded-lg border border-slate-200 p-4">
