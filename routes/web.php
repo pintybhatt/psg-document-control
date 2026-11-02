@@ -20,6 +20,7 @@ use App\Http\Controllers\OutgoingOperationController;
 use App\Http\Controllers\PhysicalCustodyController;
 use App\Http\Controllers\RoleAssignmentController;
 use App\Http\Controllers\RoleController;
+use App\Http\Controllers\UserManagementController;
 use App\Http\Middleware\AuditDocumentStorageRequests;
 use App\Http\Middleware\EnsureActiveUserSession;
 use App\Http\Middleware\EnsureDevelopmentEnvironment;
@@ -109,6 +110,9 @@ Route::middleware(['auth:web', EnsureActiveUserSession::class])->group(function 
         Route::get('organization-contexts', [MembershipController::class, 'operationalContexts'])->name('organization-contexts');
         Route::get('membership-units', [MembershipController::class, 'units'])->name('membership-units');
         Route::get('membership-users', [MembershipController::class, 'users'])->name('membership-users');
+        Route::get('user-management', [UserManagementController::class, 'index'])->name('user-management.index');
+        Route::post('user-management', [UserManagementController::class, 'store'])->name('user-management.store');
+        Route::patch('user-management/{user}', [UserManagementController::class, 'update'])->name('user-management.update');
         Route::get('memberships', [MembershipController::class, 'index'])->name('memberships.index');
         Route::post('memberships', [MembershipController::class, 'store'])->name('memberships.store');
         Route::patch('memberships/{membership}', [MembershipController::class, 'update'])->name('memberships.update');
