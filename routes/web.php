@@ -112,6 +112,7 @@ Route::middleware(['auth:web', EnsureActiveUserSession::class])->group(function 
         Route::get('membership-users', [MembershipController::class, 'users'])->name('membership-users');
         Route::get('user-management', [UserManagementController::class, 'index'])->name('user-management.index');
         Route::post('user-management', [UserManagementController::class, 'store'])->name('user-management.store');
+        Route::get('user-management/{user}/access', [UserManagementController::class, 'access'])->name('user-management.access');
         Route::patch('user-management/{user}', [UserManagementController::class, 'update'])->name('user-management.update');
         Route::get('memberships', [MembershipController::class, 'index'])->name('memberships.index');
         Route::post('memberships', [MembershipController::class, 'store'])->name('memberships.store');

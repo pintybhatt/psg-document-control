@@ -295,7 +295,7 @@ onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
             <OrganizationManagement v-if="section === 'organization' && canManageOrganization && selected?.scope_type === 'global'" :endpoint="endpoints.organization" :csrf-token="csrfToken" @saved="organizationSaved" @unauthorized="handleError" />
             <AdministrationHistory v-if="section === 'history' && selected && can('security.audit.view')" :scope="selected" :endpoint="endpoints.history" :can-manage-organization="canManageOrganization" :csrf-token="csrfToken" @unauthorized="handleError" />
             <MembershipManagement v-show="section === 'people'" v-if="selected && can('memberships.view')" :scope="selected" :endpoints="endpoints" :csrf-token="csrfToken" @unauthorized="handleError" />
-            <UserManagement v-if="section === 'users' && canManageUsers" :endpoint="endpoints.userManagement" :current-user-id="endpoints.currentUserId" :csrf-token="csrfToken" />
+            <UserManagement v-if="section === 'users' && canManageUsers" :endpoint="endpoints.userManagement" :access-endpoints="{ units: endpoints.membershipUnits, roles: endpoints.roles, permissions: endpoints.permissions }" :current-user-id="endpoints.currentUserId" :csrf-token="csrfToken" />
             <DocumentMasterDataManagement v-show="section === 'documents'" v-if="selected && selected.scope_type !== 'global' && can('master-data.view')" :scope="selected" :endpoints="endpoints.masterData" :csrf-token="csrfToken" @unauthorized="handleError" />
             <NumberingManagement v-show="section === 'numbering'" v-if="selected && selected.scope_type !== 'global' && can('numbering.view')" :scope="selected" :endpoint="endpoints.numbering" :csrf-token="csrfToken" @unauthorized="handleError" />
 
