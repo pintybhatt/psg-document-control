@@ -23,7 +23,6 @@ class ApplicationShellTest extends TestCase
             'controlled-documents',
             'document-search',
             'reports',
-            'administration',
         ];
 
         foreach ($pages as $page) {

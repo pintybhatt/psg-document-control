@@ -10,7 +10,8 @@
     </head>
     <body>
         @php
-            $navigation = collect($pages)->map(fn (string $path, string $key): array => [
+            $canAccessAdministration = auth()->check() && app(\App\Authorization\AccessControl::class)->canAccessAdministration(auth()->user());
+            $navigation = collect($pages)->filter(fn (string $path, string $key): bool => $key !== 'administration' || $canAccessAdministration)->map(fn (string $path, string $key): array => [
                 'key' => $key,
                 'href' => route('dcms.'.$key, [], false),
             ])->values();
@@ -34,11 +35,11 @@
             'controlled' => ['endpoint' => route('api.v1.controlled.index', [], false), 'contexts' => route('api.v1.controlled.contexts', [], false)],
             'outgoing' => ['incoming' => route('api.v1.incoming.index', [], false), 'endpoint' => route('api.v1.outgoing.index', [], false), 'contexts' => route('api.v1.outgoing.contexts', [], false)],
             'incoming' => ['endpoint' => route('api.v1.incoming.index', [], false), 'contexts' => route('api.v1.incoming.contexts', [], false)],
-            'administration' => [
+            'administration' => $canAccessAdministration ? [
                 'organization' => route('api.v1.organization.index', ['kind' => 'companies'], false),
                 'history' => route('api.v1.administration.history', [], false),
                 'numbering' => route('api.v1.numbering.index', [], false),
-                'contexts' => route('api.v1.authorization.contexts', [], false),
+                'contexts' => route('api.v1.authorization.contexts', ['administration' => 1], false),
                 'roles' => route('api.v1.roles.index', [], false),
                 'permissions' => route('api.v1.permissions', [], false),
                 'assignments' => route('api.v1.assignments.index', [], false),
@@ -54,7 +55,7 @@
                     'registers' => route('api.v1.master-data.index', ['kind' => 'registers'], false),
                     'classifications' => route('api.v1.master-data.classifications', [], false),
                 ],
-            ],
+            ] : null,
         ]) }}"></div>
         <noscript>
             <p>Enable JavaScript to open DCMS. / ກະລຸນາເປີດ JavaScript ເພື່ອໃຊ້ DCMS.</p>

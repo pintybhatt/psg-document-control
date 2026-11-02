@@ -83,7 +83,7 @@ describe('simple account administration', () => {
 
     it('integrates the reused Users section with Lao Administration labels', async () => {
         vi.stubGlobal('fetch', vi.fn(async url => ({ ok: true, status: 200, json: async () => url === '/contexts'
-            ? { data: [{ scope_key: 'global', scope_type: 'global', company_id: null, site_id: null, permissions: ['users.manage'] }] }
+            ? { data: [{ scope_key: 'global', scope_type: 'global', company_id: null, site_id: null, permissions: ['users.manage'] }], can_manage_organization: true }
             : { data: [], last_page: 1 } })));
         const wrapper = mount(AdministrationPage, { props: { endpoints: { contexts: '/contexts', userManagement: '/api/v1/user-management', currentUserId: 1 }, csrfToken: 'csrf-token' }, global: { plugins: [createLocalization('lo')], stubs: { ConfirmDialog: true } } });
         await flushPromises();

@@ -12,7 +12,9 @@ class AuthorizationContextController extends Controller
 {
     public function index(Request $request, AccessControl $access): JsonResponse
     {
-        return response()->json(['data' => $access->contexts($request->user())->map(function (AuthorizationScope $scope) use ($request, $access): array {
+        $contexts = $request->boolean('administration') ? $access->administrationContexts($request->user()) : $access->contexts($request->user());
+
+        return response()->json(['data' => $contexts->map(function (AuthorizationScope $scope) use ($request, $access): array {
             return [
                 'scope_key' => $scope->scope_key, 'scope_type' => $scope->scope_type, 'company_id' => $scope->company_id, 'site_id' => $scope->site_id,
                 'company' => $scope->company?->only(['name_en', 'name_lo']), 'site' => $scope->site?->only(['name_en', 'name_lo']),

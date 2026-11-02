@@ -110,6 +110,23 @@ async function newRole(wrapper) {
 }
 
 describe('scoped role administration', () => {
+    it('shows only the Roles section for a custom administrator with role-view permission', async () => {
+        server({ contexts: [{ ...globalScope, permissions: ['roles.view'] }], roles: [{ ...sampleRole, editable: false }] });
+        const wrapper = await render();
+        expect(wrapper.get('nav[aria-label="Administration"]').findAll('button').map(item => item.text())).toEqual(['Roles and permissions']);
+        expect(wrapper.text()).not.toContain('Create role');
+        expect(wrapper.text()).not.toContain('Assign role');
+        expect(wrapper.get('section[aria-labelledby="roles-heading"]').text()).toContain('Example Role');
+        expect(wrapper.findComponent({ name: 'UserManagement' }).exists()).toBe(false);
+    });
+
+    it('does not expose Users management to a delegated account permission without system authority', async () => {
+        server({ contexts: [{ ...globalScope, permissions: ['users.manage', 'roles.view'] }], roles: [{ ...sampleRole, editable: false }] });
+        const wrapper = await render();
+        expect(wrapper.get('nav[aria-label="Administration"]').findAll('button').map(item => item.text())).toEqual(['Roles and permissions']);
+        expect(wrapper.find('section[aria-labelledby="users-heading"]').exists()).toBe(false);
+    });
+
     it.each(['DOCUMENT_CONTROLLER', 'DEPARTMENT_USER', 'VIEWER'])('previews %s recommendations and preserves custom selections until an explicit adjusted save', async code => {
         const fetch = server({ roles: [{ ...sampleRole, code, permission_keys: ['incoming.operations.reopen'] }], catalog: recommendationCatalog, recommendations: recommendedProfiles });
         const wrapper = await render();

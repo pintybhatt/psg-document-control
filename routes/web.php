@@ -23,6 +23,7 @@ use App\Http\Controllers\RoleController;
 use App\Http\Controllers\UserManagementController;
 use App\Http\Middleware\AuditDocumentStorageRequests;
 use App\Http\Middleware\EnsureActiveUserSession;
+use App\Http\Middleware\EnsureAdministrationAccess;
 use App\Http\Middleware\EnsureDevelopmentEnvironment;
 use Illuminate\Contracts\View\View;
 use Illuminate\Support\Facades\Route;
@@ -47,8 +48,12 @@ $pages = [
 ];
 
 foreach ($pages as $page => $path) {
+    $middleware = ['auth:web', EnsureActiveUserSession::class];
+    if ($page === 'administration') {
+        $middleware[] = EnsureAdministrationAccess::class;
+    }
     Route::view($path, 'app', ['page' => $page, 'pages' => $pages])
-        ->middleware(['auth:web', EnsureActiveUserSession::class])->name('dcms.'.$page);
+        ->middleware($middleware)->name('dcms.'.$page);
 }
 
 Route::get('/dev/ui-components', function () use ($pages): View {

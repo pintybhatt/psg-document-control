@@ -30,7 +30,7 @@ const selectedKey = ref('');
 const section = ref('people');
 const selected = computed(() => contexts.value.find(scope => scope.scope_key === selectedKey.value));
 const can = permission => selected.value?.permissions.includes(permission) ?? false;
-const canManageUsers = computed(() => contexts.value.some(scope => scope.scope_type === 'global' && scope.permissions.includes('users.manage')));
+const canManageUsers = computed(() => canManageOrganization.value && contexts.value.some(scope => scope.scope_type === 'global' && scope.permissions.includes('users.manage')));
 const sections = computed(() => [
     { key: 'organization', label: 'orgTitle', available: !!props.endpoints.organization && canManageOrganization.value && selected.value?.scope_type === 'global' },
     { key: 'people', label: 'adminPeople', available: can('memberships.view') },
