@@ -61,9 +61,12 @@ const targetUser = ref('');
 const targetRole = ref('');
 const editorOpen = ref(false);
 const roleEditor = ref(null);
+const scopePanel = ref(null);
 const editingRole = ref(null);
 const readOnly = computed(() => editingRole.value !== null && !editingRole.value.editable);
 const securityReadOnly = computed(() => readOnly.value || editingRole.value?.security_editable === false);
+const owningScope = computed(() => readOnly.value && editingRole.value?.scope_key !== selectedKey.value
+    ? contexts.value.find(scope => scope.scope_key === editingRole.value?.scope_key && scope.permissions.includes('roles.view') && scope.permissions.includes('roles.manage')) : null);
 const roleForm = reactive({ code: '', name_en: '', name_lo: '', description: '', active: true, permission_keys: [] });
 const confirmationOpen = ref(false);
 const pending = ref(null);
@@ -217,6 +220,13 @@ async function showRole(role = null) {
 
 function fieldError(name) { return fields.value[name]?.[0] ?? ''; }
 
+async function switchToOwningScope() {
+    if (!owningScope.value || saving.value || loading.value || confirmationOpen.value) { return; }
+    selectedKey.value = owningScope.value.scope_key;
+    await nextTick();
+    scopePanel.value?.querySelector('select')?.focus();
+}
+
 async function focusInvalidRoleField() {
     await nextTick();
     roleEditor.value?.querySelector('[aria-invalid="true"]')?.focus();
@@ -328,7 +338,16 @@ onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
         <p v-if="loading && !contexts.length" role="status">{{ t('uiLoading') }}</p>
         <p v-else-if="!contexts.length" class="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-600">{{ t('rbacNoAccess') }}</p>
         <template v-if="contexts.length">
-            <div class="rounded-xl border border-slate-200 bg-white p-5"><SelectInput v-model="selectedKey" :label="t('rbacScope')" :options="scopeOptions" :disabled="saving || confirmationOpen" /><p class="mt-3 text-xs leading-6 text-slate-500">{{ t(selected?.scope_type === 'global' ? 'rbacGlobalWarning' : 'rbacScopeNotice') }}</p></div>
+            <div ref="scopePanel" data-administration-scope class="rounded-xl border-2 border-teal-600 bg-white p-4 shadow-sm lg:sticky lg:top-3 lg:z-20">
+                <div class="grid items-center gap-3 sm:grid-cols-2">
+                    <div><p class="text-sm font-semibold text-teal-800">{{ t('rbacScopeHeading') }}</p><p v-if="selected" class="mt-1 font-semibold wrap-anywhere" aria-live="polite">{{ t('rbacCurrentScope', { scope: scopeLabel(selected) }) }}</p></div>
+                    <SelectInput v-model="selectedKey" :label="t('rbacScope')" :options="scopeOptions" :disabled="saving || confirmationOpen" />
+                </div>
+                <p class="mt-3 text-sm leading-6" :class="selected?.scope_type === 'global' ? 'rounded-lg bg-amber-50 p-3 font-medium text-amber-900' : 'text-slate-600'">{{ t(selected?.scope_type === 'global' ? 'rbacGlobalWarning' : 'rbacScopeNotice') }}</p>
+                <details class="mt-2 text-sm text-slate-600"><summary class="cursor-pointer font-medium">{{ t('rbacScopeGuide') }}</summary>
+                    <dl class="mt-2 grid gap-2 sm:grid-cols-3"><div><dt class="font-semibold">{{ t('rbacGlobal') }}</dt><dd>{{ t('rbacScopeGlobalHelp') }}</dd></div><div><dt class="font-semibold">{{ t('company') }}</dt><dd>{{ t('rbacScopeCompanyHelp') }}</dd></div><div><dt class="font-semibold">{{ t('site') }}</dt><dd>{{ t('rbacScopeSiteHelp') }}</dd></div></dl>
+                </details>
+            </div>
 
             <nav :aria-label="t('administration')" class="flex flex-wrap gap-2 border-b border-slate-200 pb-3"><UiButton v-for="item in sections" :key="item.key" :variant="section === item.key ? 'primary' : 'secondary'" :aria-pressed="section === item.key" @click="section = item.key">{{ t(item.label) }}</UiButton></nav>
             <OrganizationManagement v-if="section === 'organization' && canManageOrganization && selected?.scope_type === 'global'" :endpoint="endpoints.organization" :csrf-token="csrfToken" @saved="organizationSaved" @unauthorized="handleError" />
@@ -340,6 +359,7 @@ onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
 
             <section v-show="section === 'roles'" v-if="can('roles.view')" class="flex flex-col gap-4" aria-labelledby="roles-heading">
                 <div class="flex flex-wrap items-center justify-between gap-3"><h3 id="roles-heading" class="font-semibold">{{ t('rbacRoles') }}</h3><UiButton v-if="can('roles.manage')" :disabled="loading || saving" @click="showRole()">{{ t('rbacCreateRole') }}</UiButton></div>
+                <p v-if="selected" data-roles-scope class="rounded-lg border border-teal-200 bg-teal-50 px-4 py-3 text-sm font-semibold text-teal-900">{{ t('rbacRolesScope', { scope: scopeLabel(selected) }) }}</p>
                 <DataTable v-model:page="rolePage" :rows="roleRows" :columns="roleColumns" :caption="t('rbacRoles')" :loading="loading" server-side :total="roleTotal" :per-page="10" @change="changeRolePage">
                     <template #cell-display_name="{ row }"><span class="font-semibold">{{ row.display_name }}</span><span v-if="row.code !== 'SECURITY_ADMINISTRATOR' && missingWorkspacePermissions(row)" class="block text-xs text-amber-800">{{ t('rbacWorkspaceSetupNeeded') }}</span></template>
                     <template #cell-actions="{ row }"><UiButton variant="secondary" :disabled="saving" @click="showRole(row)">{{ t(row.editable ? 'rbacEdit' : 'rbacDetails') }}</UiButton></template>
@@ -350,6 +370,10 @@ onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
                 <h3 tabindex="-1" class="font-semibold">{{ t(editingRole ? 'rbacRoleDetails' : 'rbacCreateRole') }}</h3>
                 <p v-if="editingRole" class="text-sm font-medium">{{ label(editingRole) }} · {{ t('rbacRoleOwner', { scope: roleScopeLabel(editingRole) }) }}</p>
                 <p v-if="readOnly || securityReadOnly" class="text-sm text-slate-500">{{ t(readOnly ? 'rbacInheritedReadOnly' : 'rbacSelfRoleReadOnly', { scope: roleScopeLabel(editingRole) }) }}</p>
+                <div v-if="readOnly && editingRole?.scope_key !== selectedKey" class="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                    <UiButton v-if="owningScope" :disabled="loading || saving || confirmationOpen" @click="switchToOwningScope">{{ t('rbacSwitchOwnerScope', { scope: scopeLabel(owningScope) }) }}</UiButton>
+                    <p v-else>{{ t('rbacOwnerScopeNoEdit') }}</p>
+                </div>
                 <div class="grid gap-5 sm:grid-cols-2">
                     <TextInput v-model="roleForm.code" name="role-code" :label="t('rbacCode')" :helper="t('rbacCodeHelp')" :readonly="!!editingRole || readOnly" :error-key="fieldError('code')" required maxlength="64" />
                     <TextInput v-model="roleForm.name_en" name="role-name-en" :label="t('rbacNameEn')" :readonly="readOnly" :error-key="fieldError('name_en')" required lang="en" maxlength="255" />

@@ -100,6 +100,54 @@ async function newRole(wrapper) {
 }
 
 describe('scoped role administration', () => {
+    it('uses one prominent scope selector and explains global, company and site scope in both languages', async () => {
+        server();
+        const wrapper = await render();
+        const panel = wrapper.get('[data-administration-scope]');
+        expect(panel.findAll('select')).toHaveLength(1);
+        expect(panel.text()).toContain('Check the scope before editing');
+        expect(panel.text()).toContain('Current scope: Group / Global');
+        expect(panel.text()).toContain('may affect users across companies and sites');
+        expect(panel.get('dl').text()).toContain('owned by one company');
+        expect(panel.get('dl').text()).toContain('owned by one site');
+        expect(wrapper.get('[data-roles-scope]').text()).toContain('Roles & Permissions — current scope: Group / Global');
+        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        expect(panel.text()).toContain('ກວດສອບຂອບເຂດກ່ອນແກ້ໄຂ');
+        expect(panel.text()).toContain('ຂອບເຂດປັດຈຸບັນ');
+        expect(panel.get('dl').text()).toContain('ບໍລິສັດ');
+        expect(wrapper.get('[data-roles-scope]').text()).toContain('ບົດບາດ ແລະ ສິດ');
+        expect(panel.text()).not.toContain('rbacScope');
+    });
+
+    it('switches a shared role to its authorized owning scope without changing the role or its assignments', async () => {
+        const siteScope = { ...globalScope, scope_key: 'site:10', scope_type: 'site', company_id: 7, site_id: 10, company: { name_en: 'Example Company', name_lo: 'ຕົວຢ່າງ' }, site: { name_en: 'Example Site', name_lo: 'ສະຖານທີ່' } };
+        const fetch = server({ contexts: [siteScope, globalScope], roles: [{ ...sampleRole, editable: false }] });
+        const wrapper = await render();
+        await button(wrapper, 'Details').trigger('click');
+        expect(wrapper.get('[data-roles-scope]').text()).toContain('Example Site');
+        await button(wrapper, 'Switch to Group / Global').trigger('click'); await flushPromises();
+        expect(control(wrapper, 'Authorization scope').element.value).toBe('global');
+        expect(wrapper.get('[data-roles-scope]').text()).toContain('Group / Global');
+        expect(wrapper.find('input[name="role-code"]').exists()).toBe(false);
+        expect(document.activeElement).toBe(control(wrapper, 'Authorization scope').element);
+        expect(fetch.mock.calls.some(([url]) => url.startsWith(endpoints.roles) && url.includes('scope_type=global'))).toBe(true);
+        expect(fetch.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
+    });
+
+    it.each([false, true])('offers no owner-switch editing action without owning-scope authority (view-only scope %s)', async viewOnly => {
+        const siteScope = { ...globalScope, scope_key: 'site:10', scope_type: 'site', company_id: 7, site_id: 10, company: { name_en: 'Example Company', name_lo: 'ຕົວຢ່າງ' }, site: { name_en: 'Example Site', name_lo: 'ສະຖານທີ່' } };
+        const contexts = viewOnly ? [siteScope, { ...globalScope, permissions: ['roles.view'] }] : [siteScope];
+        const fetch = server({ contexts, roles: [{ ...sampleRole, editable: false }] });
+        const wrapper = await render();
+        await button(wrapper, 'Details').trigger('click');
+        expect(wrapper.get('form').text()).toContain('You do not have role-editing access to this owning scope');
+        expect(wrapper.findAll('button').some(item => item.text().startsWith('Switch to'))).toBe(false);
+        expect(control(wrapper, 'Authorization scope').element.value).toBe('site:10');
+        expect(fetch.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
+        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        expect(wrapper.get('form').text()).toContain('ທ່ານບໍ່ມີສິດແກ້ໄຂ');
+    });
+
     it('groups business permissions and explains workspace setup without selecting or saving grants automatically', async () => {
         const catalog = [...permissionRows,
             { key: 'organization.access', area: 'organization', name_en: 'Use a workspace', name_lo: 'ພື້ນທີ່ເຮັດວຽກ', available: true, delegatable: true },
