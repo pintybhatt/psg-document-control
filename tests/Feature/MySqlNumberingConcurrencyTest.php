@@ -256,7 +256,14 @@ class MySqlNumberingConcurrencyTest extends TestCase
         $this->assertSame('REPEATABLE-READ', $settings->isolation_level);
         $this->assertSame(['InnoDB'], array_values(array_unique(array_column(DB::select('SELECT ENGINE FROM information_schema.tables WHERE TABLE_SCHEMA = DATABASE() AND TABLE_TYPE = "BASE TABLE"'), 'ENGINE'))));
 
-        $this->artisan('migrate:rollback', ['--step' => 7, '--force' => true, '--no-interaction' => true])->assertExitCode(0);
+        $phaseThreeBoundary = '2026_10_25_135202_create_document_master_data_tables';
+        $appliedMigrations = DB::table('migrations')->orderBy('migration')->pluck('migration');
+        $this->assertContains($phaseThreeBoundary, $appliedMigrations);
+        $phaseTwoMigrations = $appliedMigrations->filter(fn (string $migration): bool => $migration < $phaseThreeBoundary)->values()->all();
+        $rollbackSteps = $appliedMigrations->count() - count($phaseTwoMigrations);
+
+        $this->artisan('migrate:rollback', ['--step' => $rollbackSteps, '--force' => true, '--no-interaction' => true])->assertExitCode(0);
+        $this->assertSame($phaseTwoMigrations, DB::table('migrations')->orderBy('migration')->pluck('migration')->all());
         $this->assertFalse(Schema::hasTable('numbering_series'));
         $this->assertFalse(Schema::hasTable('document_types'));
         $this->assertModelExists($actor);
@@ -264,6 +271,8 @@ class MySqlNumberingConcurrencyTest extends TestCase
         $this->artisan('migrate', ['--force' => true, '--no-interaction' => true])->assertExitCode(0);
         $this->assertTrue(Schema::hasTable('numbering_series'));
         $this->assertTrue(Schema::hasTable('document_types'));
+        $this->assertSame($appliedMigrations->all(), DB::table('migrations')->orderBy('migration')->pluck('migration')->all());
+        $this->assertModelExists($actor);
         $this->assertDatabaseCount('organization_memberships', 1);
     }
 }
