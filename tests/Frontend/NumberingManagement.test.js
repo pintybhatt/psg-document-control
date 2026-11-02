@@ -36,6 +36,7 @@ function server({ rows = [series], error = null, registerRows = registers, histo
         if (method === 'GET' && path.endsWith('/history')) { return response({ data: history, total: history.length }); }
         if (path.endsWith('/preview')) {
             const body = JSON.parse(options.body);
+            if (body.series_id) { return response({ number: 'EXAMPLE/OUT/2026/000008' }); }
             return response({ number: `${body.prefix}/${body.year}/${'1'.padStart(body.padding, '0')}` });
         }
         if (error) { return response(error.body, error.status); }
@@ -103,6 +104,19 @@ describe('numbering administration', () => {
         expect(JSON.parse(calls[0][1].body)).toEqual({ scope_type: 'site', company_id: 4, site_id: 7, prefix: 'EXAMPLE/DOC', padding: 4, year: 2027 });
         await control(wrapper, 'Prefix').setValue('CHANGED');
         expect(wrapper.text()).not.toContain('EXAMPLE/DOC/2027/0001');
+    });
+
+    it('previews the saved series counter independently of unsaved format edits', async () => {
+        const fetch = server();
+        const wrapper = await render();
+        await button(wrapper, 'Edit').trigger('click');
+        await control(wrapper, 'Prefix').setValue('UNSAVED');
+        await button(wrapper, 'Preview next configured number').trigger('click');
+        await flushPromises();
+        expect(wrapper.text()).toContain('EXAMPLE/OUT/2026/000008');
+        const [, options] = fetch.mock.calls.find(([url]) => url.endsWith('/preview'));
+        expect(JSON.parse(options.body)).toEqual({ scope_type: 'site', company_id: 4, site_id: 7, series_id: 1 });
+        expect(wrapper.text()).toContain('does not reserve a number');
     });
 
     it('creates a continuous official series only after confirmation with scope and CSRF', async () => {

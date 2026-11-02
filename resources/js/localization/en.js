@@ -459,6 +459,8 @@ export default {
     numberingPrefix: 'Prefix',
     numberingPrefixHelp: 'Use uppercase Latin letters, digits, underscores or hyphens, with slash-separated segments. Begin with a letter. Prefixes remain reserved to their series.',
     numberingPadding: 'Minimum number of digits (1–12)',
+    numberingNextPreview: 'Preview next configured number',
+    numberingNextPreviewHelp: 'Uses the saved configuration and current year. This estimate does not reserve a number; registration may allocate a different number. Unsaved edits apply only to the format preview.',
     numberingPreviewYear: 'Preview year',
     numberingPreview: 'Preview format without allocation',
     numberingSave: 'Save numbering configuration',

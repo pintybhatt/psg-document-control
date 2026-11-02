@@ -87,12 +87,12 @@ async function edit(row = null) {
     await nextTick();
     editorElement.value?.querySelector('h4')?.focus();
 }
-async function showPreview() {
+async function showPreview(savedSeries = false) {
     previewController?.abort(); previewController = new AbortController();
     const signal = previewController.signal;
     previewLoading.value = true; preview.value = ''; errorKey.value = ''; fields.value = {};
     try {
-        const result = await request(`${props.endpoint}/preview`, { method: 'POST', signal, body: { ...scopeData(), prefix: form.prefix, padding: Number(form.padding), year: Number(form.year) } });
+        const result = await request(`${props.endpoint}/preview`, { method: 'POST', signal, body: savedSeries ? { ...scopeData(), series_id: editor.value.id } : { ...scopeData(), prefix: form.prefix, padding: Number(form.padding), year: Number(form.year) } });
         if (!signal.aborted) { preview.value = result.number; }
     } catch (error) { if (!signal.aborted) { fail(error); } }
     finally { if (!signal.aborted) { previewLoading.value = false; } }
@@ -151,7 +151,8 @@ onBeforeUnmount(() => { controller?.abort(); previewController?.abort(); history
                 <CheckboxInput v-model="form.active" :label="t('rbacActive')" :disabled="!canManage || saving" />
                 <TextInput v-model="form.change_reason" :label="t('numberingReason')" :readonly="!canManage || saving" :error-key="fields.change_reason?.[0]" maxlength="500" />
             </div>
-            <div class="flex flex-wrap items-end gap-3"><TextInput v-model="form.year" type="number" :label="t('numberingPreviewYear')" :error-key="fields.year?.[0]" min="2000" max="9999" /><UiButton variant="secondary" :loading="previewLoading" :disabled="saving" @click="showPreview">{{ t('numberingPreview') }}</UiButton></div>
+            <div class="flex flex-wrap items-end gap-3"><TextInput v-model="form.year" type="number" :label="t('numberingPreviewYear')" :error-key="fields.year?.[0]" min="2000" max="9999" /><UiButton variant="secondary" :loading="previewLoading" :disabled="saving" @click="showPreview()">{{ t('numberingPreview') }}</UiButton><UiButton v-if="editor.id" variant="secondary" :loading="previewLoading" :disabled="saving" @click="showPreview(true)">{{ t('numberingNextPreview') }}</UiButton></div>
+            <p v-if="editor.id" class="text-xs leading-6 text-slate-500">{{ t('numberingNextPreviewHelp') }}</p>
             <p v-if="preview" role="status" class="wrap-anywhere font-mono text-sm">{{ preview }}</p>
             <div class="flex flex-wrap gap-3"><UiButton v-if="canManage" type="submit" :disabled="saving">{{ t('numberingSave') }}</UiButton><UiButton variant="secondary" :disabled="saving" @click="editor = null">{{ t('uiCancel') }}</UiButton></div>
         </form>

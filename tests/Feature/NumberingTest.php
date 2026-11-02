@@ -70,6 +70,58 @@ class NumberingTest extends TestCase
         ])));
     }
 
+    #[TestWith(['annual', 'EXAMPLE/OUT/2027/0001'])]
+    #[TestWith(['continuous', 'EXAMPLE/OUT/2027/0002'])]
+    public function test_saved_series_preview_uses_its_counter_without_consuming_or_changing_history(string $policy, string $expected): void
+    {
+        [$actor, $scope, $register] = $this->actor();
+        $series = $this->series($actor, $scope, $register, ['reset_policy' => $policy, 'padding' => 4]);
+        $issued = $this->issue($actor, $scope, $series);
+        $body = $this->scopeData($scope) + ['series_id' => $series->id];
+        $this->postJson('/api/v1/numbering-series/preview', $body)->assertOk()->assertJsonPath('number', 'EXAMPLE/OUT/2026/0002');
+        $this->travelTo(now()->setDate(2027, 1, 1));
+
+        $this->postJson('/api/v1/numbering-series/preview', $body)->assertOk()->assertJsonPath('number', $expected);
+
+        $this->assertDatabaseCount('numbering_counters', 1);
+        $this->assertDatabaseCount('issued_document_numbers', 1);
+        $this->assertSame('EXAMPLE/OUT/2026/0001', $issued->refresh()->number);
+        $this->assertSame($expected, $this->issue($actor, $scope, $series)->number);
+    }
+
+    public function test_saved_series_preview_is_scoped_and_rejects_format_overrides(): void
+    {
+        [$actor, $scope, $register] = $this->actor();
+        $series = $this->series($actor, $scope, $register);
+        $body = $this->scopeData($scope) + ['series_id' => $series->id];
+        foreach (['prefix' => 'OTHER', 'padding' => 4, 'year' => 2027, 'sequence' => 5] as $field => $value) {
+            $this->postJson('/api/v1/numbering-series/preview', $body + [$field => $value])->assertUnprocessable()->assertJsonValidationErrors($field);
+        }
+        $foreign = NumberingSeries::factory()->create();
+        foreach ([$foreign->id, 999999] as $id) {
+            $this->postJson('/api/v1/numbering-series/preview', array_replace($body, ['series_id' => $id]))->assertNotFound();
+        }
+        $this->assertDatabaseCount('numbering_counters', 0);
+    }
+
+    public function test_saved_series_preview_starts_at_one_without_creating_a_counter(): void
+    {
+        [$actor, $scope, $register] = $this->actor();
+        $series = $this->series($actor, $scope, $register, ['padding' => 4]);
+        $body = $this->scopeData($scope) + ['series_id' => $series->id];
+        $this->postJson('/api/v1/numbering-series/preview', $body)->assertOk()->assertJsonPath('number', 'EXAMPLE/OUT/2026/0001');
+        $this->assertDatabaseCount('numbering_counters', 0);
+        $this->assertDatabaseCount('issued_document_numbers', 0);
+    }
+
+    public function test_saved_series_preview_requires_view_permission(): void
+    {
+        [$actor, $scope, $register] = $this->actor(['numbering.manage']);
+        $series = $this->series($actor, $scope, $register);
+        $this->postJson('/api/v1/numbering-series/preview', $this->scopeData($scope) + ['series_id' => $series->id])->assertForbidden();
+        $this->assertDatabaseCount('numbering_counters', 0);
+    }
+
     public function test_configuration_preview_and_history_never_consume_numbers(): void
     {
         [, $scope, $register] = $this->actor();

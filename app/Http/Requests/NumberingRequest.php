@@ -18,6 +18,11 @@ class NumberingRequest extends RbacScopeRequest
         if ($this->isMethod('GET')) {
             return $rules;
         }
+        if ($this->route()->getName() === 'api.v1.numbering.preview' && $this->has('series_id')) {
+            $rules['series_id'] = ['required', 'integer', 'min:1'];
+
+            return $rules + ['prefix' => ['prohibited'], 'padding' => ['prohibited'], 'year' => ['prohibited']];
+        }
         $rules += NumberingFormat::rules();
         if ($this->route()->getName() === 'api.v1.numbering.preview') {
             return $rules + ['year' => ['required', 'integer', 'between:2000,9999']];
