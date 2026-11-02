@@ -35,7 +35,8 @@ def claims_for(payload):
     return {'iss': auth.ISSUER, 'aud': auth.audience(payload), 'iat': NOW-10, 'nbf': NOW-10, 'exp': NOW+290,
             'repository': auth.REPOSITORY, 'repository_id': '42', 'event_name': 'workflow_dispatch',
             'ref': 'refs/heads/main', 'ref_type': 'branch', 'repository_visibility': 'private',
-            'sub': 'repo:'+auth.REPOSITORY+':environment:uat', 'runner_environment': 'self-hosted',
+            'sub': 'repo:pintybhatt@8923839/psg-document-control@1435463595:environment:uat',
+            'runner_environment': 'self-hosted',
             'workflow_ref': auth.REPOSITORY+'/'+auth.WORKFLOW+'@refs/heads/main', 'workflow_sha': 'd'*40,
             'sha': 'd'*40, 'run_id': str(payload['deployment_run_id']), 'run_attempt': str(payload['deployment_run_attempt']),
             'actor_id': '100', 'check_run_id': '555'}
@@ -77,14 +78,87 @@ class OidcVerificationTests(unittest.TestCase):
         signature = subprocess.check_output(['/usr/bin/openssl', 'dgst', '-sha256', '-sign', str(self.key)], input=content, timeout=10)
         return content.decode()+'.'+base64.urlsafe_b64encode(signature).decode().rstrip('=')
 
-    def verify(self, token, payload=None, jwks=None):
+    def verify(self, token, payload=None, jwks=None, progress=None, policy=None):
         with patch.object(auth, 'read_https', return_value=json.dumps({'keys': [self.jwk] if jwks is None else jwks}).encode()) as read:
-            result = auth.verify_oidc(token, request() if payload is None else payload, POLICY, now=NOW)
+            result = auth.verify_oidc(token, request() if payload is None else payload,
+                                      POLICY if policy is None else policy, now=NOW, progress=progress)
         read.assert_called_once_with(auth.ISSUER+'/.well-known/jwks', limit=128*1024)
         return result
 
     def test_signed_request_bound_trusted_workflow_passes_real_openssl_verification(self):
         self.assertEqual(self.verify(self.token())['actor_id'], '100')
+
+    def test_exact_immutable_subject_and_verified_github_identity_pass_signed_verification(self):
+        claims = dict(claims_for(request()), repository_id='1435463595', actor_id='8923839',
+                      repository_owner='pintybhatt', repository_owner_id='8923839', environment='uat')
+        policy = dict(POLICY, repository_id=1435463595, operator_ids=[8923839], runner_ids=[21])
+        verified = self.verify(self.token(claims), policy=policy)
+        self.assertEqual(verified['sub'], 'repo:pintybhatt@8923839/psg-document-control@1435463595:environment:uat')
+        self.assertEqual(verified['repository_id'], '1435463595')
+        self.assertEqual(verified['actor_id'], '8923839')
+
+    def test_wrong_subject_owner_repository_environment_and_legacy_format_are_audited_and_refused(self):
+        subjects = [
+            'repo:pintybhatt@8923840/psg-document-control@1435463595:environment:uat',
+            'repo:pintybhatt@8923839/psg-document-control@1435463596:environment:uat',
+            'repo:pintybhatt@8923839/psg-document-control@1435463595:environment:production',
+            'repo:pintybhatt@8923839/psg-document-control@1435463595:environment:UAT',
+            'repo:other-owner@8923839/psg-document-control@1435463595:environment:uat',
+            'repo:pintybhatt@8923839/other-repository@1435463595:environment:uat',
+            'repo:'+auth.REPOSITORY+':environment:uat',
+            'repo:pintybhatt@8923839/psg-document-control@1435463595:ref:refs/heads/main',
+            'repo:pintybhatt@8923839/psg-document-control@1435463595:environment:uat:extra',
+        ]
+        for subject in subjects:
+            progress = auth.AuthorizationProgress()
+            with self.subTest(subject=subject), self.assertRaisesRegex(ValueError, 'identity'):
+                self.verify(self.token(dict(claims_for(request()), sub=subject)), progress=progress)
+            self.assertEqual((progress.stage, progress.reason), ('oidc_identity', 'OIDC_SUBJECT_MISMATCH'))
+
+    def test_each_identity_mismatch_has_a_fixed_reason_without_storing_claim_values(self):
+        reasons = {'iss': 'OIDC_ISSUER_MISMATCH', 'aud': 'OIDC_AUDIENCE_MISMATCH',
+                   'repository': 'OIDC_REPOSITORY_MISMATCH', 'repository_id': 'OIDC_REPOSITORY_ID_MISMATCH',
+                   'event_name': 'OIDC_EVENT_MISMATCH', 'ref': 'OIDC_REF_MISMATCH', 'ref_type': 'OIDC_REF_TYPE_MISMATCH',
+                   'repository_visibility': 'OIDC_VISIBILITY_MISMATCH', 'sub': 'OIDC_SUBJECT_MISMATCH',
+                   'runner_environment': 'OIDC_RUNNER_ENVIRONMENT_MISMATCH', 'workflow_ref': 'OIDC_WORKFLOW_REF_MISMATCH',
+                   'run_id': 'OIDC_RUN_ID_MISMATCH', 'run_attempt': 'OIDC_RUN_ATTEMPT_MISMATCH',
+                   'actor_id': 'OIDC_OPERATOR_MISMATCH', 'workflow_sha': 'OIDC_WORKFLOW_REVISION_INVALID',
+                   'check_run_id': 'OIDC_CHECK_RUN_ID_INVALID', 'job_workflow_ref': 'OIDC_OPERATOR_MISMATCH'}
+        for key, reason in reasons.items():
+            progress = auth.AuthorizationProgress()
+            value = '' if key == 'check_run_id' else 'synthetic-sensitive-claim'
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                self.verify(self.token(dict(claims_for(request()), **{key: value})), progress=progress)
+            self.assertEqual(vars(progress), {'stage': 'oidc_identity', 'reason': reason})
+
+    def test_non_string_check_run_and_missing_workflow_sha_are_diagnosed_and_still_refused(self):
+        for field, value, reason in [('check_run_id', 555, 'OIDC_CHECK_RUN_ID_INVALID'),
+                                     ('check_run_id', None, 'OIDC_CHECK_RUN_ID_INVALID'),
+                                     ('workflow_sha', None, 'OIDC_WORKFLOW_REVISION_INVALID')]:
+            progress = auth.AuthorizationProgress()
+            with self.subTest(field=field, value=value), self.assertRaises((ValueError, TypeError)):
+                self.verify(self.token(dict(claims_for(request()), **{field: value})), progress=progress)
+            self.assertEqual(progress.reason, reason)
+
+    def test_header_jwks_signature_and_time_failures_keep_distinct_stages(self):
+        progress = auth.AuthorizationProgress()
+        with self.assertRaises(ValueError):
+            self.verify(self.token(header={'alg': 'none'}), progress=progress)
+        self.assertEqual((progress.stage, progress.reason), ('oidc_header', 'OIDC_HEADER_INVALID'))
+        with patch.object(auth, 'read_https', side_effect=OSError('synthetic-secret')), self.assertRaises(OSError):
+            auth.verify_oidc(self.token(), request(), POLICY, now=NOW, progress=progress)
+        self.assertEqual((progress.stage, progress.reason), ('oidc_jwks', 'OIDC_JWKS_UNAVAILABLE'))
+        with self.assertRaises(ValueError):
+            self.verify(self.token(), jwks=[], progress=progress)
+        self.assertEqual(progress.reason, 'OIDC_SIGNING_KEY_INVALID')
+        parts = self.token().split('.')
+        parts[-1] = base64.urlsafe_b64encode(bytes(256)).decode().rstrip('=')
+        with self.assertRaises(ValueError):
+            self.verify('.'.join(parts), progress=progress)
+        self.assertEqual((progress.stage, progress.reason), ('oidc_signature', 'OIDC_SIGNATURE_INVALID'))
+        with self.assertRaises(ValueError):
+            self.verify(self.token(dict(claims_for(request()), iat=NOW+1)), progress=progress)
+        self.assertEqual((progress.stage, progress.reason), ('oidc_time', 'OIDC_TIME_INVALID'))
 
     def test_modified_signature_and_request_are_refused(self):
         token = self.token()
@@ -168,6 +242,47 @@ class GithubEvidenceTests(unittest.TestCase):
                          {'protected': True, 'commit': {'sha': 'd'*40}}, deployment_run()]), \
                 patch.object(api, 'collection', return_value={'jobs': [deployment_job()]}):
             auth.workflow_current(api, request(), claims_for(request()), POLICY)
+
+    def test_actual_github_job_metadata_shape_matches_all_pinned_ids(self):
+        policy = dict(POLICY, repository_id=1435463595, operator_ids=[8923839], runner_ids=[21])
+        payload = request(deployment_run_id=41380288154)
+        claims = dict(claims_for(payload), repository_id='1435463595', actor_id='8923839',
+                      check_run_id='125069452934', sha='b2d775ae394660e76bd89c6071772d49adac828c')
+        run = dict(deployment_run(), id=41380288154, head_sha=claims['sha'], repository={'id': 1435463595},
+                   head_repository={'id': 1435463595}, actor={'id': 8923839}, triggering_actor={'id': 8923839})
+        job = dict(deployment_job(), run_id=41380288154, runner_id=21,
+                   check_run_url='https://api.github.com/repos/'+auth.REPOSITORY+'/check-runs/125069452934')
+        # Completed historical API responses cannot authorize a new deployment. Only status is simulated here.
+        api = self.api()
+        with patch.object(api, 'get', side_effect=[{'id': 1435463595, 'full_name': auth.REPOSITORY, 'private': True},
+                         {'protected': True, 'commit': {'sha': claims['sha']}}, run]), \
+                patch.object(api, 'collection', return_value={'jobs': [job]}):
+            auth.workflow_current(api, payload, claims, policy)
+
+    def test_job_attempt_missing_check_run_mismatch_and_wrong_runner_are_distinguishable(self):
+        for change, reason in [('attempt-missing', 'DEDICATED_RUNNER_MISMATCH'),
+                               ('check-run', 'CHECK_RUN_MATCH_INVALID'), ('runner', 'DEDICATED_RUNNER_MISMATCH')]:
+            job = deployment_job()
+            if change == 'attempt-missing': del job['run_attempt']
+            if change == 'check-run': job['check_run_url'] += '9'
+            if change == 'runner': job['runner_id'] = 999
+            progress = auth.AuthorizationProgress()
+            api = self.api()
+            with self.subTest(change=change), \
+                    patch.object(api, 'get', side_effect=[{'id': 42, 'full_name': auth.REPOSITORY, 'private': True},
+                             {'protected': True, 'commit': {'sha': 'd'*40}}, deployment_run()]), \
+                    patch.object(api, 'collection', return_value={'jobs': [job]}), self.assertRaises(ValueError):
+                auth.workflow_current(api, request(), claims_for(request()), POLICY, progress=progress)
+            self.assertEqual((progress.stage, progress.reason), ('github_job', reason))
+
+    def test_api_permission_failure_has_fixed_stage_instead_of_sensitive_response(self):
+        api = self.api()
+        progress = auth.AuthorizationProgress()
+        with patch.object(api, 'get', side_effect=urllib.error.HTTPError('https://api.github.com/synthetic', 403,
+                          'synthetic-secret', {}, io.BytesIO())), self.assertRaises(urllib.error.HTTPError) as result:
+            auth.workflow_current(api, request(), claims_for(request()), POLICY, progress=progress)
+        result.exception.close()
+        self.assertEqual(vars(progress), {'stage': 'github_repository', 'reason': 'GITHUB_REPOSITORY_UNAVAILABLE'})
 
     def test_unprotected_main_stale_revision_changed_actor_and_untrusted_runner_are_refused(self):
         for change in ('protection', 'sha', 'path', 'status', 'actor', 'attempt', 'runner', 'labels', 'job'):

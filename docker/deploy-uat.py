@@ -64,16 +64,51 @@ def request_from(stream):
     return envelope
 
 
-def authorize(envelope, policy, current, previous):
+def authorize(envelope, policy, current, previous, progress=None):
+    progress = auth.AuthorizationProgress() if progress is None else progress
+    progress.mark('policy', 'POLICY_INVALID')
     auth.validate_policy(policy)
     request = envelope['request']
+    progress.mark('request', 'REQUEST_INVALID')
     auth.validate_request(request)
-    claims = auth.verify_oidc(envelope['oidc_token'], request, policy)
+    claims = auth.verify_oidc(envelope['oidc_token'], request, policy, progress=progress)
+    progress.mark('github_credential', 'GITHUB_CREDENTIAL_INVALID')
     api = auth.GitHub(envelope['github_token'])
-    auth.workflow_current(api, request, claims, policy)
+    auth.workflow_current(api, request, claims, policy, progress=progress)
+    progress.mark('release_evidence', 'RELEASE_EVIDENCE_INVALID')
     release = api.release(request['release_run_id'], request['release_artifact_id'])
+    progress.mark('release_validation', 'RELEASE_VALIDATION_FAILED')
     manifest = auth.validate_release(api, request, release, policy, current, previous)
     return api, claims, release, manifest
+
+
+def audit_failure(progress):
+    """Append only fixed stage/reason codes and UTC time to a root-only audit file."""
+    require(os.geteuid() == 0, 'Root audit writer required.')
+    require(progress.reason in auth.AuthorizationProgress.REASONS.get(progress.stage, set()), 'Unknown diagnostic code.')
+    protected(ROOT)
+    descriptor = os.open(ROOT/'authorization-audit.jsonl',
+                         os.O_WRONLY | os.O_APPEND | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK, 0o600)
+    try:
+        info = os.fstat(descriptor)
+        require(stat.S_ISREG(info.st_mode) and info.st_uid == 0 and stat.S_IMODE(info.st_mode) == 0o600
+                and info.st_nlink == 1, 'Unsafe authorization audit file.')
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        record = {'time': datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                  'stage': progress.stage, 'reason': progress.reason}
+        data = (json.dumps(record, separators=(',', ':'))+'\n').encode('ascii')
+        require(os.write(descriptor, data) == len(data), 'Incomplete authorization audit write.')
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+
+
+def record_failure(progress):
+    """Audit unavailability must never turn an authorization refusal into success."""
+    try:
+        audit_failure(progress)
+    except (Exception, KeyboardInterrupt):
+        print('STOP: Root-only authorization audit unavailable; deployment remains refused/failed.', file=sys.stderr)
 
 
 class Deployment:
@@ -208,25 +243,34 @@ def write_json(path, value):
     path.write_text(json.dumps(value, indent=2)+'\n')
 
 
-def execute(envelope):
+def execute(envelope, progress=None):
+    progress = auth.AuthorizationProgress() if progress is None else progress
+    progress.mark('entrypoint', 'ROOT_ENTRYPOINT_REQUIRED')
     require(os.geteuid() == 0 and len(sys.argv) == 1, 'Fixed root entry point required.')
     os.umask(0o077)
+    progress.mark('custody', 'ROOT_CUSTODY_INVALID')
     protected(ROOT/'release/docker/deploy-uat.py')
     protected(ROOT/'history')
     protected(ROOT/'deployment.lock', True)
+    progress.mark('lock', 'DEPLOYMENT_LOCK_UNAVAILABLE')
     with (ROOT/'deployment.lock').open('r+') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        progress.mark('recovery', 'RECOVERY_REQUIRED')
         recovery_flag = ROOT/'config/recovery-required.json'
         require(not recovery_flag.exists(), 'Previous deployment requires administrator recovery inspection.')
+        progress.mark('configuration', 'CONFIGURATION_INVALID')
         policy = read_json(ROOT/'config/automation.json')
         current = read_json(ROOT/'config/current.json')
         previous_file = ROOT/'config/previous.json'
         previous = read_json(previous_file) if previous_file.exists() else None
+        progress.mark('configuration', 'HEALTH_URL_INVALID')
         require(re.fullmatch(r'https://[a-z0-9]+(?:[.-][a-z0-9]+)*:8444/up', policy.get('health_url', '')), 'Approved HTTPS UAT health URL required.')
+        progress.mark('configuration', 'AUTOMATION_DISABLED')
         require(policy.get('enabled') is True and policy.get('target') == 'uat'
                 and policy.get('project') == PROJECT, 'UAT automation is not enrolled/enabled.')
+        progress.mark('custody', 'ROOT_CUSTODY_INVALID')
         protected(ROOT/'release/docker/github-uat-auth.py')
-        api, claims, release, manifest = authorize(envelope, policy, current, previous)
+        api, claims, release, manifest = authorize(envelope, policy, current, previous, progress=progress)
         request = envelope['request']
         request_id = 'gha-'+str(request['deployment_run_id'])+'-'+str(request['deployment_run_attempt'])
 
@@ -239,8 +283,10 @@ def execute(envelope):
                     and artifact.get('workflow_run', {}).get('id') == request['release_run_id'], 'Release artifact expired/removed.')
 
         # A dispatch run/attempt is single-use, including after partial failure.
+        progress.mark('history', 'HISTORY_RESERVATION_FAILED')
         history = ROOT/'history'/request_id
         history.mkdir(mode=0o700)
+        progress.mark('deployment', 'DEPLOYMENT_FAILED')
         manifest_file = history/'manifest.json'
         manifest_file.write_bytes(release['manifest'])
         for name in ('run', 'jobs', 'artifacts'):
@@ -347,20 +393,26 @@ def interrupted(signum, frame):
 
 
 def main():
+    progress = auth.AuthorizationProgress()
     for signum in (signal.SIGTERM, signal.SIGHUP, signal.SIGINT, signal.SIGALRM):
         signal.signal(signum, interrupted)
     try:
         signal.alarm(15)
         envelope = request_from(sys.stdin.buffer)
         signal.alarm(900)
-        execute(envelope)
+        execute(envelope, progress=progress)
         signal.alarm(0)
     except auth.SchemaReviewRequired:
+        signal.alarm(0)
+        record_failure(progress)
         sys.exit('STOP: UAT schema mismatch. A separate controlled migration/recovery is required. '
                  'No automatic migrations were run. Inspect protected history and maintenance state.')
     except (Exception, KeyboardInterrupt):
+        signal.alarm(0)
+        record_failure(progress)
         # Do not expose arbitrary request, Docker, application or secret material over SSH.
-        sys.exit('STOP: UAT deployment refused/failed. Administrator must inspect protected history and maintenance state.')
+        sys.exit('STOP: UAT deployment refused/failed. Administrator must inspect root-only authorization audit, '
+                 'protected history and maintenance state.')
 
 
 if __name__ == '__main__':

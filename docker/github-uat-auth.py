@@ -33,6 +33,48 @@ class SchemaReviewRequired(ValueError):
     """Schema refusal with a fixed public diagnostic; never display exception contents."""
 
 
+class AuthorizationProgress:
+    """Fixed diagnostics only; never store claims, requests, credentials or exceptions."""
+
+    REASONS = {
+        'request': {'REQUEST_INVALID'},
+        'entrypoint': {'ROOT_ENTRYPOINT_REQUIRED'},
+        'custody': {'ROOT_CUSTODY_INVALID'},
+        'lock': {'DEPLOYMENT_LOCK_UNAVAILABLE'},
+        'recovery': {'RECOVERY_REQUIRED'},
+        'configuration': {'CONFIGURATION_INVALID', 'HEALTH_URL_INVALID', 'AUTOMATION_DISABLED'},
+        'policy': {'POLICY_INVALID'},
+        'oidc_header': {'OIDC_HEADER_INVALID'},
+        'oidc_jwks': {'OIDC_JWKS_UNAVAILABLE', 'OIDC_SIGNING_KEY_INVALID'},
+        'oidc_signature': {'OIDC_SIGNATURE_INVALID'},
+        'oidc_time': {'OIDC_TIME_INVALID'},
+        'oidc_identity': {
+            'OIDC_ISSUER_MISMATCH', 'OIDC_AUDIENCE_MISMATCH', 'OIDC_REPOSITORY_MISMATCH',
+            'OIDC_REPOSITORY_ID_MISMATCH', 'OIDC_EVENT_MISMATCH', 'OIDC_REF_MISMATCH',
+            'OIDC_REF_TYPE_MISMATCH', 'OIDC_VISIBILITY_MISMATCH', 'OIDC_SUBJECT_MISMATCH',
+            'OIDC_RUNNER_ENVIRONMENT_MISMATCH', 'OIDC_WORKFLOW_REF_MISMATCH',
+            'OIDC_RUN_ID_MISMATCH', 'OIDC_RUN_ATTEMPT_MISMATCH', 'OIDC_OPERATOR_MISMATCH',
+            'OIDC_WORKFLOW_REVISION_INVALID', 'OIDC_CHECK_RUN_ID_INVALID',
+        },
+        'github_credential': {'GITHUB_CREDENTIAL_INVALID'},
+        'github_repository': {'GITHUB_REPOSITORY_UNAVAILABLE'},
+        'github_main': {'GITHUB_MAIN_UNAVAILABLE', 'PROTECTED_MAIN_MISMATCH'},
+        'github_run': {'GITHUB_RUN_UNAVAILABLE', 'DEPLOYMENT_RUN_MISMATCH'},
+        'github_job': {'GITHUB_JOBS_UNAVAILABLE', 'CHECK_RUN_MATCH_INVALID', 'DEDICATED_RUNNER_MISMATCH'},
+        'release_evidence': {'RELEASE_EVIDENCE_INVALID'},
+        'release_validation': {'RELEASE_VALIDATION_FAILED'},
+        'history': {'HISTORY_RESERVATION_FAILED'},
+        'deployment': {'DEPLOYMENT_FAILED'},
+    }
+
+    def __init__(self):
+        self.mark('request', 'REQUEST_INVALID')
+
+    def mark(self, stage, reason):
+        require(reason in self.REASONS.get(stage, set()), 'Unknown diagnostic code.')
+        self.stage, self.reason = stage, reason
+
+
 def unique_object(pairs):
     result = {}
     for key, value in pairs:
@@ -172,15 +214,20 @@ def public_key(jwk):
     return der(0x30, bytes.fromhex('300d06092a864886f70d0101010500')+der(3, b'\0'+rsa))
 
 
-def verify_oidc(token, request, policy, now=None):
+def verify_oidc(token, request, policy, now=None, progress=None):
+    progress = AuthorizationProgress() if progress is None else progress
+    progress.mark('oidc_header', 'OIDC_HEADER_INVALID')
     require(isinstance(token, str) and len(token) <= 16384, 'Invalid OIDC token.')
     header64, claims64, signature64 = token.split('.')
     header = parse_json(decode64(header64))
     require(header.get('alg') == 'RS256' and header.get('typ') == 'JWT'
             and set(header) <= {'alg', 'typ', 'kid', 'x5t'} and isinstance(header.get('kid'), str), 'Untrusted JWT header.')
+    progress.mark('oidc_jwks', 'OIDC_JWKS_UNAVAILABLE')
     jwks = parse_json(read_https(ISSUER+'/.well-known/jwks', limit=128*1024))
+    progress.mark('oidc_jwks', 'OIDC_SIGNING_KEY_INVALID')
     keys = [key for key in jwks['keys'] if key.get('kid') == header['kid']]
     require(len(keys) == 1, 'Unknown/ambiguous OIDC signing key.')
+    progress.mark('oidc_signature', 'OIDC_SIGNATURE_INVALID')
     with tempfile.TemporaryDirectory(prefix='dcms-oidc-') as directory:
         key_file, signature_file = Path(directory)/'public.der', Path(directory)/'signature'
         key_file.write_bytes(public_key(keys[0]))
@@ -189,6 +236,7 @@ def verify_oidc(token, request, policy, now=None):
                                  '-signature', str(signature_file)], input=(header64+'.'+claims64).encode('ascii'),
                                 capture_output=True, timeout=10, env={'PATH': '/usr/bin:/bin'})
         require(result.returncode == 0, 'OIDC signature verification failed.')
+    progress.mark('oidc_time', 'OIDC_TIME_INVALID')
     now = time.time() if now is None else now
     claims = parse_json(decode64(claims64))
     for key in ('iat', 'nbf', 'exp'):
@@ -198,13 +246,25 @@ def verify_oidc(token, request, policy, now=None):
     expected = {'iss': ISSUER, 'aud': audience(request), 'repository': REPOSITORY,
                 'repository_id': str(policy['repository_id']), 'event_name': 'workflow_dispatch',
                 'ref': 'refs/heads/main', 'ref_type': 'branch', 'repository_visibility': 'private',
-                'sub': 'repo:'+REPOSITORY+':environment:uat', 'runner_environment': 'self-hosted',
+                'sub': 'repo:pintybhatt@8923839/psg-document-control@1435463595:environment:uat',
+                'runner_environment': 'self-hosted',
                 'workflow_ref': REPOSITORY+'/'+WORKFLOW+'@refs/heads/main',
                 'run_id': str(request['deployment_run_id']), 'run_attempt': str(request['deployment_run_attempt'])}
-    require(all(claims.get(key) == value for key, value in expected.items()), 'Unauthorized GitHub workflow identity.')
+    reasons = ('OIDC_ISSUER_MISMATCH', 'OIDC_AUDIENCE_MISMATCH', 'OIDC_REPOSITORY_MISMATCH',
+               'OIDC_REPOSITORY_ID_MISMATCH', 'OIDC_EVENT_MISMATCH', 'OIDC_REF_MISMATCH',
+               'OIDC_REF_TYPE_MISMATCH', 'OIDC_VISIBILITY_MISMATCH', 'OIDC_SUBJECT_MISMATCH',
+               'OIDC_RUNNER_ENVIRONMENT_MISMATCH', 'OIDC_WORKFLOW_REF_MISMATCH',
+               'OIDC_RUN_ID_MISMATCH', 'OIDC_RUN_ATTEMPT_MISMATCH')
+    for (key, value), reason in zip(expected.items(), reasons, strict=True):
+        progress.mark('oidc_identity', reason)
+        require(claims.get(key) == value, 'Unauthorized GitHub workflow identity.')
+    progress.mark('oidc_identity', 'OIDC_OPERATOR_MISMATCH')
     require('job_workflow_ref' not in claims and claims.get('actor_id') in [str(value) for value in policy['operator_ids']], 'Unauthorized workflow/operator.')
-    require(re.fullmatch(r'[a-f0-9]{40}', claims.get('sha', '')) and claims.get('workflow_sha') == claims['sha']
-            and re.fullmatch(r'[1-9][0-9]{0,19}', claims.get('check_run_id', '')), 'Incomplete workflow revision/job identity.')
+    progress.mark('oidc_identity', 'OIDC_WORKFLOW_REVISION_INVALID')
+    require(re.fullmatch(r'[a-f0-9]{40}', claims.get('sha', '')) and claims.get('workflow_sha') == claims['sha'],
+            'Incomplete workflow revision/job identity.')
+    progress.mark('oidc_identity', 'OIDC_CHECK_RUN_ID_INVALID')
+    require(re.fullmatch(r'[1-9][0-9]{0,19}', claims.get('check_run_id', '')), 'Incomplete workflow revision/job identity.')
     return claims
 
 
@@ -220,12 +280,18 @@ def validate_policy(policy):
             and re.fullmatch(r'[a-zA-Z0-9][a-zA-Z0-9._/-]{2,127}', policy['recovery_reference']), 'Established UAT recovery procedure required.')
 
 
-def workflow_current(api, request, claims, policy):
+def workflow_current(api, request, claims, policy, progress=None):
+    progress = AuthorizationProgress() if progress is None else progress
+    progress.mark('github_repository', 'GITHUB_REPOSITORY_UNAVAILABLE')
     repository = api.get('')
+    progress.mark('github_main', 'GITHUB_MAIN_UNAVAILABLE')
     branch = api.get('branches/main')
+    progress.mark('github_run', 'GITHUB_RUN_UNAVAILABLE')
     run = api.get('actions/runs/'+str(request['deployment_run_id']))
+    progress.mark('github_main', 'PROTECTED_MAIN_MISMATCH')
     require(repository.get('id') == policy['repository_id'] and repository.get('full_name') == REPOSITORY and repository.get('private') is True
             and branch.get('protected') is True and branch['commit']['sha'] == claims['sha'], 'Protected current main required.')
+    progress.mark('github_run', 'DEPLOYMENT_RUN_MISMATCH')
     require(run.get('id') == request['deployment_run_id'] and run.get('path') == WORKFLOW
             and run.get('event') == 'workflow_dispatch' and run.get('head_branch') == 'main'
             and run.get('head_sha') == claims['sha'] and run.get('status') == 'in_progress'
@@ -234,10 +300,13 @@ def workflow_current(api, request, claims, policy):
             and run.get('head_repository', {}).get('id') == policy['repository_id']
             and str(run.get('actor', {}).get('id')) == claims['actor_id']
             and run.get('triggering_actor', {}).get('id') in policy['operator_ids'], 'Deployment workflow is stale/unauthorized.')
+    progress.mark('github_job', 'GITHUB_JOBS_UNAVAILABLE')
     jobs = api.collection('actions/runs/'+str(request['deployment_run_id'])+'/attempts/'+str(request['deployment_run_attempt'])+'/jobs', 'jobs')['jobs']
+    progress.mark('github_job', 'CHECK_RUN_MATCH_INVALID')
     matches = [job for job in jobs if job.get('check_run_url') == 'https://api.github.com/repos/'+REPOSITORY+'/check-runs/'+claims['check_run_id']]
     require(len(matches) == 1, 'Deployment job identity missing/ambiguous.')
     job = matches[0]
+    progress.mark('github_job', 'DEDICATED_RUNNER_MISMATCH')
     require(job.get('name') == 'deploy' and job.get('status') == 'in_progress'
             and job.get('run_id') == request['deployment_run_id'] and job.get('run_attempt') == request['deployment_run_attempt']
             and job.get('runner_id') in policy['runner_ids']

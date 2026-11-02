@@ -6,11 +6,13 @@ import io
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 import tempfile
 import textwrap
 import unittest
 from unittest.mock import patch
+from types import SimpleNamespace
 import zipfile
 
 import test_release_preparation as release_fixtures
@@ -272,6 +274,51 @@ class UatDeploymentTests(unittest.TestCase):
             self.execute()
         self.assertEqual(self.calls, [])
 
+    def test_main_audits_actual_early_stages_before_history_or_docker_commands(self):
+        original_policy = copy.deepcopy(self.policy)
+        original_current = copy.deepcopy(self.current)
+        real_fstat = os.fstat
+
+        def root_stat(descriptor):
+            info = list(real_fstat(descriptor))
+            info[4] = 0
+            return os.stat_result(info)
+
+        for failure, expected in [('disabled', ('configuration', 'AUTOMATION_DISABLED')),
+                                  ('policy', ('policy', 'POLICY_INVALID')),
+                                  ('oidc', ('oidc_identity', 'OIDC_SUBJECT_MISMATCH')),
+                                  ('job', ('github_job', 'CHECK_RUN_MATCH_INVALID')),
+                                  ('release', ('release_evidence', 'RELEASE_EVIDENCE_INVALID')),
+                                  ('schema', ('release_validation', 'RELEASE_VALIDATION_FAILED'))]:
+            policy = copy.deepcopy(original_policy)
+            current = copy.deepcopy(original_current)
+            if failure == 'disabled': policy['enabled'] = False
+            if failure == 'policy': policy['operator_ids'] = []
+            if failure == 'schema': current['migration_inventory'] = []
+            for name, value in [('automation', policy), ('current', current)]:
+                (self.root/'config'/(name+'.json')).write_text(json.dumps(value))
+            self.api.collection.return_value = {'jobs': [] if failure == 'job' else [identity_fixtures.deployment_job()]}
+            self.api.release.side_effect = OSError('synthetic-secret-api-response') if failure == 'release' else None
+
+            def oidc(token, request, policy, progress):
+                if failure == 'oidc':
+                    progress.mark('oidc_identity', 'OIDC_SUBJECT_MISMATCH')
+                    raise ValueError('synthetic-secret-claims')
+                return self.claims
+
+            with self.subTest(failure=failure), patch.object(deploy, 'request_from', return_value=self.envelope), \
+                    patch.object(deploy.auth, 'verify_oidc', side_effect=oidc), \
+                    patch.object(deploy.auth, 'GitHub', return_value=self.api), \
+                    patch.object(deploy.os, 'fstat', side_effect=root_stat), \
+                    patch.object(deploy.signal, 'signal'), patch.object(deploy.signal, 'alarm'), self.assertRaises(SystemExit) as result:
+                deploy.main()
+            record = json.loads((self.root/'authorization-audit.jsonl').read_text().splitlines()[-1])
+            self.assertEqual((record['stage'], record['reason']), expected)
+            self.assertEqual(list((self.root/'history').iterdir()), [])
+            self.assertFalse((self.root/'config/recovery-required.json').exists())
+            self.assertEqual(self.calls, [])
+            self.assertNotIn('synthetic-secret', (self.root/'authorization-audit.jsonl').read_text()+str(result.exception))
+
     def test_held_host_lock_blocks_a_second_operator(self):
         import fcntl
         with (self.root/'deployment.lock').open('r+') as lock:
@@ -444,10 +491,119 @@ class ImageIdentityTests(unittest.TestCase):
                     self.runner.running_image(changed, self.manifest)
 
 
+class AuthorizationAuditTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix='dcms-authorization-audit-')
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.log = self.root/'authorization-audit.jsonl'
+        self.real_fstat = os.fstat
+        patches = [patch.object(deploy, 'ROOT', self.root),
+                   patch.object(deploy, 'protected', side_effect=lambda path, private=False: Path(path)),
+                   patch.object(deploy.os, 'geteuid', return_value=0),
+                   patch.object(deploy.os, 'fstat', side_effect=self.root_stat),
+                   patch.object(deploy.signal, 'signal'), patch.object(deploy.signal, 'alarm')]
+        for item in patches:
+            item.start()
+            self.addCleanup(item.stop)
+
+    def root_stat(self, descriptor):
+        info = list(self.real_fstat(descriptor))
+        info[4] = 0
+        return os.stat_result(info)
+
+    def test_audit_appends_only_fixed_codes_and_time_with_private_permissions(self):
+        progress = deploy.auth.AuthorizationProgress()
+        progress.mark('oidc_identity', 'OIDC_SUBJECT_MISMATCH')
+        deploy.audit_failure(progress)
+        progress.mark('github_job', 'CHECK_RUN_MATCH_INVALID')
+        deploy.audit_failure(progress)
+        records = [json.loads(line) for line in self.log.read_text().splitlines()]
+        self.assertEqual(len(records), 2)
+        self.assertEqual(records[0]['stage'], 'oidc_identity')
+        self.assertEqual(records[0]['reason'], 'OIDC_SUBJECT_MISMATCH')
+        self.assertEqual(records[1]['reason'], 'CHECK_RUN_MATCH_INVALID')
+        for record in records:
+            self.assertEqual(set(record), {'time', 'stage', 'reason'})
+            self.assertIsNotNone(datetime.datetime.fromisoformat(record['time']).tzinfo)
+        self.assertEqual(stat.S_IMODE(self.log.stat().st_mode), 0o600)
+
+    def test_malformed_request_is_audited_before_authorization_or_history_without_body(self):
+        with patch.object(deploy.sys, 'stdin', SimpleNamespace(buffer=io.BytesIO(b'{synthetic-secret-request'))), \
+                patch.object(deploy, 'execute') as execute, self.assertRaises(SystemExit) as result:
+            deploy.main()
+        record = json.loads(self.log.read_text())
+        self.assertEqual((record['stage'], record['reason']), ('request', 'REQUEST_INVALID'))
+        self.assertNotIn('synthetic-secret-request', self.log.read_text()+str(result.exception))
+        execute.assert_not_called()
+        self.assertFalse((self.root/'history').exists())
+
+    def test_early_authorization_refusal_logs_stage_without_tokens_or_exception_text(self):
+        envelope = {'oidc_token': 'synthetic-secret-jwt', 'github_token': 'synthetic-secret-github',
+                    'request': {'password': 'synthetic-secret-password'}}
+
+        def refuse(envelope, progress):
+            progress.mark('oidc_identity', 'OIDC_SUBJECT_MISMATCH')
+            raise ValueError('synthetic-secret-response')
+
+        stderr = io.StringIO()
+        with patch.object(deploy, 'request_from', return_value=envelope), patch.object(deploy, 'execute', side_effect=refuse), \
+                patch.object(deploy.sys, 'stderr', stderr), self.assertRaises(SystemExit) as result:
+            deploy.main()
+        record = json.loads(self.log.read_text())
+        self.assertEqual((record['stage'], record['reason']), ('oidc_identity', 'OIDC_SUBJECT_MISMATCH'))
+        self.assertNotIn('synthetic-secret', self.log.read_text()+str(result.exception)+stderr.getvalue())
+        self.assertFalse((self.root/'config/recovery-required.json').exists())
+        self.assertFalse((self.root/'history').exists())
+
+    def test_unsafe_symlink_hardlink_fifo_permissions_or_owner_refuse_audit_writes(self):
+        target = self.root/'target'
+        target.write_text('unchanged')
+        target.chmod(0o600)
+        for kind in ('symlink', 'hardlink', 'fifo', 'permissions', 'owner'):
+            with self.subTest(kind=kind):
+                if kind == 'symlink': self.log.symlink_to(target)
+                if kind == 'hardlink': os.link(target, self.log)
+                if kind == 'fifo': os.mkfifo(self.log, 0o600)
+                if kind in ('permissions', 'owner'):
+                    self.log.write_text('unchanged')
+                    self.log.chmod(0o644 if kind == 'permissions' else 0o600)
+                owner_stat = self.root_stat
+                if kind == 'owner':
+                    def owner_stat(descriptor):
+                        info = list(self.real_fstat(descriptor))
+                        info[4] = 999
+                        return os.stat_result(info)
+                with patch.object(deploy.os, 'fstat', side_effect=owner_stat), self.assertRaises((ValueError, OSError)):
+                    deploy.audit_failure(deploy.auth.AuthorizationProgress())
+                self.log.unlink()
+                self.assertEqual(target.read_text(), 'unchanged')
+
+    def test_untrusted_parent_and_unknown_diagnostic_code_never_write(self):
+        with patch.object(deploy, 'protected', side_effect=ValueError('synthetic-secret')), self.assertRaises(ValueError):
+            deploy.audit_failure(deploy.auth.AuthorizationProgress())
+        progress = deploy.auth.AuthorizationProgress()
+        progress.reason = 'synthetic-secret\nforged-record'
+        with self.assertRaises(ValueError):
+            deploy.audit_failure(progress)
+        self.assertFalse(self.log.exists())
+
+    def test_audit_storage_failure_reports_fixed_warning_and_never_converts_refusal_to_success(self):
+        for error in (OSError('synthetic-secret-disk'), BlockingIOError('synthetic-secret-lock')):
+            stderr = io.StringIO()
+            with self.subTest(error=type(error)), patch.object(deploy, 'request_from', side_effect=ValueError('synthetic-secret-body')), \
+                    patch.object(deploy, 'audit_failure', side_effect=error), patch.object(deploy.sys, 'stderr', stderr), \
+                    self.assertRaises(SystemExit) as result:
+                deploy.main()
+            self.assertIn('authorization audit unavailable', stderr.getvalue())
+            self.assertNotIn('synthetic-secret', stderr.getvalue()+str(result.exception))
+
+
 class DeploymentBoundaryTests(unittest.TestCase):
     def test_schema_refusal_reports_controlled_migration_without_echoing_exception_contents(self):
         with patch.object(deploy, 'request_from', return_value={}), \
                 patch.object(deploy, 'execute', side_effect=deploy.auth.SchemaReviewRequired('synthetic-secret-never-log')), \
+                patch.object(deploy, 'record_failure'), \
                 patch.object(deploy.signal, 'signal'), patch.object(deploy.signal, 'alarm'), self.assertRaises(SystemExit) as result:
             deploy.main()
         self.assertIn('separate controlled migration/recovery is required', str(result.exception))
