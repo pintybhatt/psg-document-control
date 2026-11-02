@@ -1,6 +1,6 @@
 # Private GHCR and controlled UAT release
 
-> The current prepared, disabled [GitHub UAT automation](github-uat.md) uses authenticated GitHub OIDC and release evidence. It requires no per-release root request bundle or environment reviewer; its app-only/schema and recovery rules supersede earlier UAT automation/approval statements below. The manual bootstrap, backup and controlled-migration procedures remain separate administrator work. No live setting was changed.
+> The current [one-click GitHub UAT workflow](github-uat.md) automatically selects tested evidence for current main, or dispatches this authorized publisher with full CI and existing publication controls. Normal deployment needs no IDs; rollback is an advanced explicit operation. Its OIDC/app-only/schema and recovery rules supersede earlier UAT automation/approval statements below. The dated readiness observations below are historical. Manual bootstrap, backup and controlled migrations remain separate administrator work. No live setting was changed by this update.
 
 Preparation candidate: `a7e0a5ded145319c5c60fd7e122cc42e14599c10`, verified against clean local main, origin/main and GitHub main on 2026-10-28. Includes SOP B1 numbering PR #5 and MySQL assertion correction PR #6. **Publication and deployment remain off.** This change moves the disabled publisher into `.github/workflows/release-image.yml` for PR review; no dispatch, registry write, setting change or server access is authorized by this preparation.
 

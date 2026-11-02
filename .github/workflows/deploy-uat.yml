@@ -2,20 +2,20 @@ name: Deploy DCMS UAT
 on:
   workflow_dispatch:
     inputs:
-      release_run_id:
-        description: Successful Authorized release image run ID
-        required: true
-        type: string
-      release_artifact_id:
-        description: Release-manifest artifact ID from that successful run
-        required: true
-        type: string
       operation:
-        description: Deploy forward, or return to the recorded previous release with identical schema
+        description: Normal deploy (automatic release), or advanced rollback
         required: true
         type: choice
         options: [deploy, rollback]
         default: deploy
+      release_run_id:
+        description: Advanced rollback only - previous publication run ID (leave blank for deploy)
+        required: false
+        type: string
+      release_artifact_id:
+        description: Advanced rollback only - previous manifest artifact ID (leave blank for deploy)
+        required: false
+        type: string
       rollback_compatibility_reference:
         description: Rollback only - operator review confirming previous app supports current data/schema
         required: false
@@ -23,25 +23,102 @@ on:
 permissions:
   contents: read
   actions: read
-  id-token: write
 concurrency:
   group: dcms-uat-xppl-deployment
   cancel-in-progress: false
 jobs:
+  resolve:
+    environment: uat
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      release_run_id: ${{ steps.release.outputs.release_run_id }}
+      release_artifact_id: ${{ steps.release.outputs.release_artifact_id }}
+      needs_publication: ${{ steps.release.outputs.needs_publication }}
+    steps:
+      - name: Require enabled UAT dispatch from main
+        env:
+          ENABLED: ${{ vars.ENABLE_UAT_DEPLOYMENT }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" != workflow_dispatch || "$GITHUB_REF" != refs/heads/main || "$GITHUB_REPOSITORY" != pintybhatt/psg-document-control ]]; then
+            echo '::error::UAT deployment requires a manual dispatch from this repository main.'
+            exit 1
+          fi
+          if [[ "$ENABLED" != true ]]; then
+            echo '::error::UAT deployment is disabled: ENABLE_UAT_DEPLOYMENT must be true in the uat environment.'
+            exit 1
+          fi
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Select tested publication for current main (advanced rollback uses explicit evidence)
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPERATION: ${{ inputs.operation }}
+          RELEASE_RUN_ID: ${{ inputs.release_run_id }}
+          RELEASE_ARTIFACT_ID: ${{ inputs.release_artifact_id }}
+          ROLLBACK_COMPATIBILITY_REFERENCE: ${{ inputs.rollback_compatibility_reference }}
+        run: python3 -I -B docker/select-uat-release.py
+
+  publish:
+    needs: resolve
+    if: needs.resolve.outputs.needs_publication == 'true'
+    environment: uat
+    runs-on: ubuntu-24.04
+    timeout-minutes: 85
+    permissions:
+      contents: read
+      actions: write
+    outputs:
+      release_run_id: ${{ steps.release.outputs.release_run_id }}
+      release_artifact_id: ${{ steps.release.outputs.release_artifact_id }}
+    steps:
+      - name: Recheck UAT authorization before requesting publication
+        env:
+          ENABLED: ${{ vars.ENABLE_UAT_DEPLOYMENT }}
+        run: |
+          if [[ "$ENABLED" != true ]]; then
+            echo '::error::UAT deployment is disabled; publication was not requested.'
+            exit 1
+          fi
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Invoke authorized release pipeline and wait for complete publication evidence
+        id: release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python3 -I -B docker/select-uat-release.py publish
+
   deploy:
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'pintybhatt/psg-document-control' && vars.ENABLE_UAT_DEPLOYMENT == 'true'
+    needs: [resolve, publish]
+    if: ${{ !cancelled() && needs.resolve.result == 'success' && (needs.publish.result == 'success' || needs.publish.result == 'skipped') }}
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
     environment: uat
     runs-on: [self-hosted, Linux, X64, dcms-uat-runner]
     timeout-minutes: 20
     steps:
+      - name: Recheck UAT deployment switch
+        env:
+          ENABLED: ${{ vars.ENABLE_UAT_DEPLOYMENT }}
+        run: |
+          if [[ "$ENABLED" != true ]]; then
+            echo '::error::UAT deployment is disabled; no server request was emitted.'
+            exit 1
+          fi
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
       - name: Authenticate dispatch and derive image from current GitHub release evidence
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          RELEASE_RUN_ID: ${{ inputs.release_run_id }}
-          RELEASE_ARTIFACT_ID: ${{ inputs.release_artifact_id }}
+          RELEASE_RUN_ID: ${{ needs.resolve.outputs.release_run_id || needs.publish.outputs.release_run_id }}
+          RELEASE_ARTIFACT_ID: ${{ needs.resolve.outputs.release_artifact_id || needs.publish.outputs.release_artifact_id }}
           OPERATION: ${{ inputs.operation }}
           ROLLBACK_COMPATIBILITY_REFERENCE: ${{ inputs.rollback_compatibility_reference }}
         run: |
@@ -82,3 +159,24 @@ jobs:
         if: always()
         shell: bash
         run: rm -f -- "$RUNNER_TEMP/uat-request.json"
+
+  result:
+    needs: [resolve, publish, deploy]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions: {}
+    steps:
+      - name: Report deployment result
+        env:
+          RESOLVE: ${{ needs.resolve.result }}
+          PUBLISH: ${{ needs.publish.result }}
+          DEPLOY: ${{ needs.deploy.result }}
+        run: |
+          if [[ "$RESOLVE" == success && ( "$PUBLISH" == success || "$PUBLISH" == skipped ) && "$DEPLOY" == success ]]; then
+            echo 'DCMS UAT deployment succeeded.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::error::DCMS UAT deployment did not succeed (resolve=$RESOLVE publication=$PUBLISH deploy=$DEPLOY). See the failed job; schema changes require separate controlled migration/recovery."
+            echo "DCMS UAT deployment failed or was refused. Resolve: $RESOLVE; publication: $PUBLISH; deploy: $DEPLOY. See job diagnostics." >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi

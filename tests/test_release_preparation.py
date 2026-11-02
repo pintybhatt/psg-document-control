@@ -328,8 +328,9 @@ class ReleaseConfigurationTests(unittest.TestCase):
         workflow = (ROOT/'.github/workflows/release-image.yml').read_text()
         publish = workflow.split('  publish:\n', 1)[1]
         self.assertRegex(publish, r'(?m)^    needs: ci$')
-        self.assertRegex(publish, r"\n    if: .*workflow_dispatch.*refs/heads/main.*pintybhatt/psg-document-control.*ENABLE_IMAGE_PUBLISHING")
-        self.assertIn("vars.ENABLE_IMAGE_PUBLISHING == 'true'", publish)
+        self.assertRegex(publish, r"\n    if: .*workflow_dispatch.*refs/heads/main.*pintybhatt/psg-document-control")
+        self.assertIn('ENABLED: ${{ vars.ENABLE_IMAGE_PUBLISHING }}', publish)
+        self.assertLess(publish.index('Require explicit publication authorization'), publish.index('actions/checkout@'))
         self.assertEqual(workflow.count('packages: write'), 1)
         self.assertIn('    environment: release-image\n', publish)
         self.assertIn('      retain_image: true\n', workflow)

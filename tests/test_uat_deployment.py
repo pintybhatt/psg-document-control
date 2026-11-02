@@ -41,10 +41,13 @@ def release_fixture():
 
 class RequestPreparationTests(unittest.TestCase):
     def setUp(self):
-        self.environment = patch.dict(os.environ, GH_TOKEN='synthetic-read-token', GITHUB_RUN_ID='789', GITHUB_RUN_ATTEMPT='1',
+        self.environment = patch.dict(os.environ, GH_TOKEN='synthetic-read-token', GITHUB_SHA=SOURCE, GITHUB_RUN_ID='789', GITHUB_RUN_ATTEMPT='1',
                          ACTIONS_ID_TOKEN_REQUEST_URL='https://pipelines.actions.githubusercontent.com/synthetic?api-version=1',
                          ACTIONS_ID_TOKEN_REQUEST_TOKEN='synthetic-oidc-request-token')
         self.environment.start()
+        self.branch = patch.object(prepare.auth.GitHub, 'get', return_value={'protected': True, 'commit': {'sha': SOURCE}})
+        self.branch.start()
+        self.addCleanup(self.branch.stop)
         self.addCleanup(self.environment.stop)
         fixture = release_fixture()
         self.release = {'manifest': fixture.manifest_bytes, 'run': fixture.run,
@@ -454,11 +457,11 @@ class DeploymentBoundaryTests(unittest.TestCase):
         repository = Path(__file__).resolve().parent.parent
         workflow = (repository/'.github/workflows/deploy-uat.yml').read_text()
         self.assertIn('  workflow_dispatch:', workflow)
-        self.assertIn("github.ref == 'refs/heads/main'", workflow)
-        self.assertIn("vars.ENABLE_UAT_DEPLOYMENT == 'true'", workflow)
+        self.assertIn('"$GITHUB_REF" != refs/heads/main', workflow)
+        self.assertIn('ENABLED: ${{ vars.ENABLE_UAT_DEPLOYMENT }}', workflow)
         self.assertIn('runs-on: [self-hosted, Linux, X64, dcms-uat-runner]', workflow)
         self.assertIn('    environment: uat', workflow)
-        self.assertIn('  contents: read\n  actions: read\n  id-token: write', workflow)
+        self.assertIn('      contents: read\n      actions: read\n      id-token: write', workflow)
         self.assertNotIn('packages: write', workflow)
         self.assertNotIn('      image:', workflow)
         self.assertNotIn('      request_id:', workflow)
@@ -468,7 +471,8 @@ class DeploymentBoundaryTests(unittest.TestCase):
     def test_runner_uses_pinned_host_identity_and_removes_temporary_credentials(self):
         repository = Path(__file__).resolve().parent.parent
         workflow = (repository/'.github/workflows/deploy-uat.yml').read_text()
-        script = textwrap.dedent(workflow.split('        run: |\n')[-1].split('      - name:', 1)[0])
+        ssh_step = workflow.split('      - name: Invoke only the enrolled UAT entry point\n', 1)[1]
+        script = textwrap.dedent(ssh_step.split('        run: |\n', 1)[1].split('      - name:', 1)[0])
         with tempfile.TemporaryDirectory(prefix='dcms-fake-ssh-') as directory:
             root = Path(directory)
             executable = root/'ssh'
