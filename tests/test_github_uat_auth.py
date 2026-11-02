@@ -97,6 +97,80 @@ class OidcVerificationTests(unittest.TestCase):
         self.assertEqual(verified['repository_id'], '1435463595')
         self.assertEqual(verified['actor_id'], '8923839')
 
+    def test_authorized_operator_passes_with_absent_or_matching_optional_job_workflow_claims(self):
+        policy = dict(POLICY, repository_id=1435463595, operator_ids=[8923839], runner_ids=[21])
+        claims = dict(claims_for(request()), repository_id='1435463595', actor_id='8923839')
+        for optional in ({}, {'job_workflow_ref': claims['workflow_ref']}, {'job_workflow_sha': claims['workflow_sha']},
+                         {'job_workflow_ref': claims['workflow_ref'], 'job_workflow_sha': claims['workflow_sha']}):
+            with self.subTest(optional=optional):
+                verified = self.verify(self.token(dict(claims, **optional)), policy=policy)
+                self.assertEqual(verified['actor_id'], '8923839')
+                self.assertEqual(verified['workflow_ref'], auth.REPOSITORY+'/'+auth.WORKFLOW+'@refs/heads/main')
+
+    def test_unauthorized_operator_has_its_own_reason_regardless_of_job_claim_presence(self):
+        policy = dict(POLICY, operator_ids=[8923839])
+        claims = claims_for(request())
+        for actor in ('999', 8923839, None, ''):
+            for optional in ({}, {'job_workflow_ref': claims['workflow_ref'], 'job_workflow_sha': claims['workflow_sha']}):
+                progress = auth.AuthorizationProgress()
+                with self.subTest(actor=actor, optional=optional), self.assertRaisesRegex(ValueError, 'operator'):
+                    self.verify(self.token(dict(claims, actor_id=actor, **optional)), policy=policy, progress=progress)
+                self.assertEqual(vars(progress), {'stage': 'oidc_identity', 'reason': 'OIDC_OPERATOR_MISMATCH'})
+
+    def test_optional_job_workflow_ref_cannot_authorize_a_different_repository_workflow_or_ref(self):
+        values = ['other/repository/'+auth.WORKFLOW+'@refs/heads/main',
+                  auth.REPOSITORY+'/.github/workflows/ci.yml@refs/heads/main',
+                  auth.REPOSITORY+'/'+auth.WORKFLOW+'@refs/heads/feature',
+                  auth.REPOSITORY+'/'+auth.WORKFLOW+'@refs/tags/main',
+                  auth.REPOSITORY+'/'+auth.WORKFLOW+'@'+'d'*40,
+                  auth.REPOSITORY+'/'+auth.WORKFLOW+'@refs/heads/main/extra', '', None, 123]
+        for value in values:
+            progress = auth.AuthorizationProgress()
+            with self.subTest(value=value), self.assertRaisesRegex(ValueError, 'job workflow'):
+                self.verify(self.token(dict(claims_for(request()), job_workflow_ref=value)), progress=progress)
+            self.assertEqual(vars(progress), {'stage': 'oidc_identity', 'reason': 'OIDC_JOB_WORKFLOW_REF_MISMATCH'})
+
+    def test_optional_job_workflow_sha_must_match_validated_workflow_sha_with_or_without_job_ref(self):
+        claims = claims_for(request())
+        for value in ('f'*40, 'd'*39, '', None, 123):
+            for optional in ({}, {'job_workflow_ref': claims['workflow_ref']}):
+                progress = auth.AuthorizationProgress()
+                with self.subTest(value=value, optional=optional), self.assertRaisesRegex(ValueError, 'job workflow revision'):
+                    self.verify(self.token(dict(claims, job_workflow_sha=value, **optional)), progress=progress)
+                self.assertEqual(vars(progress), {'stage': 'oidc_identity', 'reason': 'OIDC_JOB_WORKFLOW_SHA_MISMATCH'})
+
+    def test_matching_optional_job_identity_does_not_bypass_independent_api_operator_verification(self):
+        policy = dict(POLICY, repository_id=1435463595, operator_ids=[8923839], runner_ids=[21])
+        payload = request(deployment_run_id=41384659499)
+        claims = dict(claims_for(payload), repository_id='1435463595', actor_id='8923839',
+                      check_run_id='125084866857', sha='8f0edb99377512b6ec93653f9de904ca7573214b',
+                      workflow_sha='8f0edb99377512b6ec93653f9de904ca7573214b')
+        claims.update(job_workflow_ref=claims['workflow_ref'], job_workflow_sha=claims['workflow_sha'])
+        verified = self.verify(self.token(claims), payload=payload, policy=policy)
+        run = dict(deployment_run(), id=payload['deployment_run_id'], head_sha=verified['sha'],
+                   repository={'id': 1435463595}, head_repository={'id': 1435463595},
+                   actor={'id': 8923839}, triggering_actor={'id': 8923839})
+        job = dict(deployment_job(), run_id=payload['deployment_run_id'], runner_id=21,
+                   check_run_url='https://api.github.com/repos/'+auth.REPOSITORY+'/check-runs/125084866857')
+        for change in (None, 'actor', 'triggering_actor'):
+            current = copy.deepcopy(run)
+            if change is not None:
+                current[change]['id'] = 999
+            api = auth.GitHub('synthetic-read-token')
+            progress = auth.AuthorizationProgress()
+            with self.subTest(change=change), \
+                    patch.object(api, 'get', side_effect=[{'id': 1435463595, 'full_name': auth.REPOSITORY, 'private': True},
+                             {'protected': True, 'commit': {'sha': verified['sha']}}, current]), \
+                    patch.object(api, 'collection', return_value={'jobs': [job]}) as jobs:
+                if change is None:
+                    auth.workflow_current(api, payload, verified, policy, progress=progress)
+                    jobs.assert_called_once()
+                else:
+                    with self.assertRaisesRegex(ValueError, 'unauthorized'):
+                        auth.workflow_current(api, payload, verified, policy, progress=progress)
+                    self.assertEqual(progress.reason, 'DEPLOYMENT_RUN_MISMATCH')
+                    jobs.assert_not_called()
+
     def test_wrong_subject_owner_repository_environment_and_legacy_format_are_audited_and_refused(self):
         subjects = [
             'repo:pintybhatt@8923840/psg-document-control@1435463595:environment:uat',
@@ -123,7 +197,8 @@ class OidcVerificationTests(unittest.TestCase):
                    'runner_environment': 'OIDC_RUNNER_ENVIRONMENT_MISMATCH', 'workflow_ref': 'OIDC_WORKFLOW_REF_MISMATCH',
                    'run_id': 'OIDC_RUN_ID_MISMATCH', 'run_attempt': 'OIDC_RUN_ATTEMPT_MISMATCH',
                    'actor_id': 'OIDC_OPERATOR_MISMATCH', 'workflow_sha': 'OIDC_WORKFLOW_REVISION_INVALID',
-                   'check_run_id': 'OIDC_CHECK_RUN_ID_INVALID', 'job_workflow_ref': 'OIDC_OPERATOR_MISMATCH'}
+                   'check_run_id': 'OIDC_CHECK_RUN_ID_INVALID', 'job_workflow_ref': 'OIDC_JOB_WORKFLOW_REF_MISMATCH',
+                   'job_workflow_sha': 'OIDC_JOB_WORKFLOW_SHA_MISMATCH'}
         for key, reason in reasons.items():
             progress = auth.AuthorizationProgress()
             value = '' if key == 'check_run_id' else 'synthetic-sensitive-claim'
