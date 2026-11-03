@@ -11,6 +11,18 @@
   "company_code": "XPPL",
   "site_id": 2,
   "site_code": "XPPL",
+  "company": {
+    "code": "XPPL",
+    "name_en": "Xekong Power Plant Co., Ltd.",
+    "name_lo": "Xekong Power Plant Co., Ltd.",
+    "active": true
+  },
+  "site": {
+    "code": "XPPL",
+    "name_en": "Xekong Power Plant Co., Ltd.",
+    "name_lo": "Xekong Power Plant Co., Ltd.",
+    "active": true
+  },
   "departments": [
     {
       "code": "ADM",
