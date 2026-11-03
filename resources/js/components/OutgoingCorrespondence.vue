@@ -59,9 +59,16 @@ const descriptionFields = ['description_en', 'description_lo'];
 const canManage = computed(() => props.scope.permissions.includes('outgoing.drafts.manage'));
 const canRegister = computed(() => props.scope.permissions.includes('outgoing.register') && props.scope.permissions.includes('numbering.issue'));
 const label = item => item?.[language.value === 'lo' ? 'name_lo' : 'name_en'] ?? '';
-const typeOptions = computed(() => [{ value: '', label: t('uiChoose') }, ...types.value.map(item => ({ value: item.id, label: label(item) }))]);
+const typeLabel = item => automaticOfficial.value && item?.code === 'LTR' ? t('outgoingOfficialLetter') : label(item);
+const eligibleTypes = computed(() => automaticOfficial.value ? types.value.filter(item => item.code === 'LTR') : types.value);
+const needsTypeCorrection = computed(() => automaticOfficial.value && detail.value && !detail.value.registered_at && detail.value.type?.code !== 'LTR');
+const typeOptions = computed(() => [
+    { value: '', label: t('uiChoose') },
+    ...(needsTypeCorrection.value ? [{ value: detail.value.type_id, label: t('outgoingCurrentDraftType'), disabled: true }] : []),
+    ...eligibleTypes.value.map(item => ({ value: item.id, label: typeLabel(item) })),
+]);
 const selectedType = computed(() => types.value.find(item => String(item.id) === String(form.type_id)));
-const selectedCategoryLabel = computed(() => label(selectedType.value?.category));
+const selectedCategoryLabel = computed(() => label(selectedType.value?.category ?? (String(form.type_id) === String(detail.value?.type_id) ? detail.value?.category : null)));
 const scopeDepartmentLabel = computed(() => label(props.scope.department) || t('siteWideDepartment'));
 const authorizedDepartmentOptions = computed(() => props.departmentOptions.length ? props.departmentOptions : [{ value: props.scope.key, label: scopeDepartmentLabel.value }]);
 const departmentContext = computed({
@@ -149,6 +156,7 @@ async function edit(create = false) {
     const record = detail.value;
     for (const field of [...textFields, ...descriptionFields]) { form[field] = record?.[field] ?? ''; }
     Object.assign(form, { type_id: record?.type_id ?? '', priority: record?.priority ?? 'normal', classification: record?.classification ?? 'normal', recipients: record?.recipients?.map(item => Object.fromEntries(['kind', ...recipientFields].map(field => [field, item[field] ?? '']))) ?? [emptyRecipient()] });
+    if (create && automaticOfficial.value && eligibleTypes.value.length === 1) { form.type_id = eligibleTypes.value[0].id; }
     fields.value = {}; error.value = ''; editing.value = true;
     await nextTick(); editorElement.value?.querySelector('h2')?.focus();
 }
@@ -166,7 +174,7 @@ async function save() {
     finally { if (!signal.aborted) { saving.value = false; } }
 }
 async function register() {
-    if (saving.value || !detail.value || !canRegister.value) { return; }
+    if (saving.value || !detail.value || !canRegister.value || needsTypeCorrection.value) { return; }
     const signal = controller.signal; const id = detail.value.id;
     saving.value = true; error.value = ''; fields.value = {};
     try {
@@ -200,7 +208,9 @@ onBeforeUnmount(() => controller?.abort());
             <p v-if="scope.permissions.includes('documents.attachments.manage')" class="text-sm text-slate-600">{{ t('storageDraftHelp') }}</p>
             <fieldset :disabled="saving" class="grid gap-4 md:grid-cols-2"><legend class="mb-3 font-semibold">{{ t('documentInformation') }}</legend>
                 <SelectInput id="outgoing-department" v-model="departmentContext" :label="t('outgoingIssuingDepartment')" :options="authorizedDepartmentOptions" :helper="t('documentDepartmentHelp')" :disabled="!!detail || saving" required />
-                <SelectInput id="outgoing-type" v-model="form.type_id" :label="t('documentType')" :options="typeOptions" :error-key="fields.type_id?.[0]" required />
+                <SelectInput id="outgoing-type" v-model="form.type_id" :label="t('documentType')" :options="typeOptions" :helper="automaticOfficial ? t('outgoingOfficialTypeHelp') : undefined" :error-key="fields.type_id?.[0]" required />
+                <p v-if="needsTypeCorrection" class="text-sm text-slate-600">{{ t('outgoingCorrectDraftType') }}</p>
+                <p v-if="automaticOfficial && !eligibleTypes.length" role="status" class="text-sm text-slate-600">{{ t('outgoingOfficialTypeMissing') }}</p>
                 <TextInput id="outgoing-category" :model-value="selectedCategoryLabel" :label="t('documentCategory')" :helper="t('documentCategoryHelp')" readonly />
                 <SelectInput v-if="!detail" id="outgoing-classification" v-model="form.classification" :label="t('outgoingClassification')" :options="classificationOptions" :helper="t(`confidentiality-${form.classification}-description`)" :error-key="fields.classification?.[0]" required />
                 <SelectInput id="outgoing-priority" v-model="form.priority" :label="t('outgoingPriority')" :options="priorityOptions" :error-key="fields.priority?.[0]" required />
@@ -226,7 +236,8 @@ onBeforeUnmount(() => controller?.abort());
         </form>
         <section v-else-if="detail" class="flex flex-col gap-5 rounded-2xl border border-slate-200 bg-white p-5" aria-labelledby="outgoing-detail-title">
                 <SelectInput v-if="!automaticOfficial && !detail.registered_at && detail.xppl_namespaces?.length" v-model="namespaceId" :label="t('numberingSelection')" :options="namespaceOptions" :disabled="saving || loading" />
-            <div class="flex flex-wrap items-center justify-between gap-3"><h2 id="outgoing-detail-title" tabindex="-1" class="text-lg font-semibold">{{ detail.subject }}</h2><div v-if="detail.status === 'draft'" class="flex gap-3"><UiButton v-if="canManage" variant="secondary" :disabled="saving || loading" @click="edit()">{{ t('outgoingEdit') }}</UiButton><UiButton v-if="canRegister" :disabled="saving || loading" @click="confirmation = true">{{ t('outgoingRegister') }}</UiButton></div></div>
+            <div class="flex flex-wrap items-center justify-between gap-3"><h2 id="outgoing-detail-title" tabindex="-1" class="text-lg font-semibold">{{ detail.subject }}</h2><div v-if="detail.status === 'draft'" class="flex gap-3"><UiButton v-if="canManage" variant="secondary" :disabled="saving || loading" @click="edit()">{{ t('outgoingEdit') }}</UiButton><UiButton v-if="canRegister" :disabled="saving || loading || needsTypeCorrection" @click="confirmation = true">{{ t('outgoingRegister') }}</UiButton></div></div>
+            <p v-if="needsTypeCorrection" role="status" class="text-sm text-slate-600">{{ t('outgoingCorrectDraftType') }}</p>
             <CorrespondenceCorrection :key="detail.id" kind="outgoing" :record="detail" :scope="scope" :endpoint="endpoint" :csrf-token="csrfToken" :history="handling?.history ?? []" @failure="fail" @saved="operationSaved" />
             <div><UiButton variant="secondary" :disabled="loading || saving" @click="preview(`/${detail.id}/pdf`)">{{ t('reportPreviewDetailPdf') }}</UiButton></div>
             <dl class="grid gap-4 md:grid-cols-2">
@@ -234,7 +245,7 @@ onBeforeUnmount(() => controller?.abort());
                 <div><dt class="text-sm text-slate-600">{{ t('outgoingOfficialNumber') }}</dt><dd class="font-mono">{{ detail.official_number ?? '—' }}</dd></div>
                 <div><dt class="text-sm text-slate-600">{{ t('uiStatus') }}</dt><dd>{{ t(`outgoingStatus-${detail.operations?.status ?? detail.status}`) }}</dd></div>
                 <div><dt class="text-sm text-slate-600">{{ t('outgoingIssuingDepartment') }}</dt><dd>{{ scopeDepartmentLabel }}</dd></div>
-                <div><dt class="text-sm text-slate-600">{{ t('documentType') }}</dt><dd>{{ label(detail.type) }}</dd></div>
+                <div><dt class="text-sm text-slate-600">{{ t('documentType') }}</dt><dd>{{ typeLabel(detail.type) }}</dd></div>
                 <div><dt class="text-sm text-slate-600">{{ t('documentCategory') }}</dt><dd>{{ label(detail.category) }}</dd></div>
                 <div><dt class="text-sm text-slate-600">{{ t('outgoingClassification') }}</dt><dd>{{ t(`confidentiality-${detail.classification}`) }}</dd></div>
                 <div><dt class="text-sm text-slate-600">{{ t('outgoingPriority') }}</dt><dd>{{ t(`outgoingPriority-${detail.priority}`) }}</dd></div>

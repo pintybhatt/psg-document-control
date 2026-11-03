@@ -187,6 +187,7 @@ class OutgoingCorrespondenceTest extends TestCase
         unset($body['classification']);
         $body['subject'] = 'Must not persist';
         $event = 'eloquent.creating: '.OutgoingRecipient::class;
+        $body['recipients'][0]['organization'] = 'Changed recipient';
         app('events')->listen($event, fn () => false);
         try {
             $this->patchJson($this->url($scope, '/'.$id), $body)->assertInternalServerError();

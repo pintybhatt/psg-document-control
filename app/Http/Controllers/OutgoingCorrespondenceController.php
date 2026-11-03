@@ -55,11 +55,12 @@ class OutgoingCorrespondenceController extends Controller
     {
         $scope = $request->documentScope()->authorizationScope();
         $register = RegisterConfiguration::query()->where('scope_id', $scope->id)->where('register_key', 'outgoing')->first();
+        $automatic = app(XpplNumbering::class)->policyActive($scope->company_id, 'outgoing');
         $types = DocumentType::query()->where('scope_id', $scope->id)->with('category')->get()
-            ->filter(fn (DocumentType $type): bool => $register && $type->effectiveFor($register))
-            ->map(fn (DocumentType $type): array => $type->only(['id', 'name_en', 'name_lo', 'category_id']) + ['category' => $type->category->only(['id', 'name_en', 'name_lo'])])->values();
+            ->filter(fn (DocumentType $type): bool => $register && $type->effectiveFor($register) && (! $automatic || $type->code === 'LTR'))
+            ->map(fn (DocumentType $type): array => $type->only(['id', 'code', 'name_en', 'name_lo', 'category_id']) + ['category' => $type->category->only(['id', 'name_en', 'name_lo'])])->values();
 
-        return response()->json(['data' => $types, 'automatic_numbering' => app(XpplNumbering::class)->policyActive($scope->company_id, 'outgoing')]);
+        return response()->json(['data' => $types, 'automatic_numbering' => $automatic]);
     }
 
     public function show(OutgoingCorrespondenceRequest $request, string $record, ManageOutgoingCorrespondence $outgoing, ManageOutgoingOperations $operations): JsonResponse

@@ -75,6 +75,10 @@ class ManageOutgoingCorrespondence
             if (! $type || ! $type->effectiveFor($register)) {
                 throw ValidationException::withMessages(['type_id' => 'outgoingInvalidType']);
             }
+            if (app(XpplNumbering::class)->policyActive($scope->companyId, 'outgoing') && $type->code !== 'LTR'
+                && (! $record || $record->type_id !== $type->id)) {
+                throw ValidationException::withMessages(['type_id' => 'outgoingOfficialTypeRequired']);
+            }
             if (! $record) {
                 $profile = new DocumentSecurityProfile([
                     'resource_type' => DocumentResourceType::Outgoing, 'resource_key' => (string) Str::uuid(),
@@ -103,15 +107,21 @@ class ManageOutgoingCorrespondence
             if (! $record->save()) {
                 throw new LogicException('Outgoing persistence cancelled.');
             }
-            $record->recipients()->delete();
-            foreach ($recipients as $recipient) {
-                $recipient = new OutgoingRecipient($recipient);
-                $recipient->correspondence_id = $record->id;
-                if (! $recipient->save()) {
-                    throw new LogicException('Recipient persistence cancelled.');
+            $recipientFields = ['kind', 'organization', 'contact_name', 'email', 'phone', 'address'];
+            $currentRecipients = $record->recipients()->orderBy('id')->get()->map(fn (OutgoingRecipient $recipient): array => array_map(fn (string $field): mixed => $recipient->{$field}, $recipientFields))->all();
+            $nextRecipients = array_map(fn (array $recipient): array => array_map(fn (string $field): mixed => $recipient[$field] ?? null, $recipientFields), $recipients);
+            $recipientsChanged = $currentRecipients !== $nextRecipients;
+            if ($recipientsChanged) {
+                $record->recipients()->delete();
+                foreach ($recipients as $recipient) {
+                    $recipient = new OutgoingRecipient($recipient);
+                    $recipient->correspondence_id = $record->id;
+                    if (! $recipient->save()) {
+                        throw new LogicException('Recipient persistence cancelled.');
+                    }
                 }
             }
-            $this->audit($actor, $record, $creating ? 'created' : 'updated', [...$changed, 'recipients']);
+            $this->audit($actor, $record, $creating ? 'created' : 'updated', [...$changed, ...($recipientsChanged ? ['recipients'] : [])]);
 
             return $record->refresh();
         }, 1);

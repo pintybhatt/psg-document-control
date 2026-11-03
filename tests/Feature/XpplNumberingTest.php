@@ -23,7 +23,9 @@ use App\Models\Site;
 use App\Models\User;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\ValidationException;
 use PHPUnit\Framework\Attributes\TestWith;
 use Tests\Concerns\InteractsWithRbac;
@@ -172,6 +174,48 @@ class XpplNumberingTest extends TestCase
         $this->assertSame('XPPL-ADM-LTR-26-0001', $retry->official_number);
     }
 
+    public function test_official_letter_lookup_and_explicit_lot_draft_correction_preserve_document_content(): void
+    {
+        $this->setupCompany();
+        $site = $this->site('ADM', 'LOT', true, false);
+        $draft = $this->outgoingDraft($site);
+        $recipientIds = $draft->recipients()->pluck('id')->all();
+        $profileId = $draft->profile_id;
+        $unit = $site['scope'];
+        $scope = $unit->authorizationScope();
+        $register = RegisterConfiguration::query()->where('scope_id', $scope->id)->where('register_key', 'outgoing')->sole();
+        $ltr = DocumentType::factory()->create(['scope_id' => $scope->id, 'category_id' => $site['type']->category_id, 'code' => 'LTR']);
+        $ltr->registers()->attach($register->id, ['scope_id' => $scope->id]);
+        $this->grant($this->actor, $scope, ['documents.attachments.manage', 'documents.content.preview', 'documents.attachments.download']);
+        Storage::fake('documents');
+        $query = '?'.http_build_query(['company_id' => $unit->companyId, 'site_id' => $unit->siteId, 'department_id' => $unit->departmentId]);
+        $attachment = $this->postJson('/api/v1/document-storage/outgoing/'.$draft->id.'/attachments'.$query, [
+            'file' => UploadedFile::fake()->createWithContent('existing.pdf', "%PDF-1.4\n1 0 obj\n<< /Type /Catalog >>\nendobj\n%%EOF"),
+            'reason' => 'Existing draft attachment',
+        ])->assertCreated()->json('data.id');
+        app(XpplNumbering::class)->activatePolicy($this->actor, $this->companyScope, ['register_kind' => 'outgoing', 'confirm' => true]);
+        $this->getJson('/api/v1/outgoing-correspondence/lookups'.$query)->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $ltr->id)->assertJsonPath('data.0.code', 'LTR');
+        $body = ['type_id' => $ltr->id, 'subject' => $draft->subject, 'signatory_name' => $draft->signatory_name,
+            'document_date' => $draft->document_date->format('Y-m-d'), 'priority' => $draft->priority,
+            'recipients' => $draft->recipients->map(fn ($recipient): array => $recipient->only(['kind', 'organization', 'contact_name', 'email', 'phone', 'address']))->all()];
+        $this->postJson('/api/v1/outgoing-correspondence'.$query, array_replace($body, ['type_id' => $site['type_id'], 'classification' => 'normal']))->assertUnprocessable()->assertJsonValidationErrors('type_id');
+        $ltr->registers()->detach($register->id);
+        $this->patchJson('/api/v1/outgoing-correspondence/'.$draft->id.$query, $body)->assertUnprocessable()->assertJsonValidationErrors('type_id');
+        $ltr->registers()->attach($register->id, ['scope_id' => $scope->id]);
+        $this->patchJson('/api/v1/outgoing-correspondence/'.$draft->id.$query, $body)->assertOk()->assertJsonPath('data.type_id', $ltr->id)->assertJsonPath('data.id', $draft->id);
+        $this->assertSame($profileId, $draft->fresh()->profile_id);
+        $this->assertSame($recipientIds, $draft->recipients()->pluck('id')->all());
+        $this->assertDatabaseHas('document_attachments', ['id' => $attachment, 'profile_id' => $profileId]);
+        $this->assertDatabaseCount('attachment_versions', 1);
+        $this->assertSame(['created', 'updated'], $draft->audits()->orderBy('id')->pluck('action')->all());
+        $this->postJson('/api/v1/outgoing-correspondence/'.$draft->id.'/register'.$query)->assertOk()
+            ->assertJsonPath('data.internal_number', 'XPPL-OUT-2026-0001')->assertJsonPath('data.official_number', 'XPPL-ADM-LTR-26-0001');
+        $this->postJson('/api/v1/outgoing-correspondence/'.$draft->id.'/register'.$query)->assertOk();
+        $this->assertDatabaseCount('issued_document_numbers', 2);
+        $this->patchJson('/api/v1/outgoing-correspondence/'.$draft->id.$query, array_replace($body, ['type_id' => $site['type_id']]))->assertUnprocessable();
+        $this->assertSame($ltr->id, $draft->fresh()->type_id);
+    }
+
     #[TestWith(['department'])]
     #[TestWith(['type'])]
     public function test_outgoing_policy_requires_eligible_letter_type_and_origin_before_initialization(string $missing): void
@@ -181,8 +225,8 @@ class XpplNumberingTest extends TestCase
         if ($missing === 'department') {
             $site['scope'] = new DocumentScope($this->company->id, $site['scope']->siteId);
         }
-        app(XpplNumbering::class)->activatePolicy($this->actor, $this->companyScope, ['register_kind' => 'outgoing', 'confirm' => true]);
         $draft = $this->outgoingDraft($site);
+        app(XpplNumbering::class)->activatePolicy($this->actor, $this->companyScope, ['register_kind' => 'outgoing', 'confirm' => true]);
         try {
             app(ManageOutgoingCorrespondence::class)->register($this->actor, $site['scope'], (string) $draft->id);
             $this->fail('Official letter prerequisites must be enforced.');
