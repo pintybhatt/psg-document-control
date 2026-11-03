@@ -1,12 +1,13 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import ControlledDocuments from '../../resources/js/components/ControlledDocuments.vue';
+import ControlledDocumentsPage from '../../resources/js/pages/ControlledDocumentsPage.vue';
 import LanguageSwitcher from '../../resources/js/components/LanguageSwitcher.vue';
 import { createLocalization } from '../../resources/js/localization/index.js';
 import en from '../../resources/js/localization/en.js';
 import lo from '../../resources/js/localization/lo.js';
 
-const scope = { key: '7:site', company_id: 4, site_id: 7, department_id: null, permissions: ['controlled.drafts.manage', 'controlled.register', 'controlled.release', 'controlled.status.manage', 'numbering.issue'] };
+const scope = { key: '7:12', company_id: 4, site_id: 7, department_id: 12, department: { id: 12, name_en: 'Administration', name_lo: 'ບໍລິຫານ' }, permissions: ['controlled.drafts.manage', 'controlled.register', 'controlled.release', 'controlled.status.manage', 'numbering.issue'] };
 const type = { id: 9, name_en: 'SOP', name_lo: 'ລະບຽບ', category: { id: 8, name_en: 'Procedures', name_lo: 'ຂັ້ນຕອນ' } };
 const revision = { id: 11, revision_number: 0, identifier: '00', status: 'draft', title_en: '<script>Safety procedure</script>', title_lo: 'ລະບຽບຄວາມປອດໄພ', owner_id: 5, custodian_id: 5, owner_name: 'Example owner', custodian_name: 'Example owner', issue_date: '2026-10-25', effective_date: '2026-10-26', review_date: '2027-10-26', revision_reason: 'Initial', change_description: 'Initial issue', released_at: null };
 const draft = { id: 1, document_code: 'XPPL/SOP/001', type_id: 9, type, category: type.category, internal_number: null, classification: 'normal', registered_at: null, lock_version: 1, status: 'draft', current_revision_id: null, authoritative_revision_id: null, revisions: [revision] };
@@ -14,7 +15,7 @@ enableAutoUnmount(afterEach);
 beforeEach(() => localStorage.clear());
 afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals(); });
 function response(data, status = 200) { return { ok: status < 400, status, json: async () => structuredClone(data) }; }
-function server({ registered = false, released = false, mutationError = null, detailError = null, xppl = false } = {}) {
+function server({ registered = false, released = false, mutationError = null, detailError = null, xppl = false, contexts = [scope] } = {}) {
     let record = structuredClone(draft);
     if (xppl) { record.xppl_namespaces = [{ id: 4, prefix: 'XPPL-ADM-SOP' }]; }
     if (registered || released) { record.registered_at = '2026-10-26T10:00:00Z'; record.internal_number = 'TEST/CD/2026/000001'; record.lock_version = 2; }
@@ -22,6 +23,7 @@ function server({ registered = false, released = false, mutationError = null, de
     const fetch = vi.fn(async (url, options = {}) => {
         const path = new URL(url, 'http://localhost').pathname;
         const method = options.method ?? 'GET';
+        if (path.endsWith('/contexts')) { return response({ data: contexts.map(item => ({ ...item, company: { name_en: 'Example company' }, site: { name_en: 'Example site' } })) }); }
         if (path.endsWith('/lookups')) { return response({ data: [type], people: [{ id: 5, name: 'Example owner' }] }); }
         if (method === 'GET' && path === '/controlled') { return response({ data: new URL(url, 'http://localhost').searchParams.get('status') === 'current' ? [{ ...record, id: 2, document_code: 'XPPL/SOP/REPLACEMENT' }] : [record], meta: { total: 1 } }); }
         if (method === 'GET') { return detailError ? response(detailError.body, detailError.status) : response({ data: record, audits: [{ id: 1, action: 'created', actor_id: 5, created_at: '2026-10-26T10:00:00Z' }], related: [] }); }
@@ -47,8 +49,13 @@ async function show(wrapper) { await button(wrapper, 'Details').trigger('click')
 it('creates drafts with bilingual metadata, exact unit, CSRF and display dates without numbers', async () => {
     const fetch = server(); const wrapper = await render();
     await button(wrapper, en.controlledCreate).trigger('click');
+    expect(wrapper.get('#controlled-department').element.value).toBe('Administration');
+    expect(wrapper.get('#controlled-department').attributes('readonly')).toBeDefined();
+    expect(wrapper.get('#controlled-type option[value="9"]').text()).toBe('SOP');
     await wrapper.get('#controlled-document_code').setValue('XPPL/SOP/001');
     await wrapper.get('#controlled-type').setValue(9);
+    expect(wrapper.get('#controlled-category').element.value).toBe('Procedures');
+    expect(wrapper.get('#controlled-category').attributes('readonly')).toBeDefined();
     await wrapper.get('#controlled-title_en').setValue('Safety procedure');
     await wrapper.get('#controlled-title_lo').setValue('ລະບຽບ');
     await wrapper.get('#controlled-owner_id').setValue(5);
@@ -61,7 +68,7 @@ it('creates drafts with bilingual metadata, exact unit, CSRF and display dates w
     const options = fetch.mock.calls.find(([, options]) => options.method === 'POST')[1];
     const body = JSON.parse(options.body);
     expect(options.headers['X-CSRF-TOKEN']).toBe('sample-csrf');
-    expect(body).toMatchObject({ company_id: 4, site_id: 7, issue_date: '2026-10-25', effective_date: '2026-10-26', title_lo: 'ລະບຽບ' });
+    expect(body).toMatchObject({ company_id: 4, site_id: 7, department_id: 12, type_id: 9, issue_date: '2026-10-25', effective_date: '2026-10-26', title_lo: 'ລະບຽບ' });
     expect(body).not.toHaveProperty('internal_number'); expect(body).not.toHaveProperty('released_at');
 });
 it('confirms registration independently of release and sends the version being reviewed', async () => {
@@ -106,6 +113,7 @@ it('renders Lao status, history and dd/mm/yyyy dates without untranslated keys',
     await wrapper.get('select[aria-label="Language"]').setValue('lo');
     expect(wrapper.text()).toContain(lo.controlledHistory);
     expect(wrapper.text()).toContain(lo['controlledStatus-current']);
+    expect(wrapper.text()).toContain(lo.controlledOwnerDepartment); expect(wrapper.text()).toContain(lo.documentCategory);
     expect(wrapper.text()).toContain('ລະບຽບຄວາມປອດໄພ');
     expect(wrapper.text()).toContain('26/10/2026');
     expect(wrapper.text()).not.toMatch(/controlled[A-Z-]/);
@@ -166,4 +174,16 @@ it('selects an approved XPPL mapping explicitly and displays the full revision i
     const body = JSON.parse(fetch.mock.calls.find(([, options]) => options.method === 'POST')[1].body);
     expect(body).toMatchObject({ namespace_id: 4, lock_version: 1 });
     expect(wrapper.get('#controlled-detail-title').text()).toBe('XPPL-ADM-SOP-0001-R00');
+});
+
+it('labels and changes only between authorized document owner departments', async () => {
+    const engineering = { ...scope, key: '7:13', department_id: 13, department: { id: 13, name_en: 'Engineering', name_lo: 'ວິສະວະກຳ' } };
+    const fetch = server({ contexts: [scope, engineering] });
+    const wrapper = mount(ControlledDocumentsPage, { props: { endpoints: { endpoint: '/controlled', contexts: '/controlled/contexts' }, csrfToken: 'sample-csrf' }, global: { plugins: [createLocalization()] } });
+    await flushPromises();
+
+    expect(wrapper.get('label[for="controlled-context"]').text()).toBe(en.controlledOwnerDepartment);
+    expect(wrapper.findAll('#controlled-context option').map(option => option.text())).toEqual(['Administration', 'Engineering']);
+    await wrapper.get('#controlled-context').setValue('7:13'); await flushPromises();
+    expect(fetch.mock.calls.some(([url]) => url.includes('/controlled?') && url.includes('department_id=13'))).toBe(true);
 });

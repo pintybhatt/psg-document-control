@@ -7,7 +7,7 @@ import { createLocalization } from '../../resources/js/localization/index.js';
 import en from '../../resources/js/localization/en.js';
 import lo from '../../resources/js/localization/lo.js';
 
-const scope = { key: '7:site', company_id: 4, site_id: 7, department_id: null, permissions: ['outgoing.drafts.manage', 'outgoing.register', 'numbering.issue'] };
+const scope = { key: '7:12', company_id: 4, site_id: 7, department_id: 12, department: { id: 12, name_en: 'Engineering', name_lo: 'ວິສະວະກຳ' }, permissions: ['outgoing.drafts.manage', 'outgoing.register', 'numbering.issue'] };
 const type = { id: 9, name_en: 'Letter', name_lo: 'ຈົດໝາຍ', category: { id: 8, name_en: 'Correspondence', name_lo: 'ເອກະສານ' } };
 const draft = { id: 1, type_id: 9, type, category: type.category, subject: '<script>Example subject</script>', signatory_name: 'Example signatory', signatory_title: 'Example title', document_date: '2026-10-26', priority: 'normal', classification: 'normal', status: 'draft', internal_number: null, official_number: null, recipients: [{ id: 11, delivery: null, kind: 'primary', organization: 'Example recipient', email: 'recipient@example.test' }, { id: 12, delivery: null, kind: 'copy', organization: 'Copy recipient' }] };
 const descriptors = Object.getOwnPropertyDescriptors(HTMLDialogElement.prototype);
@@ -25,13 +25,13 @@ afterAll(() => {
     }
 });
 function response(data, status = 200) { return { ok: status < 400, status, json: async () => structuredClone(data) }; }
-function server({ mutationError = null, detailError = null, registered = false, xppl = false } = {}) {
+function server({ mutationError = null, detailError = null, registered = false, xppl = false, contexts = [scope] } = {}) {
     let record = { ...structuredClone(draft), ...(registered ? { status: 'registered', operations: { status: 'dispatched', revision: 1 } } : {}) };
     if (xppl) { record.xppl_namespaces = [{ id: 4, prefix: 'XPPL-ENG-LTR' }]; }
     const fetch = vi.fn(async (url, options = {}) => {
         const path = new URL(url, 'http://localhost').pathname;
         const method = options.method ?? 'GET';
-        if (path.endsWith('/contexts')) { return response({ data: [{ ...scope, company: { name_en: 'Example company' }, site: { name_en: 'Example site' } }] }); }
+        if (path.endsWith('/contexts')) { return response({ data: contexts.map(item => ({ ...item, company: { name_en: 'Example company' }, site: { name_en: 'Example site' } })) }); }
         if (path.endsWith('/lookups')) { return response({ data: [type] }); }
         if (method === 'GET' && path === '/outgoing') { return response({ data: [record], meta: { total: 1 } }); }
         if (method === 'GET') { return detailError ? response(detailError.body, detailError.status) : response({ data: record, audits: [{ id: 1, action: 'created', created_at: '2026-10-26', actor_id: 5 }] }); }
@@ -61,7 +61,12 @@ describe('outgoing correspondence', () => {
     it('creates a draft with multiple primary and copy recipients, CSRF and no numbers', async () => {
         const fetch = server(); const wrapper = await render();
         await button(wrapper, 'Create outgoing draft').trigger('click');
+        expect(wrapper.get('#outgoing-department').element.value).toBe('Engineering');
+        expect(wrapper.get('#outgoing-department').attributes('readonly')).toBeDefined();
+        expect(wrapper.get('#outgoing-type option[value="9"]').text()).toBe('Letter');
         await wrapper.get('#outgoing-type').setValue(9);
+        expect(wrapper.get('#outgoing-category').element.value).toBe('Correspondence');
+        expect(wrapper.get('#outgoing-category').attributes('readonly')).toBeDefined();
         await wrapper.get('#outgoing-signatory_name').setValue('Example signatory');
         await wrapper.get('#outgoing-subject').setValue('Draft subject');
         await wrapper.get('#outgoing-document_date').setValue('2026-10-26');
@@ -74,6 +79,7 @@ describe('outgoing correspondence', () => {
         const request = fetch.mock.calls.find(([, options]) => options.method === 'POST')[1];
         expect(request.headers['X-CSRF-TOKEN']).toBe('sample-csrf');
         const body = JSON.parse(request.body);
+        expect(body).toMatchObject({ company_id: 4, site_id: 7, department_id: 12, type_id: 9 });
         expect(body.recipients.map(item => item.kind)).toEqual(['primary', 'primary', 'copy']);
         expect(body).not.toHaveProperty('internal_number'); expect(body).not.toHaveProperty('official_number');
         expect(wrapper.find('#outgoing-draft-form').exists()).toBe(false);
@@ -142,6 +148,7 @@ describe('outgoing correspondence', () => {
         expect(wrapper.findAll('button').some(item => ['Create outgoing draft', 'Edit draft', 'Register and assign numbers'].includes(item.text()))).toBe(false);
         await wrapper.get('select[aria-label="Language"]').setValue('lo');
         expect(wrapper.text()).toContain('ທະບຽນເອກະສານຂາອອກ'); expect(wrapper.text()).toContain('ຜູ້ຮັບຫຼັກ');
+        expect(wrapper.text()).toContain(lo.outgoingIssuingDepartment); expect(wrapper.text()).toContain(lo.documentCategory);
         expect(wrapper.find('script').exists()).toBe(false);
         expect(wrapper.find('table').exists()).toBe(false);
     });
@@ -149,6 +156,17 @@ describe('outgoing correspondence', () => {
         server(); const wrapper = mount(OutgoingPage, { props: { endpoints: { endpoint: '/outgoing', contexts: '/outgoing/contexts' }, csrfToken: 'sample-csrf' }, global: { plugins: [createLocalization()] } });
         await flushPromises(); expect(wrapper.find('#outgoing-context').exists()).toBe(false);
         expect(wrapper.text()).toContain(draft.subject);
+    });
+    it('labels and changes only between authorized issuing departments', async () => {
+        const administration = { ...scope, key: '7:13', department_id: 13, department: { id: 13, name_en: 'Administration', name_lo: 'ບໍລິຫານ' } };
+        const fetch = server({ contexts: [scope, administration] });
+        const wrapper = mount(OutgoingPage, { props: { endpoints: { endpoint: '/outgoing', contexts: '/outgoing/contexts' }, csrfToken: 'sample-csrf' }, global: { plugins: [createLocalization()] } });
+        await flushPromises();
+
+        expect(wrapper.get('label[for="outgoing-context"]').text()).toBe(en.outgoingIssuingDepartment);
+        expect(wrapper.findAll('#outgoing-context option').map(option => option.text())).toEqual(['Engineering', 'Administration']);
+        await wrapper.get('#outgoing-context').setValue('7:13'); await flushPromises();
+        expect(fetch.mock.calls.some(([url]) => url.includes('/outgoing?') && url.includes('department_id=13'))).toBe(true);
     });
     it('shows request failure separately from a genuine empty register', async () => {
         const fetch = server();

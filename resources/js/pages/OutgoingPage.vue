@@ -19,7 +19,7 @@ onBeforeUnmount(() => { if (!shared) { workspace.revoke(); } });
 <template>
     <section class="flex flex-col gap-4">
         <p v-if="error && !shared" role="alert">{{ t(error) }}</p>
-        <SelectInput v-if="units.length > 1" id="outgoing-context" v-model="unitKey" :label="t('department')" :options="options" :disabled="loading" class="max-w-sm" />
+        <SelectInput v-if="units.length > 1" id="outgoing-context" v-model="unitKey" :label="t('outgoingIssuingDepartment')" :options="options" :disabled="loading" class="max-w-sm" />
         <p v-if="loading" role="status">{{ t('uiLoading') }}</p>
         <p v-else-if="!selected && !error" class="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-600">{{ t('outgoingNoContexts') }}</p>
         <Correspondence v-if="selected" :key="selected.key" :scope="selected" :endpoint="endpoints.endpoint" :incoming-endpoint="endpoints.incoming" :csrf-token="csrfToken" @unauthorized="workspace.revoke" />

@@ -55,7 +55,10 @@ const descriptionFields = ['description_en', 'description_lo'];
 const canManage = computed(() => props.scope.permissions.includes('outgoing.drafts.manage'));
 const canRegister = computed(() => props.scope.permissions.includes('outgoing.register') && props.scope.permissions.includes('numbering.issue'));
 const label = item => item?.[language.value === 'lo' ? 'name_lo' : 'name_en'] ?? '';
-const typeOptions = computed(() => [{ value: '', label: t('uiChoose') }, ...types.value.map(item => ({ value: item.id, label: `${label(item.category)} / ${label(item)}` }))]);
+const typeOptions = computed(() => [{ value: '', label: t('uiChoose') }, ...types.value.map(item => ({ value: item.id, label: label(item) }))]);
+const selectedType = computed(() => types.value.find(item => String(item.id) === String(form.type_id)));
+const selectedCategoryLabel = computed(() => label(selectedType.value?.category));
+const scopeDepartmentLabel = computed(() => label(props.scope.department) || t('siteWideDepartment'));
 const classificationOptions = computed(() => ['normal', 'confidential', 'highly_confidential'].map(value => ({ value, label: t(`confidentiality-${value}`) })));
 const priorityOptions = computed(() => ['normal', 'urgent'].map(value => ({ value, label: t(`outgoingPriority-${value}`) })));
 const columns = computed(() => [{ key: 'subject', label: t('outgoing-subject') }, { key: 'document_date', label: t('outgoing-document_date'), type: 'date' }, { key: 'status_label', label: t('uiStatus') }, { key: 'actions', label: t('rbacActions') }]);
@@ -159,7 +162,9 @@ onBeforeUnmount(() => controller?.abort());
             <p class="text-sm text-slate-600">{{ t('outgoingDraftRules') }}</p>
             <p v-if="scope.permissions.includes('documents.attachments.manage')" class="text-sm text-slate-600">{{ t('storageDraftHelp') }}</p>
             <fieldset :disabled="saving" class="grid gap-4 md:grid-cols-2"><legend class="mb-3 font-semibold">{{ t('documentInformation') }}</legend>
-                <SelectInput id="outgoing-type" v-model="form.type_id" :label="t('outgoingType')" :options="typeOptions" :error-key="fields.type_id?.[0]" required />
+                <TextInput id="outgoing-department" :model-value="scopeDepartmentLabel" :label="t('outgoingIssuingDepartment')" :helper="t('documentDepartmentHelp')" readonly />
+                <SelectInput id="outgoing-type" v-model="form.type_id" :label="t('documentType')" :options="typeOptions" :error-key="fields.type_id?.[0]" required />
+                <TextInput id="outgoing-category" :model-value="selectedCategoryLabel" :label="t('documentCategory')" :helper="t('documentCategoryHelp')" readonly />
                 <SelectInput v-if="!detail" id="outgoing-classification" v-model="form.classification" :label="t('outgoingClassification')" :options="classificationOptions" :helper="t(`confidentiality-${form.classification}-description`)" :error-key="fields.classification?.[0]" required />
                 <SelectInput id="outgoing-priority" v-model="form.priority" :label="t('outgoingPriority')" :options="priorityOptions" :error-key="fields.priority?.[0]" required />
                 <TextInput v-for="field in textFields.filter(field => !['sender_contact', 'sender_email', 'sender_phone', 'signatory_title'].includes(field))" :id="`outgoing-${field}`" :key="field" v-model="form[field]" :label="t(`outgoing-${field}`)" :class="field === 'subject' ? 'md:col-span-2' : ''" :type="field.endsWith('_date') ? 'date' : 'text'" :error-key="fields[field]?.[0]" :required="['signatory_name', 'subject', 'document_date'].includes(field)" :maxlength="field === 'subject' ? 500 : 255" />
@@ -190,7 +195,9 @@ onBeforeUnmount(() => controller?.abort());
                 <div><dt class="text-sm text-slate-600">{{ t('outgoingNumber') }}</dt><dd class="font-mono">{{ detail.internal_number ?? '—' }}</dd></div>
                 <div><dt class="text-sm text-slate-600">{{ t('outgoingOfficialNumber') }}</dt><dd class="font-mono">{{ detail.official_number ?? '—' }}</dd></div>
                 <div><dt class="text-sm text-slate-600">{{ t('uiStatus') }}</dt><dd>{{ t(`outgoingStatus-${detail.operations?.status ?? detail.status}`) }}</dd></div>
-                <div><dt class="text-sm text-slate-600">{{ t('outgoingType') }}</dt><dd>{{ label(detail.category) }} / {{ label(detail.type) }}</dd></div>
+                <div><dt class="text-sm text-slate-600">{{ t('outgoingIssuingDepartment') }}</dt><dd>{{ scopeDepartmentLabel }}</dd></div>
+                <div><dt class="text-sm text-slate-600">{{ t('documentType') }}</dt><dd>{{ label(detail.type) }}</dd></div>
+                <div><dt class="text-sm text-slate-600">{{ t('documentCategory') }}</dt><dd>{{ label(detail.category) }}</dd></div>
                 <div><dt class="text-sm text-slate-600">{{ t('outgoingClassification') }}</dt><dd>{{ t(`confidentiality-${detail.classification}`) }}</dd></div>
                 <div><dt class="text-sm text-slate-600">{{ t('outgoingPriority') }}</dt><dd>{{ t(`outgoingPriority-${detail.priority}`) }}</dd></div>
                 <div v-for="field in ['signatory_name', 'document_date']" :key="field"><dt class="text-sm text-slate-600">{{ t(`outgoing-${field}`) }}</dt><dd class="whitespace-pre-wrap wrap-anywhere">{{ field.endsWith('_date') ? formatDate(detail[field]) : detail[field] || '—' }}</dd></div>

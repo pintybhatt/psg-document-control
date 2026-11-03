@@ -39,7 +39,10 @@ const canRegister = computed(() => can('controlled.register') && can('numbering.
 const draft = computed(() => detail.value?.revisions.find(item => item.status === 'draft'));
 const authoritative = computed(() => detail.value?.revisions.find(item => item.id === detail.value.authoritative_revision_id));
 const editable = computed(() => ['draft', 'current'].includes(detail.value?.status));
-const typeOptions = computed(() => [{ value: '', label: t('uiChoose') }, ...types.value.map(item => ({ value: item.id, label: `${label(item.category)} / ${label(item)}` }))]);
+const typeOptions = computed(() => [{ value: '', label: t('uiChoose') }, ...types.value.map(item => ({ value: item.id, label: label(item) }))]);
+const selectedType = computed(() => types.value.find(item => String(item.id) === String(form.type_id)));
+const selectedCategoryLabel = computed(() => label(selectedType.value?.category));
+const scopeDepartmentLabel = computed(() => label(props.scope.department) || t('siteWideDepartment'));
 const peopleOptions = computed(() => [{ value: '', label: t('uiChoose') }, ...people.value.map(item => ({ value: item.id, label: item.name }))]);
 const statusOptions = computed(() => [{ value: '', label: t('controlledAllStatuses') }, ...statuses.map(value => ({ value, label: t(`controlledStatus-${value}`) }))]);
 const terminalOptions = computed(() => (detail.value?.status === 'current' ? ['obsolete', 'superseded'] : ['archived']).map(value => ({ value, label: t(`controlledStatus-${value}`) })));
@@ -141,7 +144,7 @@ onBeforeUnmount(() => controller?.abort());
             <form class="flex flex-wrap items-end gap-3" @submit.prevent="page = 1; error = ''; load()">
                 <TextInput id="controlled-search" v-model="search" :label="t('controlledSearch')" maxlength="200" class="grow" />
                 <SelectInput id="controlled-status-filter" v-model="status" :label="t('uiStatus')" :options="statusOptions" />
-                <SelectInput id="controlled-type-filter" v-model="typeFilter" :label="t('controlledType')" :options="typeOptions" />
+                <SelectInput id="controlled-type-filter" v-model="typeFilter" :label="t('documentType')" :options="typeOptions" />
                 <UiButton type="submit" variant="secondary" :disabled="loading">{{ t('incomingApplyFilters') }}</UiButton>
             </form>
             <DataTable v-model:page="page" :rows="displayRows" :columns="columns" :caption="t('controlledTitle')" :loading="loading" :error="error" server-side :total="total" :per-page="10" @change="load()">
@@ -155,7 +158,10 @@ onBeforeUnmount(() => controller?.abort());
             <p class="text-sm text-slate-600">{{ t('controlledDraftHelp') }}</p>
             <p v-if="scope.permissions.includes('documents.attachments.manage')" class="text-sm text-slate-600">{{ t('storageControlledDraftHelp') }}</p>
             <fieldset :disabled="saving" class="grid gap-4 md:grid-cols-2"><legend class="mb-3 font-semibold">{{ t('documentInformation') }}</legend>
-                <template v-if="!detail?.registered_at"><TextInput id="controlled-document_code" v-model="form.document_code" :label="t('controlled-document_code')" :error-key="fields.document_code?.[0]" maxlength="100" required /><SelectInput id="controlled-type" v-model="form.type_id" :label="t('controlledType')" :options="typeOptions" :error-key="fields.type_id?.[0]" required /></template>
+                <TextInput id="controlled-department" :model-value="scopeDepartmentLabel" :label="t('controlledOwnerDepartment')" :helper="t('documentDepartmentHelp')" readonly />
+                <template v-if="!detail?.registered_at"><TextInput id="controlled-document_code" v-model="form.document_code" :label="t('controlled-document_code')" :error-key="fields.document_code?.[0]" maxlength="100" required /><SelectInput id="controlled-type" v-model="form.type_id" :label="t('documentType')" :options="typeOptions" :error-key="fields.type_id?.[0]" required /></template>
+                <TextInput v-else id="controlled-type" :model-value="label(detail.type)" :label="t('documentType')" readonly />
+                <TextInput id="controlled-category" :model-value="selectedCategoryLabel" :label="t('documentCategory')" :helper="t('documentCategoryHelp')" readonly />
                 <SelectInput v-if="!detail" id="controlled-classification" v-model="form.classification" :label="t('outgoingClassification')" :options="classificationOptions" :error-key="fields.classification?.[0]" required />
                 <TextInput v-for="field in textFields" :id="`controlled-${field}`" :key="field" v-model="form[field]" :label="t(`controlled-${field}`)" :required="field === 'title_en'" :error-key="fields[field]?.[0]" maxlength="500" />
                 <SelectInput v-for="field in ['owner_id', 'custodian_id']" :id="`controlled-${field}`" :key="field" v-model="form[field]" :label="t(`controlled-${field}`)" :options="peopleOptions" :error-key="fields[field]?.[0]" required />
@@ -169,7 +175,9 @@ onBeforeUnmount(() => controller?.abort());
             <div class="flex flex-wrap items-center justify-between gap-3"><h2 id="controlled-detail-title" tabindex="-1" class="text-lg font-semibold">{{ authoritative?.full_identifier || draft?.full_identifier || detail.document_code }}</h2><StatusBadge :status="detail.status" :label="t(`controlledStatus-${detail.status}`)" /></div>
             <dl class="grid gap-4 md:grid-cols-2">
                 <div><dt class="text-sm text-slate-600">{{ t('controlledNumber') }}</dt><dd class="font-mono">{{ detail.internal_number || '—' }}</dd></div>
-                <div><dt class="text-sm text-slate-600">{{ t('controlledType') }}</dt><dd>{{ label(detail.category) }} / {{ label(detail.type) }}</dd></div>
+                <div><dt class="text-sm text-slate-600">{{ t('controlledOwnerDepartment') }}</dt><dd>{{ scopeDepartmentLabel }}</dd></div>
+                <div><dt class="text-sm text-slate-600">{{ t('documentType') }}</dt><dd>{{ label(detail.type) }}</dd></div>
+                <div><dt class="text-sm text-slate-600">{{ t('documentCategory') }}</dt><dd>{{ label(detail.category) }}</dd></div>
                 <div><dt class="text-sm text-slate-600">{{ t('outgoingClassification') }}</dt><dd>{{ t(`confidentiality-${detail.classification}`) }}</dd></div>
                 <div><dt class="text-sm text-slate-600">{{ t('controlledAuthoritative') }}</dt><dd class="font-semibold">{{ authoritative ? `${authoritative.full_identifier || authoritative.identifier} · ${language === 'lo' ? authoritative.title_lo || authoritative.title_en : authoritative.title_en}` : t('controlledNoAuthority') }}</dd></div>
             </dl>

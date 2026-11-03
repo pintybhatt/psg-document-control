@@ -121,6 +121,18 @@ class ControlledDocumentsTest extends TestCase
         $this->getJson($this->url('/lookups'))->assertOk()->assertJsonPath('people.0.id', $this->actor->id);
     }
 
+    public function test_workflow_lookups_and_draft_validation_exclude_types_not_mapped_to_controlled(): void
+    {
+        $this->fixture();
+        $outgoing = RegisterConfiguration::factory()->create(['scope_id' => $this->scope->id, 'register_key' => 'outgoing']);
+        $otherType = DocumentType::factory()->create(['scope_id' => $this->scope->id, 'category_id' => $this->type->category_id]);
+        $otherType->registers()->attach($outgoing->id, ['scope_id' => $this->scope->id]);
+
+        $this->getJson($this->url('/lookups'))->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $this->type->id);
+        $this->postJson($this->url(), array_replace($this->payload(), ['type_id' => $otherType->id]))->assertUnprocessable()->assertJsonPath('errors.type_id.0', 'controlledInvalidType');
+        $this->assertDatabaseCount('controlled_documents', 0);
+    }
+
     public function test_revision_release_preserves_authority_until_atomic_replacement_and_snapshots_history(): void
     {
         $this->fixture();

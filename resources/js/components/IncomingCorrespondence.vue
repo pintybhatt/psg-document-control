@@ -50,7 +50,10 @@ const descriptionFields = ['description_en', 'description_lo'];
 const canManage = computed(() => props.scope.permissions.includes('incoming.drafts.manage'));
 const canRegister = computed(() => props.scope.permissions.includes('incoming.register') && props.scope.permissions.includes('numbering.issue'));
 const label = item => item?.[language.value === 'lo' ? 'name_lo' : 'name_en'] ?? '';
-const typeOptions = computed(() => [{ value: '', label: t('uiChoose') }, ...types.value.map(item => ({ value: item.id, label: `${label(item.category)} / ${label(item)}` }))]);
+const typeOptions = computed(() => [{ value: '', label: t('uiChoose') }, ...types.value.map(item => ({ value: item.id, label: label(item) }))]);
+const selectedType = computed(() => types.value.find(item => String(item.id) === String(form.type_id)));
+const selectedCategoryLabel = computed(() => label(selectedType.value?.category));
+const scopeDepartmentLabel = computed(() => label(props.scope.department) || t('siteWideDepartment'));
 const channelOptions = computed(() => [{ value: '', label: t('uiChoose') }, ...['email', 'courier', 'hand_delivery', 'post', 'other'].map(value => ({ value, label: t(`incomingChannel-${value}`) }))]);
 const filterStatuses = computed(() => [{ value: '', label: t('incomingAllStatuses') }, ...['draft', 'received', 'assigned', 'in_progress', 'responded', 'closed'].map(value => ({ value, label: t(`incomingStatus-${value}`) }))]);
 const dueOptions = computed(() => [{ value: '', label: t('incomingAllDueDates') }, ...['overdue', 'today'].map(value => ({ value, label: t(`incomingDue-${value}`) }))]);
@@ -167,7 +170,9 @@ onBeforeUnmount(() => controller?.abort());
             <p class="text-sm text-slate-600">{{ t('incomingDraftRules') }}</p>
             <p v-if="scope.permissions.includes('documents.attachments.manage')" class="text-sm text-slate-600">{{ t('storageDraftHelp') }}</p>
             <fieldset class="grid gap-4 md:grid-cols-2"><legend class="mb-3 font-semibold">{{ t('documentInformation') }}</legend>
-                <SelectInput id="incoming-type" v-model="form.type_id" :label="t('incomingType')" :options="typeOptions" :error-key="fields.type_id?.[0]" required />
+                <TextInput id="incoming-department" :model-value="scopeDepartmentLabel" :label="t('incomingReceivingDepartment')" :helper="t('documentDepartmentHelp')" readonly />
+                <SelectInput id="incoming-type" v-model="form.type_id" :label="t('documentType')" :options="typeOptions" :error-key="fields.type_id?.[0]" required />
+                <TextInput id="incoming-category" :model-value="selectedCategoryLabel" :label="t('documentCategory')" :helper="t('documentCategoryHelp')" readonly />
                 <SelectInput v-if="!detail" id="incoming-classification" v-model="form.classification" :label="t('incomingClassification')" :options="classificationOptions" :helper="t(`confidentiality-${form.classification}-description`)" :error-key="fields.classification?.[0]" required />
                 <SelectInput id="incoming-channel" v-model="form.channel" :label="t('incomingChannel')" :options="channelOptions" :error-key="fields.channel?.[0]" required />
                 <SelectInput id="incoming-priority" v-model="form.priority" :label="t('incomingPriority')" :options="priorityOptions" :error-key="fields.priority?.[0]" required />
@@ -186,7 +191,9 @@ onBeforeUnmount(() => controller?.abort());
             <dl class="grid gap-4 md:grid-cols-2">
                 <div><dt class="text-sm text-slate-600">{{ t('incomingNumber') }}</dt><dd class="font-mono">{{ detail.internal_number ?? '—' }}</dd></div>
                 <div><dt class="text-sm text-slate-600">{{ t('uiStatus') }}</dt><dd>{{ t(`incomingStatus-${detail.operations?.status ?? (detail.status === 'registered' ? 'received' : detail.status)}`) }}</dd></div>
-                <div><dt class="text-sm text-slate-600">{{ t('incomingType') }}</dt><dd>{{ label(detail.category) }} / {{ label(detail.type) }}</dd></div>
+                <div><dt class="text-sm text-slate-600">{{ t('incomingReceivingDepartment') }}</dt><dd>{{ scopeDepartmentLabel }}</dd></div>
+                <div><dt class="text-sm text-slate-600">{{ t('documentType') }}</dt><dd>{{ label(detail.type) }}</dd></div>
+                <div><dt class="text-sm text-slate-600">{{ t('documentCategory') }}</dt><dd>{{ label(detail.category) }}</dd></div>
                 <div><dt class="text-sm text-slate-600">{{ t('incomingClassification') }}</dt><dd>{{ t(`confidentiality-${detail.classification}`) }}</dd></div>
                 <div><dt class="text-sm text-slate-600">{{ t('incomingChannel') }}</dt><dd>{{ detail.channel ? t(`incomingChannel-${detail.channel}`) : t('incomingUnspecified') }}</dd></div>
                 <div><dt class="text-sm text-slate-600">{{ t('incomingPriority') }}</dt><dd>{{ t(`incomingPriority-${detail.priority}`) }}</dd></div>
