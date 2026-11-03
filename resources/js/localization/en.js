@@ -1,4 +1,7 @@
 export default {
+    'controlledOwnerHelp': 'Optional for drafts. Assign an eligible owner before release.',
+    'controlledCustodianHelp': 'The person responsible for document control. Your account is selected when eligible.',
+    'controlledNoCustodian': 'No eligible custodian. Configure an active user with an active membership in this company, site and selected department.',
     confidentialityRevoke: 'Revoke access',
     confidentialityTitle: 'Confidentiality & Access',
     confidentialityClearances: 'User Clearances',

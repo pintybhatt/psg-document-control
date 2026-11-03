@@ -53,7 +53,10 @@ class ControlledDocumentController extends Controller
             ->filter(fn (DocumentType $type): bool => $register && $type->effectiveFor($register))
             ->map(fn (DocumentType $type): array => $type->only(['id', 'name_en', 'name_lo']) + ['category' => $type->category->only(['id', 'name_en', 'name_lo'])])->values();
 
-        return response()->json(['data' => $types, 'people' => $manager->people($scope)->orderBy('name')->orderBy('id')->get(['id', 'name'])]);
+        $people = $manager->people($scope)->orderBy('name')->orderBy('id')->get(['id', 'name']);
+
+        return response()->json(['data' => $types, 'people' => $people,
+            'default_custodian_id' => $people->contains('id', $request->user()->id) ? $request->user()->id : null]);
     }
 
     public function show(ControlledDocumentRequest $request, string $record, ManageControlledDocuments $manager): JsonResponse

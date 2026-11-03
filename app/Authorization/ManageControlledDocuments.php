@@ -78,6 +78,7 @@ class ManageControlledDocuments
                 $this->editable($record);
             }
             $rules = $this->revisionRules();
+            $rules['owner_id'] = ['nullable', 'integer'];
             if (! $record?->isFormallyRegistered()) {
                 $rules += ['document_code' => ['required', 'string', 'max:100', 'regex:/^[A-Z0-9][A-Z0-9.\/-]*$/', Rule::unique('controlled_documents')->where('scope_id', $register->scope_id)->ignore($record?->id)], 'type_id' => ['required', 'integer']];
             }
@@ -276,8 +277,11 @@ class ManageControlledDocuments
     /** @param array<string, mixed> $data */
     private function validatePeople(DocumentScope $scope, array $data): void
     {
-        $ids = $this->people($scope)->whereIn('id', [$data['owner_id'], $data['custodian_id']])->pluck('id')->all();
+        $ids = $this->people($scope)->whereIn('id', [$data['owner_id'] ?? null, $data['custodian_id']])->pluck('id')->all();
         foreach (['owner_id', 'custodian_id'] as $field) {
+            if ($field === 'owner_id' && ! isset($data[$field])) {
+                continue;
+            }
             if (! in_array((int) $data[$field], $ids, true)) {
                 throw ValidationException::withMessages([$field => 'controlledInvalidPerson']);
             }

@@ -31,7 +31,7 @@ class ControlledDocumentResource extends JsonResource
                 'id', 'revision_number', 'title_en', 'title_lo', 'description_en', 'description_lo', 'owner_id', 'custodian_id', 'revision_reason', 'change_description', 'supersedes_id', 'released_by', 'release_reason',
             ]) + [
                 'full_identifier' => $xppl ? $this->internal_number.'-R'.$revision->identifier() : null, 'identifier' => $revision->identifier(), 'status' => $revision->released_at === null ? 'draft' : ($revision->id === $this->current_revision_id ? $this->status : 'superseded'),
-                'owner_name' => $revision->owner_name ?? $revision->owner->name, 'custodian_name' => $revision->custodian_name ?? $revision->custodian->name,
+                'owner_name' => $revision->owner_name ?? $revision->owner?->name, 'custodian_name' => $revision->custodian_name ?? $revision->custodian->name,
                 'issue_date' => $revision->issue_date->format('Y-m-d'), 'effective_date' => $revision->effective_date->format('Y-m-d'), 'review_date' => $revision->review_date?->format('Y-m-d'),
                 'released_at' => $revision->released_at?->toISOString(),
             ])->values(),

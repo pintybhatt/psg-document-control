@@ -15,7 +15,7 @@ enableAutoUnmount(afterEach);
 beforeEach(() => localStorage.clear());
 afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals(); });
 function response(data, status = 200) { return { ok: status < 400, status, json: async () => structuredClone(data) }; }
-function server({ registered = false, released = false, mutationError = null, detailError = null, xppl = false, contexts = [scope] } = {}) {
+function server({ registered = false, released = false, mutationError = null, detailError = null, xppl = false, contexts = [scope], people = [{ id: 5, name: 'Example owner' }], defaultCustodianId = 5 } = {}) {
     let record = structuredClone(draft);
     if (xppl) { record.xppl_namespaces = [{ id: 4, prefix: 'XPPL-ADM-SOP' }]; }
     if (registered || released) { record.registered_at = '2026-10-26T10:00:00Z'; record.internal_number = 'TEST/CD/2026/000001'; record.lock_version = 2; }
@@ -24,7 +24,7 @@ function server({ registered = false, released = false, mutationError = null, de
         const path = new URL(url, 'http://localhost').pathname;
         const method = options.method ?? 'GET';
         if (path.endsWith('/contexts')) { return response({ data: contexts.map(item => ({ ...item, company: { name_en: 'Example company' }, site: { name_en: 'Example site' } })) }); }
-        if (path.endsWith('/lookups')) { return response({ data: [type], people: [{ id: 5, name: 'Example owner' }] }); }
+        if (path.endsWith('/lookups')) { return response({ data: [type], people, default_custodian_id: defaultCustodianId }); }
         if (method === 'GET' && path === '/controlled') { return response({ data: new URL(url, 'http://localhost').searchParams.get('status') === 'current' ? [{ ...record, id: 2, document_code: 'XPPL/SOP/REPLACEMENT' }] : [record], meta: { total: 1 } }); }
         if (method === 'GET') { return detailError ? response(detailError.body, detailError.status) : response({ data: record, audits: [{ id: 1, action: 'created', actor_id: 5, created_at: '2026-10-26T10:00:00Z' }], related: [] }); }
         if (mutationError) { return response(mutationError.body, mutationError.status); }
@@ -46,6 +46,16 @@ async function render(currentScope = scope) {
 function button(wrapper, text) { const found = wrapper.findAll('button').find(item => item.text() === text); expect(found, text).toBeDefined(); return found; }
 async function show(wrapper) { await button(wrapper, 'Details').trigger('click'); await flushPromises(); }
 
+it('explains missing custodian membership and never defaults to an ineligible user', async () => {
+    server({ people: [], defaultCustodianId: 5 });
+    const wrapper = await render(); await button(wrapper, en.controlledCreate).trigger('click');
+    expect(wrapper.get('#controlled-custodian_id').element.value).toBe('');
+    expect(wrapper.text()).toContain(en.controlledNoCustodian);
+    expect(wrapper.get('#controlled-custodian_id').attributes('required')).toBeDefined();
+    await wrapper.get('select[aria-label="Language"]').setValue('lo');
+    expect(wrapper.text()).toContain(lo.controlledNoCustodian);
+});
+
 it('creates drafts with bilingual metadata, exact unit, CSRF and display dates without numbers', async () => {
     const fetch = server(); const wrapper = await render();
     await button(wrapper, en.controlledCreate).trigger('click');
@@ -53,6 +63,9 @@ it('creates drafts with bilingual metadata, exact unit, CSRF and display dates w
     expect(wrapper.get('#controlled-department option').text()).toBe('Administration');
     expect(wrapper.findAll('#controlled-department option')).toHaveLength(1);
     expect(wrapper.get('#controlled-department').attributes('readonly')).toBeUndefined();
+    expect(wrapper.get('#controlled-owner_id').attributes('required')).toBeUndefined();
+    expect(wrapper.get('#controlled-owner_id').element.value).toBe('');
+    expect(wrapper.get('#controlled-custodian_id').element.value).toBe('5');
     expect(wrapper.get('#controlled-type option[value="9"]').text()).toBe('SOP');
     await wrapper.get('#controlled-document_code').setValue('XPPL/SOP/001');
     await wrapper.get('#controlled-type').setValue(9);
@@ -72,6 +85,16 @@ it('creates drafts with bilingual metadata, exact unit, CSRF and display dates w
     expect(options.headers['X-CSRF-TOKEN']).toBe('sample-csrf');
     expect(body).toMatchObject({ company_id: 4, site_id: 7, department_id: 12, type_id: 9, issue_date: '2026-10-25', effective_date: '2026-10-26', title_lo: 'ລະບຽບ' });
     expect(body).not.toHaveProperty('internal_number'); expect(body).not.toHaveProperty('released_at');
+});
+it('submits an unassigned owner as null and preserves an existing draft custodian when editing', async () => {
+    const fetch = server();
+    const wrapper = await render(); await button(wrapper, en.controlledCreate).trigger('click');
+    await wrapper.get('#controlled-draft-form').trigger('submit'); await flushPromises();
+    const body = JSON.parse(fetch.mock.calls.find(([, options]) => options.method === 'POST')[1].body);
+    expect(body.owner_id).toBeNull();
+    expect(body.custodian_id).toBe(5);
+    await button(wrapper, en.controlledEdit).trigger('click');
+    expect(wrapper.get('#controlled-custodian_id').element.value).toBe('5');
 });
 it('confirms registration independently of release and sends the version being reviewed', async () => {
     const fetch = server(); const wrapper = await render(); await show(wrapper);

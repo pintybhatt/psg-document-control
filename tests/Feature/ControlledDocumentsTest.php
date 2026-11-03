@@ -64,6 +64,35 @@ class ControlledDocumentsTest extends TestCase
         return '/api/v1/controlled-documents'.$suffix.'?'.http_build_query(['company_id' => $this->scope->company_id, 'site_id' => $this->scope->site_id]);
     }
 
+    public function test_optional_draft_owner_can_be_assigned_later_but_is_required_for_release(): void
+    {
+        $this->fixture();
+        $body = $this->payload();
+        unset($body['owner_id']);
+        $record = $this->postJson($this->url(), $body)->assertCreated()->assertJsonPath('data.revisions.0.owner_id', null)->json('data');
+        $record = $this->registered($record);
+        $this->postJson($this->url('/'.$record['id'].'/release'), ['lock_version' => 2, 'revision_id' => $record['revisions'][0]['id'], 'reason' => 'Release'])
+            ->assertUnprocessable()->assertJsonValidationErrors('owner_id');
+        $body = $this->payload();
+        unset($body['classification']);
+        $body['lock_version'] = 2;
+        $this->patchJson($this->url('/'.$record['id']), $body)->assertUnprocessable();
+        unset($body['document_code'], $body['type_id']);
+        $record = $this->patchJson($this->url('/'.$record['id']), $body)->assertOk()->assertJsonPath('data.revisions.0.owner_id', $this->actor->id)->json('data');
+        $this->released($record);
+    }
+
+    public function test_custodian_default_requires_exact_active_membership(): void
+    {
+        $this->fixture();
+        $this->getJson($this->url('/lookups'))->assertOk()->assertJsonPath('default_custodian_id', $this->actor->id);
+        $department = Department::factory()->create(['company_id' => $this->scope->company_id, 'site_id' => $this->scope->site_id]);
+        OrganizationMembership::factory()->for($this->actor)->inDepartment($department)->create();
+        $this->getJson($this->url('/lookups').'&department_id='.$department->id)->assertOk()->assertJsonPath('default_custodian_id', $this->actor->id);
+        $outsider = User::factory()->create();
+        $this->postJson($this->url(), array_replace($this->payload(), ['custodian_id' => $outsider->id]))->assertUnprocessable()->assertJsonValidationErrors('custodian_id');
+    }
+
     /** @return array<string, mixed> */
     private function payload(): array
     {
@@ -287,6 +316,7 @@ class ControlledDocumentsTest extends TestCase
         OrganizationMembership::query()->where('user_id', $this->actor->id)->update(['active' => false]);
         $this->getJson($this->url())->assertForbidden();
         UserRoleAssignment::query()->create(['user_id' => $this->actor->id, 'role_id' => Role::query()->where('code', 'SECURITY_ADMINISTRATOR')->value('id'), 'scope_id' => AuthorizationScope::context('global')->id, 'active' => true]);
+        $this->getJson($this->url('/lookups'))->assertOk()->assertJsonCount(0, 'people')->assertJsonPath('default_custodian_id', null);
         $this->postJson($this->url('/'.$record['id'].'/release'), ['lock_version' => 2, 'revision_id' => $record['revisions'][0]['id'], 'reason' => 'Release'])->assertUnprocessable()->assertJsonValidationErrors('owner_id');
     }
 

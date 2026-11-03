@@ -25,6 +25,7 @@ const { t, language } = useLocalization();
 const request = createJsonClient(props.csrfToken);
 const { items, notify, dismiss } = useNotifications();
 const rows = ref([]), types = ref([]), people = ref([]), total = ref(0), page = ref(1);
+const defaultCustodianId = ref('');
 const search = ref(''), status = ref(''), typeFilter = ref('');
 const namespaceId = ref('');
 const namespaceOptions = computed(() => [{ value: '', label: t('numberingLegacy') }, ...(detail.value?.xppl_namespaces ?? []).map(item => ({ value: item.id, label: item.prefix }))]);
@@ -101,6 +102,8 @@ async function refreshCreateContext() {
         types.value = result.data;
         contextValid.value = can('controlled.drafts.manage');
         people.value = result.people;
+        defaultCustodianId.value = result.people.some(person => person.id === result.default_custodian_id) ? result.default_custodian_id : '';
+        form.custodian_id = defaultCustodianId.value;
     } catch (failure) { if (!signal.aborted) { fail(failure); } }
     finally { if (!signal.aborted) { contextLoading.value = false; } }
 }
@@ -114,7 +117,7 @@ async function reset() {
     rows.value = []; detail.value = null; audits.value = []; related.value = []; types.value = []; people.value = []; replacements.value = []; total.value = 0; page.value = 1; editing.value = false; action.value = ''; error.value = ''; fields.value = {}; saving.value = false;
     await load(signal);
     if (signal.aborted) { return; }
-    try { const result = await request(url('/lookups'), { signal }); if (!signal.aborted) { types.value = result.data; people.value = result.people;
+    try { const result = await request(url('/lookups'), { signal }); if (!signal.aborted) { types.value = result.data; people.value = result.people; defaultCustodianId.value = result.people.some(person => person.id === result.default_custodian_id) ? result.default_custodian_id : '';
         const query = new URLSearchParams(window.location.search);
         if (/^[1-9][0-9]*$/.test(query.get('record') ?? '')) { await show({ id: query.get('record') }); }
     } }
@@ -132,6 +135,7 @@ async function edit(create = false) {
     if (create) { detail.value = null; audits.value = []; related.value = []; }
     for (const key of [...textFields, ...dateFields, 'description_en', 'description_lo', 'owner_id', 'custodian_id', 'revision_reason', 'change_description']) { form[key] = draft.value?.[key] ?? ''; }
     Object.assign(form, { document_code: detail.value?.document_code ?? '', type_id: detail.value?.type_id ?? '', classification: 'normal' });
+    if (create) { form.custodian_id = defaultCustodianId.value; }
     editing.value = true; action.value = ''; fields.value = {}; error.value = '';
     await nextTick(); editor.value?.querySelector('h2')?.focus();
 }
@@ -139,6 +143,7 @@ async function save() {
     if (contextLoading.value || !contextValid.value) { return; }
     if (saving.value) { return; }
     const body = { ...form };
+    body.owner_id = form.owner_id || null;
     if (detail.value) { body.lock_version = detail.value.lock_version; delete body.classification; }
     if (detail.value?.registered_at) { delete body.document_code; delete body.type_id; }
     await mutate(detail.value ? `/${detail.value.id}` : '', body, detail.value ? 'PATCH' : 'POST');
@@ -207,7 +212,8 @@ onBeforeUnmount(() => controller?.abort());
                 <TextInput id="controlled-category" :model-value="selectedCategoryLabel" :label="t('documentCategory')" :helper="t('documentCategoryHelp')" readonly />
                 <SelectInput v-if="!detail" id="controlled-classification" v-model="form.classification" :label="t('outgoingClassification')" :options="classificationOptions" :error-key="fields.classification?.[0]" required />
                 <TextInput v-for="field in textFields" :id="`controlled-${field}`" :key="field" v-model="form[field]" :label="t(`controlled-${field}`)" :required="field === 'title_en'" :error-key="fields[field]?.[0]" maxlength="500" />
-                <SelectInput v-for="field in ['owner_id', 'custodian_id']" :id="`controlled-${field}`" :key="field" v-model="form[field]" :label="t(`controlled-${field}`)" :options="peopleOptions" :error-key="fields[field]?.[0]" required />
+                <SelectInput v-for="field in ['owner_id', 'custodian_id']" :id="`controlled-${field}`" :key="field" v-model="form[field]" :label="t(`controlled-${field}`)" :options="peopleOptions" :error-key="fields[field]?.[0]" :required="field === 'custodian_id'" :helper="field === 'owner_id' ? t('controlledOwnerHelp') : t('controlledCustodianHelp')" />
+                <p v-if="!contextLoading && !people.length" role="status" class="text-sm text-slate-600">{{ t('controlledNoCustodian') }}</p>
                 <TextInput v-for="field in dateFields" :id="`controlled-${field}`" :key="field" v-model="form[field]" :label="t(`controlled-${field}`)" type="date" :required="field !== 'review_date'" :error-key="fields[field]?.[0]" />
                 <TextareaInput v-for="field in ['revision_reason', 'change_description']" :id="`controlled-${field}`" :key="field" v-model="form[field]" :label="t(`controlled-${field}`)" :error-key="fields[field]?.[0]" maxlength="5000" required />
             </fieldset>
