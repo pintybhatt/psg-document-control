@@ -49,6 +49,50 @@ class XpplNumberingTest extends TestCase
         $this->signIn($this->actor);
     }
 
+    public function test_unnumbered_xppl_draft_registers_from_server_mapping_and_retries_do_not_allocate(): void
+    {
+        $this->setupCompany();
+        $site = $this->site();
+        $scope = $site['scope'];
+        $manager = app(ManageControlledDocuments::class);
+        $this->assertFalse($manager->automaticNumbering($scope, $site['type_id'])['ready']);
+        $body = ['type_id' => $site['type_id'], 'classification' => 'normal', 'title_en' => 'Automatic draft', 'custodian_id' => $this->actor->id,
+            'issue_date' => '2026-10-25', 'effective_date' => '2026-10-26', 'revision_reason' => 'Initial issue', 'change_description' => 'First issue of the document'];
+        $record = $manager->save($this->actor, $scope, $body);
+        $this->assertNull($record->document_code);
+        $this->assertDatabaseCount('issued_document_numbers', 0);
+        try {
+            $this->issue($site, $record, null);
+            $this->fail('An unapproved baseline must block registration.');
+        } catch (ValidationException $failure) {
+            $this->assertArrayHasKey('controlled', $failure->errors());
+        }
+        $this->enable($site);
+        $this->assertSame('XPPL-ADM-SOP-0001-R00', $manager->automaticNumbering($scope, $site['type_id'])['preview']);
+        try {
+            $manager->register($this->actor, $scope, (string) $record->id, ['lock_version' => 1, 'namespace_id' => 999]);
+            $this->fail('Client namespace overrides must be rejected.');
+        } catch (ValidationException $failure) {
+            $this->assertArrayHasKey('namespace_id', $failure->errors());
+        }
+        DB::beginTransaction();
+        $this->issue($site, $record, null);
+        DB::rollBack();
+        $this->assertNull($record->fresh()->document_code);
+        $this->assertDatabaseCount('issued_document_numbers', 0);
+        $this->assertSame(0, (int) DB::table('xppl_numbering_counters')->value('value'));
+        $url = '/api/v1/controlled-documents/lookups?'.http_build_query(['company_id' => $scope->companyId, 'site_id' => $scope->siteId, 'department_id' => $scope->departmentId]);
+        $this->getJson($url)->assertOk()->assertJsonPath('data.0.automatic_numbering.preview', 'XPPL-ADM-SOP-0001-R00')->assertJsonMissingPath('data.0.automatic_numbering.namespace_id');
+        $registered = $this->issue($site, $record, null);
+        $this->assertSame('XPPL-ADM-SOP-0001', $registered->document_code);
+        $this->assertSame($registered->document_code, $registered->internal_number);
+        $this->assertSame($registered->id, $this->issue($site, $record, null)->id);
+        $this->assertDatabaseCount('issued_document_numbers', 1);
+        $this->assertDatabaseCount('controlled_registration_links', 1);
+        $this->assertSame('XPPL-ADM-SOP-0002-R00', $manager->automaticNumbering($scope, $site['type_id'])['preview']);
+        $this->assertSame('XPPL-ADM-SOP-0001-R00', (new ControlledDocumentResource($registered))->resolve()['revisions'][0]['full_identifier']);
+    }
+
     /** @return array<string, mixed> */
     private function site(string $department = 'ADM', string $typeCode = 'SOP', bool $outgoing = false): array
     {
@@ -93,7 +137,9 @@ class XpplNumberingTest extends TestCase
     /** @param array<string, mixed> $site */
     private function draft(array $site, ?string $code = null): ControlledDocument
     {
-        return app(ManageControlledDocuments::class)->save($this->actor, $site['scope'], ['document_code' => $code ?? 'DRAFT/'.mb_strtoupper(bin2hex(random_bytes(5))),
+        $automatic = $code === null && (app(ManageControlledDocuments::class)->automaticNumbering($site['scope'], $site['type_id'])['ready'] ?? false);
+
+        return app(ManageControlledDocuments::class)->save($this->actor, $site['scope'], ($automatic ? [] : ['document_code' => $code ?? 'DRAFT/'.mb_strtoupper(bin2hex(random_bytes(5)))]) + [
             'type_id' => $site['type_id'], 'classification' => 'normal', 'title_en' => 'Test document', 'owner_id' => $this->actor->id, 'custodian_id' => $this->actor->id,
             'issue_date' => '2026-10-25', 'effective_date' => '2026-10-26', 'revision_reason' => 'Initial', 'change_description' => 'Initial']);
     }
@@ -102,7 +148,7 @@ class XpplNumberingTest extends TestCase
     private function issue(array $site, ControlledDocument $draft, ?int $namespace): ControlledDocument
     {
         return app(ManageControlledDocuments::class)->register($this->actor, $site['scope'], (string) $draft->id,
-            ['lock_version' => $draft->lock_version] + ($namespace === null ? [] : ['namespace_id' => $namespace]));
+            ['lock_version' => $draft->lock_version] + ($namespace === null || $draft->document_code === null ? [] : ['namespace_id' => $namespace]));
     }
 
     public function test_two_sites_share_continuous_numbering_and_revision_does_not_allocate(): void

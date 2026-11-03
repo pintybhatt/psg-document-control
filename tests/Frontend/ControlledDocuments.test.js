@@ -15,7 +15,7 @@ enableAutoUnmount(afterEach);
 beforeEach(() => localStorage.clear());
 afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals(); });
 function response(data, status = 200) { return { ok: status < 400, status, json: async () => structuredClone(data) }; }
-function server({ registered = false, released = false, mutationError = null, detailError = null, xppl = false, contexts = [scope], people = [{ id: 5, name: 'Example owner' }], defaultCustodianId = 5 } = {}) {
+function server({ registered = false, released = false, mutationError = null, detailError = null, xppl = false, contexts = [scope], people = [{ id: 5, name: 'Example owner' }], defaultCustodianId = 5, automatic = null } = {}) {
     let record = structuredClone(draft);
     if (xppl) { record.xppl_namespaces = [{ id: 4, prefix: 'XPPL-ADM-SOP' }]; }
     if (registered || released) { record.registered_at = '2026-10-26T10:00:00Z'; record.internal_number = 'TEST/CD/2026/000001'; record.lock_version = 2; }
@@ -24,7 +24,7 @@ function server({ registered = false, released = false, mutationError = null, de
         const path = new URL(url, 'http://localhost').pathname;
         const method = options.method ?? 'GET';
         if (path.endsWith('/contexts')) { return response({ data: contexts.map(item => ({ ...item, company: { name_en: 'Example company' }, site: { name_en: 'Example site' } })) }); }
-        if (path.endsWith('/lookups')) { return response({ data: [type], people, default_custodian_id: defaultCustodianId }); }
+        if (path.endsWith('/lookups')) { return response({ data: [{ ...type, automatic_numbering: automatic }], people, default_custodian_id: defaultCustodianId }); }
         if (method === 'GET' && path === '/controlled') { return response({ data: new URL(url, 'http://localhost').searchParams.get('status') === 'current' ? [{ ...record, id: 2, document_code: 'XPPL/SOP/REPLACEMENT' }] : [record], meta: { total: 1 } }); }
         if (method === 'GET') { return detailError ? response(detailError.body, detailError.status) : response({ data: record, audits: [{ id: 1, action: 'created', actor_id: 5, created_at: '2026-10-26T10:00:00Z' }], related: [] }); }
         if (mutationError) { return response(mutationError.body, mutationError.status); }
@@ -45,6 +45,22 @@ async function render(currentScope = scope) {
 }
 function button(wrapper, text) { const found = wrapper.findAll('button').find(item => item.text() === text); expect(found, text).toBeDefined(); return found; }
 async function show(wrapper) { await button(wrapper, 'Details').trigger('click'); await flushPromises(); }
+
+it.each([true, false])('previews automatic numbering without manual code entry when configured=%s', async ready => {
+    const fetch = server({ automatic: { ready, preview: ready ? 'XPPL-ADM-SOP-0043-R00' : null } });
+    const wrapper = await render(); await button(wrapper, en.controlledCreate).trigger('click');
+    await wrapper.get('#controlled-type').setValue(9);
+    expect(wrapper.find('#controlled-document_code').exists()).toBe(false);
+    expect(wrapper.get('#controlled-number-preview').element.value).toBe(ready ? 'XPPL-ADM-SOP-0043-R00' : '');
+    expect(wrapper.text()).toContain(en.controlledNumberProvisional);
+    if (!ready) { expect(wrapper.text()).toContain(en.controlledAutomaticConfiguration); }
+    expect(wrapper.get('#controlled-revision_reason').element.value).toBe('Initial issue');
+    expect(wrapper.get('#controlled-change_description').element.value).toBe('First issue of the document');
+    await wrapper.get('#controlled-draft-form').trigger('submit'); await flushPromises();
+    const body = JSON.parse(fetch.mock.calls.find(([, options]) => options.method === 'POST')[1].body);
+    expect(body).not.toHaveProperty('document_code');
+    expect(body).not.toHaveProperty('namespace_id');
+});
 
 it('explains missing custodian membership and never defaults to an ineligible user', async () => {
     server({ people: [], defaultCustodianId: 5 });

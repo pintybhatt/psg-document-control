@@ -3,6 +3,7 @@
 namespace App\Authorization;
 
 use App\Models\AuthorizationScope;
+use App\Models\Company;
 use App\Models\ControlledDocument;
 use App\Models\ControlledDocumentAudit;
 use App\Models\ControlledRevision;
@@ -23,6 +24,37 @@ use LogicException;
 
 class ManageControlledDocuments
 {
+    /** @return array<string, mixed>|null */
+    public function automaticNumbering(DocumentScope $scope, int $typeId): ?array
+    {
+        if (Company::query()->whereKey($scope->companyId)->value('code') !== 'XPPL') {
+            return null;
+        }
+        $unavailable = ['ready' => false, 'preview' => null];
+        $series = NumberingSeries::query()->where('scope_id', $scope->authorizationScope()->id)->where('purpose', NumberingPurpose::InternalRegister)
+            ->whereHas('register', fn (Builder $query): Builder => $query->where('register_key', 'controlled'))->first();
+        $options = XpplNumbering::options($scope->authorizationScope()->id, $scope->departmentId, $typeId, 'xppl_controlled');
+        if (! $series || count($options) !== 1) {
+            return $unavailable;
+        }
+        try {
+            $engine = app(XpplNumbering::class);
+            $masters = $engine->masters($scope->companyId, ['series_id' => $series->id, 'department_id' => $scope->departmentId, 'type_id' => $typeId, 'format' => 'xppl_controlled']);
+            $mapping = DB::table('xppl_numbering_mappings')->where('namespace_id', $options[0]['id'])->where('series_id', $series->id)
+                ->where('department_id', $scope->departmentId)->where('type_id', $typeId)->first();
+            $report = $engine->reconcile($masters);
+            $counter = DB::table('xppl_numbering_counters')->where('namespace_id', $options[0]['id'])->where('period', 0)->value('value');
+            if (! $mapping || $mapping->master_hash !== $masters['master_hash'] || ! $report['confirmed'] || $report['ambiguous'] || $report['collision_count']
+                || $report['next_sequence'] > NumberingFormat::MAX_SEQUENCE || $report['next_sequence'] !== (int) $counter + 1) {
+                return $unavailable;
+            }
+
+            return ['ready' => true, 'preview' => $report['preview'].'-R00', 'namespace_id' => $options[0]['id']];
+        } catch (ValidationException) {
+            return $unavailable;
+        }
+    }
+
     public function __construct(private AccessControl $roles, private DocumentAccess $documents, private DocumentNumbering $numbering, private MembershipAccess $memberships) {}
 
     public function authorizeContext(User $actor, DocumentScope $scope, ?string $permission = null): void
@@ -79,10 +111,15 @@ class ManageControlledDocuments
             }
             $rules = $this->revisionRules();
             $rules['owner_id'] = ['nullable', 'integer'];
+            $automaticConfig = $this->automaticNumbering($scope, (int) ($data['type_id'] ?? $record?->type_id));
+            $automatic = $automaticConfig !== null && ($record ? $record->document_code === null : (empty($data['document_code']) || $automaticConfig['ready']));
             if (! $record?->isFormallyRegistered()) {
                 $rules += ['document_code' => ['required', 'string', 'max:100', 'regex:/^[A-Z0-9][A-Z0-9.\/-]*$/', Rule::unique('controlled_documents')->where('scope_id', $register->scope_id)->ignore($record?->id)], 'type_id' => ['required', 'integer']];
             }
             $rules['classification'] = $record ? ['prohibited'] : ['required', Rule::enum(Confidentiality::class)];
+            if ($automatic) {
+                $rules['document_code'] = ['prohibited'];
+            }
             $this->rejectUnknown($data, [...array_keys($rules), ...($record ? ['lock_version'] : [])]);
             $validated = Validator::make($data, $rules, $this->messages())->validate();
             if (isset($validated['document_code']) && $validated['document_code'] !== $record?->document_code) {
@@ -103,7 +140,7 @@ class ManageControlledDocuments
                 $this->persist($profile);
                 $this->persist(new DocumentSecurityAudit(['actor_id' => $actor->id, 'profile_id' => $profile->id, 'event' => 'profile.registered', 'after' => $profile->getAttributes()]));
                 $record = new ControlledDocument(['scope_id' => $register->scope_id, 'register_id' => $register->id, 'profile_id' => $profile->id,
-                    'document_code' => $validated['document_code'], 'type_id' => $type->id, 'status' => 'draft', 'lock_version' => 1, 'created_by' => $actor->id, 'updated_by' => $actor->id]);
+                    'document_code' => $automatic ? null : $validated['document_code'], 'type_id' => $type->id, 'status' => 'draft', 'lock_version' => 1, 'created_by' => $actor->id, 'updated_by' => $actor->id]);
                 $record->setRelation('profile', $profile);
                 abort_unless($this->canRead($actor, $record), 403, 'rbacForbidden');
                 $this->persist($record);
@@ -115,7 +152,7 @@ class ManageControlledDocuments
                     throw ValidationException::withMessages(['controlled' => 'controlledNoDraft']);
                 }
                 if (! $record->isFormallyRegistered()) {
-                    $record->fill(['document_code' => $validated['document_code'], 'type_id' => $type->id]);
+                    $record->fill(['document_code' => $automatic ? null : $validated['document_code'], 'type_id' => $type->id]);
                 }
                 $this->touch($record, $actor);
                 $action = 'draft_updated';
@@ -153,20 +190,43 @@ class ManageControlledDocuments
             if (! $series) {
                 throw ValidationException::withMessages(['controlled' => 'controlledNumberingUnavailable']);
             }
+            $existing = $this->find($actor, $scope, $id);
+            $automatic = $existing->document_code === null;
+            if ($automatic && array_key_exists('namespace_id', $data)) {
+                throw ValidationException::withMessages(['namespace_id' => 'controlledAutomaticConfiguration']);
+            }
+            if ($existing->isFormallyRegistered() && $existing->document_code === $existing->internal_number
+                && DB::table('xppl_numbering_allocations as a')->join('issued_document_numbers as i', 'i.id', '=', 'a.issuance_id')->where('i.record_type', 'controlled')->where('i.record_key', $id)->exists()) {
+                $this->roles->authorize($actor, 'numbering.issue', $scope->authorizationScope());
+                if (array_key_exists('namespace_id', $data)) {
+                    throw ValidationException::withMessages(['namespace_id' => 'controlledAutomaticConfiguration']);
+                }
+
+                return $existing;
+            }
+            $automaticConfig = $automatic ? $this->automaticNumbering($scope, $existing->type_id) : null;
+            if ($automatic && ! ($automaticConfig['ready'] ?? false)) {
+                throw ValidationException::withMessages(['controlled' => 'controlledAutomaticConfiguration']);
+            }
+            $xppl = $automatic ? ['namespace_id' => $automaticConfig['namespace_id'], 'department_id' => $scope->departmentId, 'type_id' => $existing->type_id]
+                : (isset($data['namespace_id']) ? $this->xpplContext($actor, $scope, $id, $data['namespace_id']) : null);
             $record = null;
-            $issuance = $this->numbering->register($actor, $scope->authorizationScope(), $series->id, function (string $number) use ($actor, $scope, $id, $data, $register, &$record): ControlledDocument {
+            $issuance = $this->numbering->register($actor, $scope->authorizationScope(), $series->id, function (string $number) use ($actor, $scope, $id, $data, $register, $automatic, &$record): ControlledDocument {
                 $record = $this->find($actor, $scope, $id, true);
                 $this->version($record, $data);
                 if ($record->isFormallyRegistered()) {
                     throw ValidationException::withMessages(['controlled' => 'controlledAlreadyRegistered']);
                 }
                 $this->applicable($record->type, $register);
+                if ($automatic) {
+                    $record->document_code = $number;
+                }
                 $record->fill(['internal_number' => $number, 'registered_at' => now(), 'registered_by' => $actor->id]);
                 $this->touch($record, $actor);
-                $this->audit($actor, $record, null, 'registered', null, ['internal_number', 'registered_at', 'registered_by']);
+                $this->audit($actor, $record, null, 'registered', null, $automatic ? ['document_code', 'internal_number', 'registered_at', 'registered_by'] : ['internal_number', 'registered_at', 'registered_by']);
 
                 return $record;
-            }, isset($data['namespace_id']) ? $this->xpplContext($actor, $scope, $id, $data['namespace_id']) : null);
+            }, $xppl);
             DB::table('controlled_registration_links')->insert(['document_id' => $record->id, 'issuance_id' => $issuance->id]);
 
             return $record->refresh();

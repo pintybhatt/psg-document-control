@@ -26,6 +26,7 @@ const request = createJsonClient(props.csrfToken);
 const { items, notify, dismiss } = useNotifications();
 const rows = ref([]), types = ref([]), people = ref([]), total = ref(0), page = ref(1);
 const defaultCustodianId = ref('');
+const automaticCompany = ref(false);
 const search = ref(''), status = ref(''), typeFilter = ref('');
 const namespaceId = ref('');
 const namespaceOptions = computed(() => [{ value: '', label: t('numberingLegacy') }, ...(detail.value?.xppl_namespaces ?? []).map(item => ({ value: item.id, label: item.prefix }))]);
@@ -51,6 +52,9 @@ const authoritative = computed(() => detail.value?.revisions.find(item => item.i
 const editable = computed(() => ['draft', 'current'].includes(detail.value?.status));
 const typeOptions = computed(() => [{ value: '', label: t('uiChoose') }, ...types.value.map(item => ({ value: item.id, label: label(item) }))]);
 const selectedType = computed(() => types.value.find(item => String(item.id) === String(form.type_id)));
+const automaticDraft = computed(() => (!detail.value || !detail.value.document_code)
+    && (automaticCompany.value || types.value.some(item => item.automatic_numbering != null)));
+const numberPreview = computed(() => selectedType.value?.automatic_numbering);
 const selectedCategoryLabel = computed(() => label(selectedType.value?.category));
 const scopeDepartmentLabel = computed(() => label(props.scope.department) || t('siteWideDepartment'));
 const authorizedDepartmentOptions = computed(() => props.departmentOptions.length
@@ -100,6 +104,7 @@ async function refreshCreateContext() {
         const result = await request(url('/lookups'), { signal });
         if (signal.aborted) { return; }
         types.value = result.data;
+        automaticCompany.value = result.automatic_numbering ?? false;
         contextValid.value = can('controlled.drafts.manage');
         people.value = result.people;
         defaultCustodianId.value = result.people.some(person => person.id === result.default_custodian_id) ? result.default_custodian_id : '';
@@ -117,7 +122,7 @@ async function reset() {
     rows.value = []; detail.value = null; audits.value = []; related.value = []; types.value = []; people.value = []; replacements.value = []; total.value = 0; page.value = 1; editing.value = false; action.value = ''; error.value = ''; fields.value = {}; saving.value = false;
     await load(signal);
     if (signal.aborted) { return; }
-    try { const result = await request(url('/lookups'), { signal }); if (!signal.aborted) { types.value = result.data; people.value = result.people; defaultCustodianId.value = result.people.some(person => person.id === result.default_custodian_id) ? result.default_custodian_id : '';
+    try { const result = await request(url('/lookups'), { signal }); if (!signal.aborted) { types.value = result.data; automaticCompany.value = result.automatic_numbering ?? false; people.value = result.people; defaultCustodianId.value = result.people.some(person => person.id === result.default_custodian_id) ? result.default_custodian_id : '';
         const query = new URLSearchParams(window.location.search);
         if (/^[1-9][0-9]*$/.test(query.get('record') ?? '')) { await show({ id: query.get('record') }); }
     } }
@@ -136,6 +141,7 @@ async function edit(create = false) {
     for (const key of [...textFields, ...dateFields, 'description_en', 'description_lo', 'owner_id', 'custodian_id', 'revision_reason', 'change_description']) { form[key] = draft.value?.[key] ?? ''; }
     Object.assign(form, { document_code: detail.value?.document_code ?? '', type_id: detail.value?.type_id ?? '', classification: 'normal' });
     if (create) { form.custodian_id = defaultCustodianId.value; }
+    if (create) { form.revision_reason = 'Initial issue'; form.change_description = 'First issue of the document'; }
     editing.value = true; action.value = ''; fields.value = {}; error.value = '';
     await nextTick(); editor.value?.querySelector('h2')?.focus();
 }
@@ -144,6 +150,7 @@ async function save() {
     if (saving.value) { return; }
     const body = { ...form };
     body.owner_id = form.owner_id || null;
+    if (automaticDraft.value) { delete body.document_code; }
     if (detail.value) { body.lock_version = detail.value.lock_version; delete body.classification; }
     if (detail.value?.registered_at) { delete body.document_code; delete body.type_id; }
     await mutate(detail.value ? `/${detail.value.id}` : '', body, detail.value ? 'PATCH' : 'POST');
@@ -196,7 +203,7 @@ onBeforeUnmount(() => controller?.abort());
                 <UiButton type="submit" variant="secondary" :disabled="loading">{{ t('incomingApplyFilters') }}</UiButton>
             </form>
             <DataTable v-model:page="page" :rows="displayRows" :columns="columns" :caption="t('controlledTitle')" :loading="loading" :error="error" server-side :total="total" :per-page="10" @change="load()">
-                <template #cell-document_code="{ row }"><button type="button" :disabled="loading" class="text-left font-semibold text-teal-800 hover:underline" @click="show(row)">{{ row.display_identifier }}</button><span class="block font-mono text-xs text-slate-500">{{ row.internal_number || '—' }}</span></template>
+                <template #cell-document_code="{ row }"><button type="button" :disabled="loading" class="text-left font-semibold text-teal-800 hover:underline" @click="show(row)">{{ row.display_identifier || t('controlledUnnumbered') }}</button><span class="block font-mono text-xs text-slate-500">{{ row.internal_number || '—' }}</span></template>
                 <template #cell-status="{ row }"><StatusBadge :status="row.status" :label="t(`controlledStatus-${row.status}`)" /></template>
                 <template #cell-actions="{ row }"><UiButton variant="secondary" :disabled="loading" @click="show(row)">{{ t('rbacDetails') }}</UiButton></template>
             </DataTable>
@@ -207,8 +214,12 @@ onBeforeUnmount(() => controller?.abort());
             <p v-if="scope.permissions.includes('documents.attachments.manage')" class="text-sm text-slate-600">{{ t('storageControlledDraftHelp') }}</p>
             <fieldset :disabled="saving" class="grid gap-4 md:grid-cols-2"><legend class="mb-3 font-semibold">{{ t('documentInformation') }}</legend>
                 <SelectInput id="controlled-department" v-model="departmentContext" :label="t('controlledOwnerDepartment')" :options="authorizedDepartmentOptions" :helper="t('documentDepartmentHelp')" :disabled="!!detail || saving" required />
-                <template v-if="!detail?.registered_at"><TextInput id="controlled-document_code" v-model="form.document_code" :label="t('controlled-document_code')" :error-key="fields.document_code?.[0]" maxlength="100" required /><SelectInput id="controlled-type" v-model="form.type_id" :label="t('documentType')" :options="typeOptions" :error-key="fields.type_id?.[0]" required /></template>
-                <TextInput v-else id="controlled-type" :model-value="label(detail.type)" :label="t('documentType')" readonly />
+                <template v-if="!detail?.registered_at"><TextInput v-if="!automaticDraft" id="controlled-document_code" v-model="form.document_code" :label="t('controlled-document_code')" :error-key="fields.document_code?.[0]" maxlength="100" required /><SelectInput id="controlled-type" v-model="form.type_id" :label="t('documentType')" :options="typeOptions" :error-key="fields.type_id?.[0]" required /></template>
+                <template v-if="automaticDraft">
+                    <TextInput id="controlled-number-preview" :model-value="numberPreview?.preview || ''" :label="t('controlledNumberPreview')" :helper="t('controlledNumberProvisional')" readonly />
+                    <p v-if="!numberPreview?.ready" class="text-sm text-slate-600">{{ t('controlledAutomaticConfiguration') }}</p>
+                </template>
+                <TextInput v-if="detail?.registered_at" id="controlled-type" :model-value="label(detail.type)" :label="t('documentType')" readonly />
                 <TextInput id="controlled-category" :model-value="selectedCategoryLabel" :label="t('documentCategory')" :helper="t('documentCategoryHelp')" readonly />
                 <SelectInput v-if="!detail" id="controlled-classification" v-model="form.classification" :label="t('outgoingClassification')" :options="classificationOptions" :error-key="fields.classification?.[0]" required />
                 <TextInput v-for="field in textFields" :id="`controlled-${field}`" :key="field" v-model="form[field]" :label="t(`controlled-${field}`)" :required="field === 'title_en'" :error-key="fields[field]?.[0]" maxlength="500" />
@@ -222,7 +233,7 @@ onBeforeUnmount(() => controller?.abort());
             <div class="flex gap-3"><UiButton type="submit" :loading="saving" :disabled="contextLoading || !contextValid">{{ t('controlledSave') }}</UiButton><UiButton variant="secondary" :disabled="saving" @click="editing = false">{{ t('uiCancel') }}</UiButton></div>
         </form>
         <section v-else-if="detail" class="flex flex-col gap-5 rounded-2xl border border-slate-200 bg-white p-5" aria-labelledby="controlled-detail-title">
-            <div class="flex flex-wrap items-center justify-between gap-3"><h2 id="controlled-detail-title" tabindex="-1" class="text-lg font-semibold">{{ authoritative?.full_identifier || draft?.full_identifier || detail.document_code }}</h2><StatusBadge :status="detail.status" :label="t(`controlledStatus-${detail.status}`)" /></div>
+            <div class="flex flex-wrap items-center justify-between gap-3"><h2 id="controlled-detail-title" tabindex="-1" class="text-lg font-semibold">{{ authoritative?.full_identifier || draft?.full_identifier || detail.document_code || t('controlledUnnumbered') }}</h2><StatusBadge :status="detail.status" :label="t(`controlledStatus-${detail.status}`)" /></div>
             <dl class="grid gap-4 md:grid-cols-2">
                 <div><dt class="text-sm text-slate-600">{{ t('controlledNumber') }}</dt><dd class="font-mono">{{ detail.internal_number || '—' }}</dd></div>
                 <div><dt class="text-sm text-slate-600">{{ t('controlledOwnerDepartment') }}</dt><dd>{{ scopeDepartmentLabel }}</dd></div>
@@ -233,7 +244,7 @@ onBeforeUnmount(() => controller?.abort());
             </dl>
             <div v-if="!action" class="flex flex-wrap gap-3">
                 <UiButton v-if="draft && editable && can('controlled.drafts.manage')" variant="secondary" :disabled="saving || loading" @click="edit()">{{ t('controlledEdit') }}</UiButton>
-                <SelectInput v-if="!detail.registered_at && detail.xppl_namespaces?.length" v-model="namespaceId" :label="t('numberingSelection')" :options="namespaceOptions" :disabled="saving || loading" />
+                <SelectInput v-if="!detail.registered_at && detail.document_code && detail.xppl_namespaces?.length" v-model="namespaceId" :label="t('numberingSelection')" :options="namespaceOptions" :disabled="saving || loading" />
                 <UiButton v-if="!detail.registered_at && canRegister" :disabled="saving || loading" @click="beginAction('register')">{{ t('controlledAction-register') }}</UiButton>
                 <UiButton v-if="draft && editable && detail.registered_at && can('controlled.release')" :disabled="saving || loading" @click="beginAction('release')">{{ t('controlledAction-release') }}</UiButton>
                 <UiButton v-if="!draft && detail.status === 'current' && can('controlled.drafts.manage')" variant="secondary" :disabled="saving || loading" @click="beginAction('revisions')">{{ t('controlledAction-revisions') }}</UiButton>

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\ControlledDocument;
 use App\Models\ControlledRevision;
 use Illuminate\Foundation\Testing\DatabaseMigrations;
 use Illuminate\Support\Facades\DB;
@@ -11,6 +12,30 @@ use Tests\TestCase;
 class OptionalControlledOwnerMigrationTest extends TestCase
 {
     use DatabaseMigrations;
+
+    public function test_unnumbered_draft_migration_preserves_codes_guards_and_blocks_unsafe_rollback(): void
+    {
+        if (DB::getDriverName() !== 'sqlite') {
+            $this->markTestSkipped('SQLite rebuild regression.');
+        }
+        $document = ControlledDocument::factory()->create()->refresh();
+        $before = $document->getAttributes();
+        $guards = DB::select("SELECT name, sql FROM sqlite_master WHERE type = 'trigger' ORDER BY name");
+        $migration = require database_path('migrations/2026_11_03_050644_allow_unnumbered_controlled_drafts.php');
+        $migration->down();
+        $migration->up();
+        $this->assertEquals($before, $document->fresh()->getAttributes());
+        $this->assertEquals($guards, DB::select("SELECT name, sql FROM sqlite_master WHERE type = 'trigger' ORDER BY name"));
+        $this->assertSame([], DB::select('PRAGMA foreign_key_check'));
+        $document->update(['document_code' => null, 'lock_version' => 2]);
+        try {
+            $migration->down();
+            $this->fail('Rollback must refuse unnumbered drafts.');
+        } catch (LogicException $exception) {
+            $this->assertStringContainsString('Register unnumbered drafts', $exception->getMessage());
+        }
+        $document->update(['document_code' => $before['document_code'], 'lock_version' => 3]);
+    }
 
     public function test_sqlite_owner_change_preserves_records_foreign_keys_and_all_guards(): void
     {

@@ -115,7 +115,9 @@ class XpplNumbering
             $inspect($row->number, $row->record_type.':'.$row->record_key);
         }
         foreach (DB::table('controlled_documents')->whereIn('scope_id', $companyScopes)->where(fn (Builder $query): Builder => $query->where('document_code', 'like', $masters['prefix'].'%')->orWhere('internal_number', 'like', $masters['prefix'].'%'))->get(['id', 'document_code', 'internal_number']) as $row) {
-            $inspect($row->document_code, 'controlled:'.$row->id);
+            if ($row->document_code !== null) {
+                $inspect($row->document_code, 'controlled:'.$row->id);
+            }
             if ($row->internal_number) {
                 $inspect($row->internal_number, 'controlled:'.$row->id);
             }
