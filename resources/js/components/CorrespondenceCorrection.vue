@@ -16,7 +16,7 @@ const allowed = computed(() => props.record.status === 'registered' && props.sco
     && !props.record.operations?.dispatch_date && !props.record.recipients?.some(item => item.delivery)
     && !props.history.some(item => ['dispatch', 'correct_dispatch', 'delivery'].includes(item.action)))));
 const mainFields = computed(() => outgoing.value ? ['subject', 'document_date', 'signatory_name'] : ['subject', 'sender_organization', 'external_reference', 'correspondence_date', 'received_date']);
-const extraFields = computed(() => outgoing.value ? ['signatory_title', 'description_en', 'description_lo'] : ['sender_contact', 'sender_email', 'sender_phone', 'description_en', 'description_lo']);
+const extraFields = computed(() => outgoing.value ? ['document_revision', 'signatory_title', 'description_en', 'description_lo'] : ['document_revision', 'sender_contact', 'sender_email', 'sender_phone', 'description_en', 'description_lo']);
 const recipientFields = ['organization', 'contact_name', 'email', 'phone', 'address'];
 const editing = ref(false);
 const saving = ref(false);
@@ -32,7 +32,7 @@ const channels = computed(() => ['email', 'courier', 'hand_delivery', 'post', 'o
 const priorities = computed(() => ['normal', 'urgent'].map(value => ({ value, label: t(`incomingPriority-${value}`) })));
 const required = field => ['subject', 'sender_organization', 'correspondence_date', 'received_date', 'document_date', 'signatory_name'].includes(field);
 const inputType = field => field.endsWith('_date') ? 'date' : field.endsWith('email') ? 'email' : 'text';
-const maximum = field => field === 'subject' || field === 'address' ? 500 : field.endsWith('phone') ? 64 : 255;
+const maximum = field => field === 'document_revision' ? 30 : field === 'subject' || field === 'address' ? 500 : field.endsWith('phone') ? 64 : 255;
 async function start() {
     Object.keys(form).forEach(key => delete form[key]);
     for (const field of [...mainFields.value, ...extraFields.value, 'priority', ...(!outgoing.value ? ['channel'] : [])]) { form[field] = props.record[field] ?? ''; }
@@ -72,7 +72,7 @@ onBeforeUnmount(() => controller.abort());
             <p class="text-sm text-slate-600">{{ t('correspondenceProtectedIdentity') }} · {{ record.internal_number }}<span v-if="outgoing"> · {{ record.official_number }}</span></p>
             <p v-if="error" role="alert" class="text-red-800">{{ t(error) }}</p>
             <fieldset :disabled="saving" class="grid gap-4 md:grid-cols-2">
-                <TextInput v-for="field in mainFields" :id="`${kind}-correction-${field}`" :key="field" v-model="form[field]" :label="t(`${kind}-${field}`)" :type="inputType(field)" :required="required(field)" :maxlength="maximum(field)" :error-key="fields[`details.${field}`]?.[0]" />
+                <TextInput v-for="field in mainFields" :id="`${kind}-correction-${field}`" :key="field" v-model="form[field]" :label="t(`${kind}-${field}`)" :type="inputType(field)" :helper="field === 'received_date' ? t('correspondenceReceivedDateHelp') : field.endsWith('_date') ? t('correspondenceDocumentDateHelp') : ''" :required="required(field)" :maxlength="maximum(field)" :error-key="fields[`details.${field}`]?.[0]" />
                 <SelectInput :id="`${kind}-correction-priority`" v-model="form.priority" :label="t(`${kind}Priority`)" :options="priorities" :error-key="fields['details.priority']?.[0]" required />
                 <SelectInput v-if="!outgoing" id="incoming-correction-channel" v-model="form.channel" :label="t('incomingChannel')" :options="channels" :error-key="fields['details.channel']?.[0]" required />
             </fieldset>
@@ -89,7 +89,7 @@ onBeforeUnmount(() => controller.abort());
                 <summary class="cursor-pointer text-sm font-semibold">{{ t('outgoingRecipients') }}</summary>
                 <fieldset v-for="(recipient, index) in form.recipients" :key="recipient.id" :disabled="saving" class="mt-3 grid gap-4 md:grid-cols-2">
                     <legend class="font-medium">{{ t(`outgoingRecipient-${record.recipients[index].kind}`) }} · {{ record.recipients[index].organization }}</legend>
-                    <TextInput v-for="field in recipientFields" :id="`outgoing-correction-recipient-${index}-${field}`" :key="field" v-model="recipient[field]" :label="t(`outgoingRecipient-${field}`)" :type="inputType(field)" :required="field === 'organization'" :maxlength="maximum(field)" :error-key="fields[`details.recipients.${index}.${field}`]?.[0]" />
+                    <TextInput v-for="field in recipientFields" :id="`outgoing-correction-recipient-${index}-${field}`" :key="field" v-model="recipient[field]" :label="t(`outgoingRecipient-${field}`)" :type="inputType(field)" :helper="field === 'received_date' ? t('correspondenceReceivedDateHelp') : field.endsWith('_date') ? t('correspondenceDocumentDateHelp') : ''" :required="field === 'organization'" :maxlength="maximum(field)" :error-key="fields[`details.recipients.${index}.${field}`]?.[0]" />
                 </fieldset>
             </details>
             <TextareaInput :id="`${kind}-correction-reason`" v-model="reason" :label="t('correspondenceCorrectionReason')" :helper="t('correspondenceCorrectionReasonHelp')" :error-key="fields.note?.[0]" :disabled="saving" required minlength="10" maxlength="2000" />

@@ -25,7 +25,7 @@ afterAll(() => {
     }
 });
 function response(data, status = 200) { return { ok: status < 400, status, json: async () => structuredClone(data) }; }
-function server({ mutationError = null, detailError = null, contexts = [scope] } = {}) {
+function server({ mutationError = null, detailError = null, contexts = [scope], relatedOutgoing = [] } = {}) {
     let record = structuredClone(draft);
     const fetch = vi.fn(async (url, options = {}) => {
         const path = new URL(url, 'http://localhost').pathname;
@@ -33,7 +33,7 @@ function server({ mutationError = null, detailError = null, contexts = [scope] }
         if (path.endsWith('/contexts')) { return response({ data: contexts.map(item => ({ ...item, company: { name_en: 'Example company' }, site: { name_en: 'Example site' } })) }); }
         if (path.endsWith('/lookups')) { return response({ data: [type] }); }
         if (method === 'GET' && path === '/incoming') { return response({ data: [record], meta: { total: 1 } }); }
-        if (method === 'GET') { return detailError ? response(detailError.body, detailError.status) : response({ data: record, audits: [{ id: 1, action: 'created', created_at: '2026-10-26', actor_id: 5 }] }); }
+        if (method === 'GET') { return detailError ? response(detailError.body, detailError.status) : response({ data: record, related_outgoing: relatedOutgoing, audits: [{ id: 1, action: 'created', created_at: '2026-10-26', actor_id: 5 }] }); }
         if (mutationError) { return response(mutationError.body, mutationError.status); }
         const body = JSON.parse(options.body);
         if (path.endsWith('/register')) { record = { ...record, status: 'registered', internal_number: 'TEST/IN/2026/000001', registered_by: 5, registered_at: '2026-10-26T00:00:00Z' }; }
@@ -54,6 +54,36 @@ function button(wrapper, text) { const found = wrapper.findAll('button').find(it
 async function openDetail(wrapper) { await button(wrapper, 'Details').trigger('click'); await flushPromises(); }
 
 describe('incoming correspondence', () => {
+    it('shows the authorized outgoing document number and subject in details', async () => {
+        server({ relatedOutgoing: [{ id: 5, official_number: 'XPPL-ADM-LTR-26-0001', internal_number: 'OUT/1', subject: '<script>Reply subject</script>' }] });
+        const wrapper = await render(); await openDetail(wrapper);
+        expect(wrapper.text()).toContain('XPPL-ADM-LTR-26-0001');
+        expect(wrapper.text()).toContain('<script>Reply subject</script>');
+        expect(wrapper.find('script').exists()).toBe(false);
+        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        expect(wrapper.text()).toContain(lo.incomingRelatedOutgoing);
+    });
+
+    it('keeps manual revision optional under Additional Information and preserves it through draft editing', async () => {
+        const fetch = server(); const wrapper = await render();
+        await button(wrapper, en.incomingCreate).trigger('click');
+        const input = wrapper.get('#incoming-document_revision');
+        expect(input.element.value).toBe('');
+        expect(input.attributes('maxlength')).toBe('30');
+        expect(input.attributes('required')).toBeUndefined();
+        expect(input.element.closest('details')).not.toBeNull();
+        await button(wrapper, en.uiCancel).trigger('click');
+        await openDetail(wrapper);
+        await button(wrapper, en.incomingEdit).trigger('click');
+        await wrapper.get('#incoming-document_revision').setValue('Rev A');
+        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        expect(wrapper.text()).toContain(lo['incoming-document_revision']);
+        await wrapper.get('#incoming-draft-form').trigger('submit'); await flushPromises();
+        const mutation = fetch.mock.calls.find(([, options]) => options?.method === 'PATCH');
+        expect(JSON.parse(mutation[1].body).document_revision).toBe('Rev A');
+        expect(wrapper.text()).toContain('Rev A');
+    });
+
     it('filters the register and supplies native report downloads with the selected scope and filters', async () => {
         const fetch = server(); const wrapper = await render();
         await wrapper.get('#incoming-filter-search').setValue('Example');

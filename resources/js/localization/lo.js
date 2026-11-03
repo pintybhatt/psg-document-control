@@ -1,4 +1,12 @@
 export default {
+    "incoming-document_revision": "ສະບັບແກ້ໄຂ (ບໍ່ບັງຄັບ)",
+    "outgoing-document_revision": "ສະບັບແກ້ໄຂ (ບໍ່ບັງຄັບ)",
+    "incomingRelatedOutgoing": "ເອກະສານຂາອອກທີ່ເຊື່ອມໂຍງ",
+    "correspondenceDocumentDateHelp": "ວັນທີທີ່ພິມຢູ່ໃນເອກະສານຕົ້ນສະບັບ.",
+    "correspondenceReceivedDateHelp": "ວັນທີທີ່ XPPL ໄດ້ຮັບເອກະສານ.",
+    "correspondenceRegistrationDateHelp": "ວັນທີລົງທະບຽນທີ່ລະບົບບັນທຶກອັດຕະໂນມັດ.",
+    "correspondenceDispatchDateHelp": "ວັນທີທີ່ XPPL ສົ່ງເອກະສານອອກ.",
+
     outgoingOfficialLetter: 'ຈົດໝາຍທາງການ',
     outgoingOfficialTypeHelp: 'ຈົດໝາຍທາງການໃຊ້ປະເພດຈົດໝາຍທີ່ອະນຸມັດ.',
     outgoingCurrentDraftType: 'ປະເພດສະບັບຮ່າງປັດຈຸບັນ — ຕ້ອງແກ້ໄຂ',
@@ -826,7 +834,7 @@ export default {
     "incoming-subject": "ຫົວຂໍ້",
     "incoming-description_en": "ລາຍລະອຽດ (ອັງກິດ)",
     "incoming-description_lo": "ລາຍລະອຽດ (ລາວ)",
-    "incomingRegisteredAt": "ເວລາລົງທະບຽນ",
+    "incomingRegisteredAt": "ວັນທີລົງທະບຽນ",
     "incomingRegisteredBy": "ຜູ້ລົງທະບຽນ (ລະຫັດຜູ້ໃຊ້)",
     "incomingHistory": "ປະຫວັດການດຳເນີນງານ",
     "incomingActor": "ຜູ້ໃຊ້",

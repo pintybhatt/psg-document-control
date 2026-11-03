@@ -2,11 +2,15 @@
 
 namespace App;
 
+use App\Authorization\ManageIncomingOperations;
+use App\Authorization\ManageOutgoingOperations;
 use App\Models\Company;
 use App\Models\Department;
 use App\Models\IncomingCorrespondence;
 use App\Models\OutgoingCorrespondence;
+use App\Models\PhysicalCopy;
 use App\Models\Site;
+use App\Models\User;
 use Carbon\CarbonImmutable;
 use DateTimeInterface;
 use Illuminate\Database\Eloquent\Model;
@@ -29,6 +33,13 @@ class CorrespondenceReport
 {
     /** @var array<string, array{string, string}> */
     private const LABELS = [
+        'category' => ['Document category', 'ໝວດເອກະສານ'],
+        'document_reference' => ['Document reference', 'ເລກອ້າງອີງເອກະສານ'],
+        'document_revision' => ['Revision', 'ສະບັບແກ້ໄຂ'],
+        'handling' => ['Responsible department / person', 'ພະແນກ / ຜູ້ຮັບຜິດຊອບ'],
+        'related_references' => ['Related / reply references', 'ເລກອ້າງອີງເອກະສານກ່ຽວຂ້ອງ / ຕອບກັບ'],
+        'physical_references' => ['Physical copy / folder reference', 'ເລກອ້າງອີງສຳເນົາ / ແຟ້ມເອກະສານ'],
+        'related_outgoing' => ['Linked outgoing correspondence', 'ເອກະສານຂາອອກທີ່ເຊື່ອມໂຍງ'],
         'incoming' => ['Incoming correspondence register', 'ທະບຽນເອກະສານຂາເຂົ້າ'],
         'outgoing' => ['Outgoing correspondence register', 'ທະບຽນເອກະສານຂາອອກ'],
         'detail' => ['Correspondence details', 'ລາຍລະອຽດເອກະສານ'],
@@ -40,9 +51,9 @@ class CorrespondenceReport
         'internal_number' => ['Internal number', 'ເລກທະບຽນພາຍໃນ'], 'official_number' => ['Official number', 'ເລກເອກະສານທາງການ'],
         'subject' => ['Subject', 'ຫົວຂໍ້'], 'sender_organization' => ['Sender', 'ຜູ້ສົ່ງ'],
         'recipient' => ['Recipient', 'ຜູ້ຮັບ'],
-        'recipients' => ['Recipients', 'ຜູ້ຮັບ'], 'received_date' => ['Received date', 'ວັນທີຮັບ'],
-        'correspondence_date' => ['Correspondence date', 'ວັນທີເອກະສານ'], 'document_date' => ['Document date', 'ວັນທີເອກະສານ'],
-        'channel' => ['Channel', 'ຊ່ອງທາງ'], 'status' => ['Status', 'ສະຖານະ'], 'due_date' => ['Due date', 'ວັນຄົບກຳນົດ'],
+        'recipients' => ['Primary recipient', 'ຜູ້ຮັບຫຼັກ'], 'received_date' => ['Received date', 'ວັນທີຮັບ'],
+        'correspondence_date' => ['Document date', 'ວັນທີເອກະສານ'], 'document_date' => ['Document date', 'ວັນທີເອກະສານ'],
+        'channel' => ['Channel', 'ຊ່ອງທາງ'], 'status' => ['Operational status', 'ສະຖານະ'], 'due_date' => ['Due date', 'ວັນຄົບກຳນົດ'],
         'response_required' => ['Response required', 'ຕ້ອງຕອບ'], 'response_completed' => ['Response completed', 'ຕອບແລ້ວ'],
         'dispatch_date' => ['Dispatch date', 'ວັນທີສົ່ງອອກ'], 'dispatch_channel' => ['Dispatch channel', 'ຊ່ອງທາງສົ່ງອອກ'],
         'dispatch_reference' => ['Dispatch reference', 'ເລກອ້າງອີງການສົ່ງ'], 'dispatch_remarks' => ['Dispatch remarks', 'ໝາຍເຫດການສົ່ງ'],
@@ -60,7 +71,7 @@ class CorrespondenceReport
         'sender_email' => ['Sender email', 'ອີເມວຜູ້ສົ່ງ'], 'sender_phone' => ['Sender phone', 'ເບີໂທຜູ້ສົ່ງ'],
         'signatory_name' => ['Signatory', 'ຜູ້ລົງນາມ'], 'signatory_title' => ['Signatory title', 'ຕຳແໜ່ງຜູ້ລົງນາມ'],
         'description_en' => ['Description (English)', 'ລາຍລະອຽດ (ອັງກິດ)'], 'description_lo' => ['Description (Lao)', 'ລາຍລະອຽດ (ລາວ)'],
-        'registered_at' => ['Registered at', 'ເວລາລົງທະບຽນ'], 'registered_by' => ['Registered by (user ID)', 'ຜູ້ລົງທະບຽນ (ລະຫັດຜູ້ໃຊ້)'],
+        'registered_at' => ['Registration date', 'ວັນທີລົງທະບຽນ'], 'registered_by' => ['Registered by (user ID)', 'ຜູ້ລົງທະບຽນ (ລະຫັດຜູ້ໃຊ້)'],
         'operations' => ['Current handling', 'ການດຳເນີນງານປັດຈຸບັນ'], 'history' => ['Operational history', 'ປະຫວັດການດຳເນີນງານ'],
         'registration_history' => ['Registration history', 'ປະຫວັດການລົງທະບຽນ'], 'related' => ['Related correspondence', 'ເອກະສານທີ່ກ່ຽວຂ້ອງ'],
         'created' => ['Draft created', 'ສ້າງຮ່າງແລ້ວ'], 'updated' => ['Updated', 'ປັບປຸງແລ້ວ'], 'noted' => ['Follow-up added', 'ເພີ່ມການຕິດຕາມ'],
@@ -107,6 +118,7 @@ class CorrespondenceReport
         $columns = $kind === 'incoming'
             ? ['internal_number', 'subject', 'sender_organization', 'received_date', 'channel', 'status', 'due_date', 'response_required', 'response_completed']
             : ['internal_number', 'official_number', 'subject', 'recipients', 'document_date', 'status', 'dispatch_date', 'dispatch_channel', 'dispatch_reference'];
+        $columns = [...$columns, 'category', ...($kind === 'incoming' ? ['document_reference', 'document_date'] : []), 'document_revision', 'registered_at', 'handling', 'priority', 'related_references', 'physical_references'];
         $rows = [];
         foreach ($records as $record) {
             $state = $record->operation;
@@ -116,11 +128,29 @@ class CorrespondenceReport
                 ? ['sender_organization' => $record->sender_organization, 'received_date' => $record->received_date, 'channel' => $record->channel ? $this->label($record->channel, $data['language']) : null,
                     'due_date' => $state?->due_date, 'response_required' => $this->label($state?->response_required ? 'yes' : 'no', $data['language']), 'response_completed' => $this->label($state?->response_completed_at ? 'yes' : 'no', $data['language'])]
                 : ['official_number' => $record->official_number, 'document_date' => $record->document_date,
-                    'recipients' => $record->recipients->map(fn ($recipient): string => $this->label($recipient->kind, $data['language']).': '.$recipient->organization)->implode("\n"),
+                    'recipients' => $record->recipients->where('kind', 'primary')->map(fn ($recipient): string => implode(' · ', array_filter([$recipient->organization, $recipient->contact_name])))->implode("\n"),
                     'dispatch_date' => $state?->dispatch_date, 'dispatch_channel' => $state?->dispatch_channel ? $this->label($state->dispatch_channel, $data['language']) : null, 'dispatch_reference' => $state?->dispatch_reference];
+            $language = $data['language'];
+            $related = $this->related($request->user(), $record);
+            $row += ['category' => $record->type->category->{'name_'.$language},
+                'document_reference' => $kind === 'incoming' ? $record->external_reference : $record->official_number,
+                'document_revision' => $record->document_revision,
+                'registered_at' => $record->registered_at?->setTimezone('Asia/Vientiane')->startOfDay(),
+                'priority' => $this->label($record->priority, $language),
+                'related_references' => implode("\n", array_map(fn (array $item): string => $item['official_number'] ?? $item['internal_number'], $related)),
+                'physical_references' => $this->physicalReferences($record)];
+            $row['handling'] = implode(' / ', array_filter([
+                Department::query()->find($kind === 'incoming' ? ($state?->responsible_department_id ?? $record->profile->department_id) : $record->profile->department_id)?->{'name_'.$language},
+                $kind === 'incoming' && $state?->responsible_user_id ? User::query()->find($state->responsible_user_id)?->name : null,
+            ]));
+            if ($kind === 'incoming') {
+                $row['document_date'] = $record->correspondence_date;
+            }
             $rows[] = $row;
         }
-        $data += ['columns' => $columns, 'rows' => $rows, 'sections' => [], 'detail' => false];
+        $columns = array_values(array_filter($columns, fn (string $column): bool => ! in_array($column, ['handling', 'related_references', 'physical_references'], true)
+            || array_filter(array_column($rows, $column)) !== []));
+        $data += ['columns' => $columns, 'rows' => $rows, 'sections' => [], 'detail' => false, 'compact_register' => true];
         $format = $request->input('format', 'xlsx');
         $pdf = $format === 'pdf' ? $this->pdf($data) : null;
 
@@ -135,7 +165,8 @@ class CorrespondenceReport
     {
         $data = $this->metadata($request, $kind);
         $language = $data['language'];
-        $fields = ['internal_number', ...($kind === 'outgoing' ? ['official_number', 'signatory_name', 'signatory_title', 'document_date'] : ['sender_organization', 'sender_contact', 'sender_email', 'sender_phone', 'external_reference', 'correspondence_date', 'received_date', 'channel']), 'subject', 'status', 'type', 'classification', 'priority', 'description_en', 'description_lo', 'registered_at', 'registered_by'];
+        $fields = ['internal_number', ...($kind === 'outgoing' ? ['official_number', 'signatory_name', 'signatory_title', 'document_date'] : ['sender_organization', 'sender_contact', 'sender_email', 'sender_phone', 'external_reference', 'correspondence_date', 'received_date', 'channel']), 'subject', 'document_revision', 'status', 'type', 'classification', 'priority', 'description_en', 'description_lo', 'registered_at', 'registered_by'];
+        $record['status'] = $record['operations']['status'] ?? $record['status'];
         $sections = [['title' => $record['subject'], 'fields' => $this->fields(array_intersect_key($record, array_flip($fields)), $language)]];
         if ($record['operations']) {
             $state = $record['operations'];
@@ -170,11 +201,28 @@ class CorrespondenceReport
         if (count($related)) {
             $sections[] = ['title' => $this->label('related', $language), 'fields' => array_map(fn (array $item): array => ['label' => $item['internal_number'], 'value' => $item['subject']], $related)];
         }
+        if (! empty($details['related_outgoing'])) {
+            $sections[] = ['title' => $this->label('related_outgoing', $language), 'fields' => array_map(fn (array $item): array => ['label' => $item['official_number'] ?? $item['internal_number'], 'value' => $item['subject']], $details['related_outgoing'])];
+        }
         $data += ['columns' => [], 'rows' => [], 'sections' => $sections, 'detail' => true];
 
         $pdf = $this->pdf($data);
 
         return $this->download($pdf['content'], $kind.'-correspondence-'.$record['id'].'.pdf', 'pdf', $pdf['pages']);
+    }
+
+    /** @return list<array<string, mixed>> */
+    private function related(User $actor, IncomingCorrespondence|OutgoingCorrespondence $record): array
+    {
+        return $record instanceof IncomingCorrespondence
+            ? [...app(ManageIncomingOperations::class)->related($actor, $record), ...app(ManageIncomingOperations::class)->relatedOutgoing($actor, $record)]
+            : app(ManageOutgoingOperations::class)->relatedIncoming($actor, $record);
+    }
+
+    private function physicalReferences(IncomingCorrespondence|OutgoingCorrespondence $record): string
+    {
+        return PhysicalCopy::query()->where('profile_id', $record->profile_id)->with('location')->orderBy('identifier')->get()
+            ->map(fn (PhysicalCopy $copy): string => $copy->identifier.' · '.$copy->location->label())->implode("\n");
     }
 
     /** @return array<string, mixed> */

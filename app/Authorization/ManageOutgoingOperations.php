@@ -33,13 +33,6 @@ class ManageOutgoingOperations
     /** @return array<string, mixed> */
     public function details(User $actor, OutgoingCorrespondence $record): array
     {
-        $related = [];
-        foreach (DB::table('outgoing_incoming_links')->where('outgoing_id', $record->id)->orderBy('incoming_id')->pluck('incoming_id') as $id) {
-            $incoming = IncomingCorrespondence::query()->find($id);
-            if ($incoming && $this->incoming->canRead($actor, $incoming)) {
-                $related[] = $incoming->only(['id', 'subject', 'internal_number']);
-            }
-        }
         $history = OutgoingOperationAudit::query()->where('correspondence_id', $record->id)->orderBy('revision')->get();
         $actors = User::query()->whereIn('id', $history->pluck('actor_id'))->pluck('name', 'id');
         $history = $history->map(function (OutgoingOperationAudit $audit) use ($actor, $actors): array {
@@ -61,7 +54,21 @@ class ManageOutgoingOperations
             return $data;
         });
 
-        return ['history' => $history, 'related_incoming' => $related];
+        return ['history' => $history, 'related_incoming' => $this->relatedIncoming($actor, $record)];
+    }
+
+    /** @return list<array<string, mixed>> */
+    public function relatedIncoming(User $actor, OutgoingCorrespondence $record): array
+    {
+        $related = [];
+        foreach (DB::table('outgoing_incoming_links')->where('outgoing_id', $record->id)->orderBy('incoming_id')->pluck('incoming_id') as $id) {
+            $incoming = IncomingCorrespondence::query()->find($id);
+            if ($incoming && $this->incoming->canRead($actor, $incoming)) {
+                $related[] = $incoming->only(['id', 'subject', 'internal_number']);
+            }
+        }
+
+        return $related;
     }
 
     /** @return list<array<string, mixed>> */

@@ -34,6 +34,8 @@ describe('registered correspondence metadata corrections', () => {
         expect(wrapper.get(`#${kind}-correction-${date}`).element.value).toBe('26/10/2026');
         await wrapper.get(`#${kind}-correction-${date}`).setValue('27/10/2026');
         await wrapper.get(`#${kind}-correction-subject`).setValue('Corrected subject');
+        expect(wrapper.get(`#${kind}-correction-document_revision`).attributes('maxlength')).toBe('30');
+        await wrapper.get(`#${kind}-correction-document_revision`).setValue('01');
         await wrapper.get(`#${kind}-correction-reason`).setValue('Correct transcription from original');
         if (kind === 'outgoing') { await wrapper.get('#outgoing-correction-recipient-0-organization').setValue('Correct recipient'); }
         await wrapper.get('form').trigger('submit'); await flushPromises();
@@ -41,7 +43,7 @@ describe('registered correspondence metadata corrections', () => {
         expect(url).toBe(`/${kind}/3/operations?company_id=1&site_id=1`);
         expect(request.headers['X-CSRF-TOKEN']).toBe('sample-csrf');
         const body = JSON.parse(request.body);
-        expect(body).toMatchObject({ action: 'correct_details', revision: 2, note: 'Correct transcription from original', details: { subject: 'Corrected subject', [date]: '2026-10-27' } });
+        expect(body).toMatchObject({ action: 'correct_details', revision: 2, note: 'Correct transcription from original', details: { subject: 'Corrected subject', document_revision: '01', [date]: '2026-10-27' } });
         expect(body.details).not.toHaveProperty('internal_number');
         expect(body.details).not.toHaveProperty('official_number');
         expect(body.details).not.toHaveProperty('classification');

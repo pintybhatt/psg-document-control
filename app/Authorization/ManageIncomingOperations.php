@@ -6,6 +6,7 @@ use App\Models\Department;
 use App\Models\IncomingCorrespondence;
 use App\Models\IncomingCorrespondenceOperation;
 use App\Models\IncomingOperationAudit;
+use App\Models\OutgoingCorrespondence;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
@@ -40,13 +41,6 @@ class ManageIncomingOperations
     /** @return array<string, mixed> */
     public function details(User $actor, IncomingCorrespondence $record): array
     {
-        $related = [];
-        foreach ($this->relations($record->id)->get() as $link) {
-            $other = IncomingCorrespondence::query()->find($link->correspondence_id === $record->id ? $link->related_id : $link->correspondence_id);
-            if ($other && $this->incoming->canRead($actor, $other)) {
-                $related[] = $other->only(['id', 'subject', 'internal_number']);
-            }
-        }
         $history = IncomingOperationAudit::query()->where('correspondence_id', $record->id)->orderBy('revision')->get()->map(function (IncomingOperationAudit $audit) use ($actor): array {
             $data = $audit->only(['id', 'actor_id', 'action', 'revision', 'note', 'before', 'after', 'created_at']);
             $data['actor_name'] = User::query()->whereKey($audit->actor_id)->value('name');
@@ -74,9 +68,34 @@ class ManageIncomingOperations
         });
         $state = $this->state($record);
 
-        return ['history' => $history, 'related' => $related,
+        return ['history' => $history, 'related' => $this->related($actor, $record), 'related_outgoing' => $this->relatedOutgoing($actor, $record),
             'responsible_user' => User::query()->find($state['responsible_user_id'])?->only(['id', 'name']),
             'responsible_department' => Department::query()->find($state['responsible_department_id'])?->only(['id', 'name_en', 'name_lo'])];
+    }
+
+    /** @return list<array<string, mixed>> */
+    public function related(User $actor, IncomingCorrespondence $record): array
+    {
+        $related = [];
+        foreach ($this->relations($record->id)->get() as $link) {
+            $other = IncomingCorrespondence::query()->find($link->correspondence_id === $record->id ? $link->related_id : $link->correspondence_id);
+            if ($other && $this->incoming->canRead($actor, $other)) {
+                $related[] = $other->only(['id', 'subject', 'internal_number']);
+            }
+        }
+
+        return $related;
+    }
+
+    /** @return list<array<string, mixed>> */
+    public function relatedOutgoing(User $actor, IncomingCorrespondence $record): array
+    {
+        $manager = app(ManageOutgoingCorrespondence::class);
+
+        return OutgoingCorrespondence::query()->whereIn('id', DB::table('outgoing_incoming_links')->where('incoming_id', $record->id)->select('outgoing_id'))
+            ->with('profile')->orderBy('id')->get()
+            ->filter(fn (OutgoingCorrespondence $outgoing): bool => $manager->canRead($actor, $outgoing))
+            ->map(fn (OutgoingCorrespondence $outgoing): array => $outgoing->only(['id', 'internal_number', 'official_number', 'subject']))->values()->all();
     }
 
     /** @return array<string, mixed> */

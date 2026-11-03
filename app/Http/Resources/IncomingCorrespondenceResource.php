@@ -18,7 +18,7 @@ class IncomingCorrespondenceResource extends JsonResource
             'sender_organization' => $this->sender_organization, 'sender_contact' => $this->sender_contact,
             'sender_email' => $this->sender_email, 'sender_phone' => $this->sender_phone, 'external_reference' => $this->external_reference,
             'correspondence_date' => $this->correspondence_date->format('Y-m-d'), 'received_date' => $this->received_date->format('Y-m-d'),
-            'subject' => $this->subject, 'description_en' => $this->description_en, 'description_lo' => $this->description_lo,
+            'subject' => $this->subject, 'document_revision' => $this->document_revision, 'description_en' => $this->description_en, 'description_lo' => $this->description_lo,
             'priority' => $this->priority, 'status' => $this->status, 'internal_number' => $this->internal_number,
             'channel' => $this->channel,
             'operations' => $this->status === 'registered' ? app(ManageIncomingOperations::class)->state($this->resource) : null,

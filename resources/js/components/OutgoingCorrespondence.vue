@@ -51,7 +51,7 @@ let initialNavigation = true;
 let reopenCreateAfterScopeChange = false;
 const contextLoading = ref(false);
 const contextValid = ref(true);
-const textFields = ['signatory_name', 'signatory_title', 'document_date', 'subject'];
+const textFields = ['document_revision', 'signatory_name', 'signatory_title', 'document_date', 'subject'];
 const recipientFields = ['organization', 'contact_name', 'email', 'phone', 'address'];
 const recipientKinds = computed(() => ['primary', 'copy'].map(value => ({ value, label: t(`outgoingRecipient-${value}`) })));
 function emptyRecipient(kind = 'primary') { return { kind, organization: '', contact_name: '', email: '', phone: '', address: '' }; }
@@ -214,10 +214,10 @@ onBeforeUnmount(() => controller?.abort());
                 <TextInput id="outgoing-category" :model-value="selectedCategoryLabel" :label="t('documentCategory')" :helper="t('documentCategoryHelp')" readonly />
                 <SelectInput v-if="!detail" id="outgoing-classification" v-model="form.classification" :label="t('outgoingClassification')" :options="classificationOptions" :helper="t(`confidentiality-${form.classification}-description`)" :error-key="fields.classification?.[0]" required />
                 <SelectInput id="outgoing-priority" v-model="form.priority" :label="t('outgoingPriority')" :options="priorityOptions" :error-key="fields.priority?.[0]" required />
-                <TextInput v-for="field in textFields.filter(field => !['sender_contact', 'sender_email', 'sender_phone', 'signatory_title'].includes(field))" :id="`outgoing-${field}`" :key="field" v-model="form[field]" :label="t(`outgoing-${field}`)" :class="field === 'subject' ? 'md:col-span-2' : ''" :type="field.endsWith('_date') ? 'date' : 'text'" :error-key="fields[field]?.[0]" :required="['signatory_name', 'subject', 'document_date'].includes(field)" :maxlength="field === 'subject' ? 500 : 255" />
+                <TextInput v-for="field in textFields.filter(field => !['document_revision', 'sender_contact', 'sender_email', 'sender_phone', 'signatory_title'].includes(field))" :id="`outgoing-${field}`" :key="field" v-model="form[field]" :label="t(`outgoing-${field}`)" :class="field === 'subject' ? 'md:col-span-2' : ''" :type="field.endsWith('_date') ? 'date' : 'text'" :helper="field === 'received_date' ? t('correspondenceReceivedDateHelp') : field.endsWith('_date') ? t('correspondenceDocumentDateHelp') : ''" :error-key="fields[field]?.[0]" :required="['signatory_name', 'subject', 'document_date'].includes(field)" :maxlength="field === 'subject' ? 500 : 255" />
             </fieldset>
-            <details :open="['sender_contact', 'sender_email', 'sender_phone', 'signatory_title', ...descriptionFields].some(field => fields[field])" class="rounded-xl border border-slate-200 p-4"><summary class="cursor-pointer text-sm font-semibold">{{ t('additionalInformation') }}</summary><div class="mt-4 grid gap-4 md:grid-cols-2">
-                <TextInput v-for="field in textFields.filter(field => ['sender_contact', 'sender_email', 'sender_phone', 'signatory_title'].includes(field))" :id="`outgoing-${field}`" :key="field" v-model="form[field]" :label="t(`outgoing-${field}`)" :type="field.endsWith('email') ? 'email' : 'text'" :error-key="fields[field]?.[0]" :maxlength="field.endsWith('phone') ? 64 : 255" />
+            <details :open="['document_revision', 'sender_contact', 'sender_email', 'sender_phone', 'signatory_title', ...descriptionFields].some(field => fields[field])" class="rounded-xl border border-slate-200 p-4"><summary class="cursor-pointer text-sm font-semibold">{{ t('additionalInformation') }}</summary><div class="mt-4 grid gap-4 md:grid-cols-2">
+                <TextInput v-for="field in textFields.filter(field => ['document_revision', 'sender_contact', 'sender_email', 'sender_phone', 'signatory_title'].includes(field))" :id="`outgoing-${field}`" :key="field" v-model="form[field]" :label="t(`outgoing-${field}`)" :type="field.endsWith('email') ? 'email' : 'text'" :error-key="fields[field]?.[0]" :maxlength="field === 'document_revision' ? 30 : field.endsWith('phone') ? 64 : 255" />
                 <TextareaInput v-for="field in descriptionFields" :id="`outgoing-${field}`" :key="field" v-model="form[field]" :label="t(`outgoing-${field}`)" :error-key="fields[field]?.[0]" maxlength="5000" />
             </div></details>
             <section class="flex flex-col gap-4" aria-labelledby="outgoing-recipients-title">
@@ -253,7 +253,7 @@ onBeforeUnmount(() => controller?.abort());
             </dl>
             <details class="rounded-xl border border-slate-200 p-4"><summary class="cursor-pointer text-sm font-semibold">{{ t('additionalInformation') }}</summary><dl class="mt-4 grid gap-4 md:grid-cols-2">
                 <div v-for="field in [...textFields.filter(field => !['subject', 'signatory_name', 'document_date'].includes(field)), ...descriptionFields]" :key="field"><dt class="text-sm text-slate-600">{{ t(`outgoing-${field}`) }}</dt><dd class="whitespace-pre-wrap wrap-anywhere">{{ detail[field] || '—' }}</dd></div>
-                <div v-if="detail.registered_at"><dt class="text-sm text-slate-600">{{ t('outgoingRegisteredAt') }}</dt><dd>{{ formatDateTime(detail.registered_at) }}</dd></div>
+                <div v-if="detail.registered_at"><dt class="text-sm text-slate-600">{{ t('outgoingRegisteredAt') }}</dt><dd>{{ formatDateTime(detail.registered_at) }}<p class="text-sm text-slate-600">{{ t('correspondenceRegistrationDateHelp') }}</p></dd></div>
                 <div v-if="detail.registered_by"><dt class="text-sm text-slate-600">{{ t('outgoingRegisteredBy') }}</dt><dd>{{ detail.registered_by }}</dd></div>
             </dl></details>
             <h3 class="font-semibold">{{ t('outgoingRecipients') }}</h3>

@@ -169,6 +169,7 @@ class ManageIncomingCorrespondence
     private function validate(array $data, bool $creating): array
     {
         $rules = [
+            'document_revision' => ['nullable', 'string', 'max:30'],
             'type_id' => ['required', 'integer'], 'subject' => ['required', 'string', 'max:500'],
             'sender_organization' => ['required', 'string', 'max:255'], 'sender_contact' => ['nullable', 'string', 'max:255'],
             'sender_email' => ['nullable', 'email', 'max:255'], 'sender_phone' => ['nullable', 'string', 'max:64'],

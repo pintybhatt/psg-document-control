@@ -212,6 +212,7 @@ class ManageOutgoingCorrespondence
     private function validate(array $data, bool $creating): array
     {
         $rules = [
+            'document_revision' => ['nullable', 'string', 'max:30'],
             'type_id' => ['required', 'integer'], 'subject' => ['required', 'string', 'max:500'],
             'signatory_name' => ['required', 'string', 'max:255'], 'signatory_title' => ['nullable', 'string', 'max:255'],
             'document_date' => ['required', 'date_format:Y-m-d'],

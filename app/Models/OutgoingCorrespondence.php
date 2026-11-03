@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Validation\ValidationException;
 
-#[Fillable(['scope_id', 'profile_id', 'register_id', 'type_id', 'signatory_name', 'signatory_title', 'subject', 'description_en', 'description_lo', 'document_date', 'priority', 'status', 'internal_number', 'official_number', 'registered_at', 'registered_by', 'created_by', 'updated_by'])]
+#[Fillable(['scope_id', 'profile_id', 'register_id', 'type_id', 'signatory_name', 'signatory_title', 'subject', 'document_revision', 'description_en', 'description_lo', 'document_date', 'priority', 'status', 'internal_number', 'official_number', 'registered_at', 'registered_by', 'created_by', 'updated_by'])]
 class OutgoingCorrespondence extends Model implements FormalNumberedRegistration
 {
     protected static function booted(): void

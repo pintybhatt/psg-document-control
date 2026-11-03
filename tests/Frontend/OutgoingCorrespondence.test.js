@@ -52,6 +52,26 @@ function button(wrapper, text) { const found = wrapper.findAll('button').find(it
 async function show(wrapper) { await button(wrapper, 'Details').trigger('click'); await flushPromises(); }
 
 describe('outgoing correspondence', () => {
+    it('keeps manual revision optional under Additional Information and preserves it through draft editing', async () => {
+        const fetch = server(); const wrapper = await render();
+        await button(wrapper, en.outgoingCreate).trigger('click');
+        const input = wrapper.get('#outgoing-document_revision');
+        expect(input.element.value).toBe('');
+        expect(input.attributes('maxlength')).toBe('30');
+        expect(input.attributes('required')).toBeUndefined();
+        expect(input.element.closest('details')).not.toBeNull();
+        await button(wrapper, en.uiCancel).trigger('click');
+        await show(wrapper);
+        await button(wrapper, en.outgoingEdit).trigger('click');
+        await wrapper.get('#outgoing-document_revision').setValue('Rev A');
+        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        expect(wrapper.text()).toContain(lo['outgoing-document_revision']);
+        await wrapper.get('#outgoing-draft-form').trigger('submit'); await flushPromises();
+        const mutation = fetch.mock.calls.find(([, options]) => options?.method === 'PATCH');
+        expect(JSON.parse(mutation[1].body).document_revision).toBe('Rev A');
+        expect(wrapper.text()).toContain('Rev A');
+    });
+
     it('defaults a new official draft to the approved type with a friendly bilingual label', async () => {
         server({ automatic: true });
         const wrapper = await render();

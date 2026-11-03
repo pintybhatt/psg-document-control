@@ -10,7 +10,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Validation\ValidationException;
 
-#[Fillable(['scope_id', 'profile_id', 'register_id', 'type_id', 'channel', 'sender_organization', 'sender_contact', 'sender_email', 'sender_phone', 'external_reference', 'correspondence_date', 'received_date', 'subject', 'description_en', 'description_lo', 'priority', 'status', 'internal_number', 'registered_at', 'registered_by', 'created_by', 'updated_by'])]
+#[Fillable(['scope_id', 'profile_id', 'register_id', 'type_id', 'channel', 'sender_organization', 'sender_contact', 'sender_email', 'sender_phone', 'external_reference', 'correspondence_date', 'received_date', 'subject', 'document_revision', 'description_en', 'description_lo', 'priority', 'status', 'internal_number', 'registered_at', 'registered_by', 'created_by', 'updated_by'])]
 class IncomingCorrespondence extends Model implements FormalNumberedRegistration
 {
     protected static function booted(): void

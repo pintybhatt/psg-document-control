@@ -42,8 +42,9 @@ class IncomingOperationsMigrationTest extends TestCase
             $this->assertFalse(Schema::hasColumn('incoming_correspondences', 'channel'));
             $before = $record->fresh()->getRawOriginal();
             $this->artisan('migrate', ['--force' => true, '--no-interaction' => true])->assertExitCode(0);
-            $this->assertSame($before, array_diff_key($record->fresh()->getRawOriginal(), ['channel' => true]));
+            $this->assertSame($before, array_diff_key($record->fresh()->getRawOriginal(), ['channel' => true, 'document_revision' => true]));
             $this->assertNull($record->fresh()->channel);
+            $this->assertNull($record->fresh()->document_revision);
             $this->assertDatabaseCount('incoming_operation_audits', 0);
             try {
                 DB::table('incoming_correspondences')->where('id', $record->id)->update(['internal_number' => 'FORGED']);
