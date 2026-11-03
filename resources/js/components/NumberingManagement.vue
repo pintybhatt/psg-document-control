@@ -14,7 +14,7 @@ import { createJsonClient } from '../utilities/jsonClient.js';
 
 const props = defineProps({ scope: { type: Object, required: true }, endpoint: { type: String, required: true }, csrfToken: { type: String, required: true } });
 const emit = defineEmits(['unauthorized']);
-const { t } = useLocalization();
+const { t, language } = useLocalization();
 const request = createJsonClient(props.csrfToken);
 const { items, notify, dismiss } = useNotifications();
 const rows = ref([]);
@@ -44,11 +44,22 @@ const xpplForm = reactive({ series_id: '', department_id: '', type_id: '' });
 const reconciliation = ref(null);
 const cutoverConfirmed = ref(false);
 const xpplBusy = ref(false);
+const policyConfirmed = ref(false);
+async function activatePolicy() {
+    if (!canManage.value || !policyConfirmed.value || xpplBusy.value) { return; }
+    const signal = controller.signal;
+    xpplBusy.value = true; errorKey.value = '';
+    try {
+        const result = await request(`${props.endpoint}/xppl/activate`, { method: 'POST', signal, body: { ...scopeData(), confirm: true } });
+        if (!signal.aborted) { xpplOptions.value = result; policyConfirmed.value = false; }
+    } catch (error) { if (!signal.aborted) { fail(error); } }
+    finally { if (!signal.aborted) { xpplBusy.value = false; } }
+}
 const xpplSeries = computed(() => xpplOptions.value.series.filter(item => xpplKind.value === 'xppl_controlled' ? item.register === 'controlled' && item.purpose === 'internal_register' : xpplKind.value === 'xppl_letter' && item.register === 'outgoing' && item.purpose === 'official_outgoing').map(item => ({ value: item.id, label: `${item.id} · ${item.site_name_en ?? item.site_id} · ${item.site_name_lo ?? ''} · ${t(`masterRegister-${item.register}`)} · ${t(`numberingPurpose-${item.purpose}`)}` })));
 const selectedXpplSeries = computed(() => xpplOptions.value.series.find(item => item.id === Number(xpplForm.series_id)));
 const selectedXpplDepartment = computed(() => xpplOptions.value.departments.find(item => item.id === Number(xpplForm.department_id)));
-const xpplDepartments = computed(() => xpplOptions.value.departments.filter(item => xpplKind.value === 'xppl_controlled' || item.site_id === selectedXpplSeries.value?.site_id).map(item => ({ value: item.id, label: `${item.code} · ${item.name_en} · ${item.name_lo} · ${t('site')} ${item.site_id}` })));
-const xpplTypes = computed(() => xpplOptions.value.types.filter(item => xpplKind.value === 'xppl_controlled' ? item.site_id === selectedXpplDepartment.value?.site_id : item.scope_id === selectedXpplSeries.value?.scope_id).map(item => ({ value: item.id, label: `${item.code} · ${item.name_en} · ${item.name_lo}` })));
+const xpplDepartments = computed(() => xpplOptions.value.departments.filter(item => xpplKind.value === 'xppl_controlled' || item.site_id === selectedXpplSeries.value?.site_id).map(item => ({ value: item.id, label: `${item.code} · ${language.value === 'lo' ? item.name_lo : item.name_en}` })));
+const xpplTypes = computed(() => xpplOptions.value.types.filter(item => xpplKind.value === 'xppl_controlled' ? item.site_id === selectedXpplDepartment.value?.site_id : item.scope_id === selectedXpplSeries.value?.scope_id).map(item => ({ value: item.id, label: `${item.code} · ${language.value === 'lo' ? item.name_lo : item.name_en}` })));
 async function loadXppl() {
     if (props.scope.scope_type !== 'company') { return; }
     const signal = controller.signal;
@@ -99,6 +110,7 @@ function fail(error) {
     if ([401, 403, 419].includes(error.status)) {
         revoked.value = true; controller?.abort(); previewController?.abort(); historyController?.abort();
         xpplOptions.value = { departments: [], types: [], series: [], history: [], mappings: [] }; reconciliation.value = null;
+        policyConfirmed.value = false;
         rows.value = []; registers.value = []; history.value = []; editor.value = null; historySeries.value = null; preview.value = ''; confirmationOpen.value = false;
         loading.value = false; previewLoading.value = false; historyLoading.value = false;
         emit('unauthorized', error);
@@ -118,6 +130,7 @@ async function reset() {
     const signal = controller.signal;
     revoked.value = false; rows.value = []; registers.value = []; editor.value = null; historySeries.value = null; history.value = []; preview.value = ''; fields.value = {}; errorKey.value = ''; confirmationOpen.value = false; page.value = 1; total.value = 0; previewLoading.value = false; historyLoading.value = false;
     xpplOptions.value = { departments: [], types: [], series: [], history: [], mappings: [] }; reconciliation.value = null; cutoverConfirmed.value = false; xpplBusy.value = false;
+    policyConfirmed.value = false;
     xpplKind.value = '';
     Object.assign(xpplForm, { series_id: '', department_id: '', type_id: '' });
     await load();
@@ -187,8 +200,17 @@ onBeforeUnmount(() => { controller?.abort(); previewController?.abort(); history
         </dl>
         <p class="text-xs leading-6 text-slate-500">{{ t('numberingCodesHelp') }}</p>
         <p v-if="errorKey" role="alert" class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">{{ t(errorKey) }}</p>
+        <section v-if="!revoked && scope.scope_type === 'company' && xpplOptions.policy_available" class="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-5" aria-labelledby="xppl-policy-title">
+            <h4 id="xppl-policy-title" class="font-semibold">{{ t('numberingAdvanced') }}</h4>
+            <p role="status">{{ t('numberingPolicyStatus') }}: {{ t(xpplOptions.policy ? 'rbacActive' : 'rbacInactive') }}</p>
+            <p class="text-sm text-slate-600">{{ t('numberingPolicyHelp') }}</p>
+            <template v-if="!xpplOptions.policy && canManage">
+                <CheckboxInput v-model="policyConfirmed" :label="t('numberingPolicyConfirm')" :disabled="xpplBusy" />
+                <UiButton :disabled="xpplBusy || !policyConfirmed" @click="activatePolicy">{{ t('numberingPolicyActivate') }}</UiButton>
+            </template>
+        </section>
         <details v-if="!revoked" :key="`advanced:${scope.scope_key}`" data-numbering-advanced class="rounded-xl border border-slate-200 bg-white p-5">
-            <summary class="cursor-pointer font-semibold text-slate-900">{{ t('numberingAdvanced') }}</summary>
+            <summary class="cursor-pointer font-semibold text-slate-900">{{ t('numberingAdvancedDetails') }}</summary>
             <p v-if="scope.scope_type !== 'company'" class="mt-4 text-sm leading-7 text-slate-600">{{ t('numberingXpplCompany') }}</p>
             <div v-else class="mt-4 flex flex-col gap-4">
                 <p class="text-sm leading-7 text-slate-600">{{ t('numberingXpplHelp') }}</p>

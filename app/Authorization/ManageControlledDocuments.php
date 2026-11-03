@@ -34,6 +34,21 @@ class ManageControlledDocuments
         $series = NumberingSeries::query()->where('scope_id', $scope->authorizationScope()->id)->where('purpose', NumberingPurpose::InternalRegister)
             ->whereHas('register', fn (Builder $query): Builder => $query->where('register_key', 'controlled'))->first();
         $options = XpplNumbering::options($scope->authorizationScope()->id, $scope->departmentId, $typeId, 'xppl_controlled');
+        if ((! $series || count($options) === 0) && $scope->departmentId !== null && $typeId > 0 && app(XpplNumbering::class)->policyActive($scope->companyId)) {
+            try {
+                $engine = app(XpplNumbering::class);
+                $report = $engine->reconcile($engine->masters($scope->companyId, ['department_id' => $scope->departmentId, 'type_id' => $typeId, 'format' => 'xppl_controlled']));
+                $counter = DB::table('xppl_numbering_counters')->where('namespace_id', $report['namespace_id'])->where('period', 0)->value('value');
+                if ($report['ambiguous'] || $report['collision_count'] || $report['next_sequence'] > NumberingFormat::MAX_SEQUENCE
+                    || ($report['confirmed'] && $report['next_sequence'] !== (int) $counter + 1)) {
+                    return $unavailable;
+                }
+
+                return ['ready' => true, 'preview' => $report['preview'].'-R00', 'namespace_id' => $report['namespace_id']];
+            } catch (ValidationException) {
+                return $unavailable;
+            }
+        }
         if (! $series || count($options) !== 1) {
             return $unavailable;
         }
@@ -186,11 +201,14 @@ class ManageControlledDocuments
             XpplNumbering::lockCompany($scope->companyId);
             $register = $this->lockRegister($scope);
             $this->authorizeContext($actor, $scope, 'controlled.register');
+            $existing = $this->find($actor, $scope, $id);
+            if ($existing->document_code === null && app(XpplNumbering::class)->policyActive($scope->companyId)) {
+                app(XpplNumbering::class)->initializeUnderPolicy($actor, $scope, $existing->type_id);
+            }
             $series = NumberingSeries::query()->where('register_id', $register->id)->where('purpose', NumberingPurpose::InternalRegister)->first();
             if (! $series) {
                 throw ValidationException::withMessages(['controlled' => 'controlledNumberingUnavailable']);
             }
-            $existing = $this->find($actor, $scope, $id);
             $automatic = $existing->document_code === null;
             if ($automatic && array_key_exists('namespace_id', $data)) {
                 throw ValidationException::withMessages(['namespace_id' => 'controlledAutomaticConfiguration']);

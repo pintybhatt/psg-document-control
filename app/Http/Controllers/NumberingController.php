@@ -9,6 +9,7 @@ use App\Authorization\XpplNumbering;
 use App\Http\Requests\NumberingRequest;
 use App\Http\Resources\NumberingSeriesResource;
 use App\Models\AuthorizationScope;
+use App\Models\Company;
 use App\Models\Department;
 use App\Models\DocumentType;
 use App\Models\NumberingSeries;
@@ -27,6 +28,8 @@ class NumberingController extends Controller
         $scopes = AuthorizationScope::query()->where('company_id', $scope->company_id)->where('scope_type', 'site')->select('id');
 
         return response()->json([
+            'policy_available' => Company::query()->whereKey($scope->company_id)->where('code', 'XPPL')->where('active', true)->exists(),
+            'policy' => DB::table('xppl_numbering_policies')->where('company_id', $scope->company_id)->first(),
             'departments' => Department::query()->where('company_id', $scope->company_id)->where('active', true)->orderBy('id')->get(['id', 'site_id', 'code', 'name_en', 'name_lo']),
             'types' => DocumentType::query()->with('scope')->whereIn('scope_id', $scopes)->where('active', true)->orderBy('id')->get()
                 ->map(fn (DocumentType $type): array => $type->only(['id', 'scope_id', 'code', 'name_en', 'name_lo']) + ['site_id' => $type->scope->site_id]),
@@ -42,6 +45,13 @@ class NumberingController extends Controller
     public function xpplReview(NumberingRequest $request, XpplNumbering $manager): JsonResponse
     {
         return response()->json($manager->review($request->user(), $request->scopeContext(), $request->validated()));
+    }
+
+    public function xpplActivate(NumberingRequest $request, XpplNumbering $manager): JsonResponse
+    {
+        $manager->activatePolicy($request->user(), $request->scopeContext(), $request->validated());
+
+        return $this->xpplOptions($request);
     }
 
     public function xpplConfirm(NumberingRequest $request, XpplNumbering $manager): JsonResponse

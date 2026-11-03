@@ -20,6 +20,44 @@ class XpplNumbering
 {
     public function __construct(private AccessControl $access) {}
 
+    public function policyActive(int $companyId): bool
+    {
+        return DB::table('xppl_numbering_policies')->where('company_id', $companyId)->exists();
+    }
+
+    /** @param array<string, mixed> $data */
+    public function activatePolicy(User $actor, AuthorizationScope $scope, array $data): void
+    {
+        abort_unless($scope->scope_type === 'company', 422, 'numberingXpplCompany');
+        $this->access->authorize($actor, 'numbering.manage', $scope);
+        Validator::make($data, ['confirm' => ['required', 'accepted']])->validate();
+        DB::transaction(function () use ($actor, $scope): void {
+            self::lockCompany($scope->company_id);
+            abort_unless(Company::query()->whereKey($scope->company_id)->where('code', 'XPPL')->where('active', true)->exists(), 422, 'numberingXpplConflict');
+            if (! $this->policyActive($scope->company_id)) {
+                DB::table('xppl_numbering_policies')->insert(['company_id' => $scope->company_id, 'activated_by' => $actor->id, 'activated_at' => now()]);
+            }
+        });
+    }
+
+    public function initializeUnderPolicy(User $actor, DocumentScope $scope, int $typeId): void
+    {
+        if (DB::transactionLevel() < 1) {
+            throw new \LogicException('Policy initialization requires the registration transaction.');
+        }
+        abort_unless($this->policyActive($scope->companyId), 403);
+        app(ManageControlledDocuments::class)->authorizeContext($actor, $scope, 'controlled.register');
+        $this->access->authorize($actor, 'numbering.issue', $scope->authorizationScope());
+        self::lockCompany($scope->companyId);
+        $data = ['department_id' => $scope->departmentId, 'type_id' => $typeId, 'format' => 'xppl_controlled'];
+        $masters = $this->masters($scope->companyId, $data);
+        $report = $this->reconcile($masters);
+        if ($report['ambiguous'] || $report['collision_count']) {
+            $this->invalid();
+        }
+        $this->confirmSetup($actor, $scope->companyId, $data, $masters, $report, $scope);
+    }
+
     public static function lockCompany(int $companyId): void
     {
         if (DB::getDriverName() === 'sqlite') {
@@ -173,35 +211,49 @@ class XpplNumbering
             if ($report['ambiguous'] || $report['collision_count'] || ! hash_equals($report['token'], $data['token']) || (int) $data['next_sequence'] !== $report['next_sequence']) {
                 $this->invalid();
             }
-            if ($masters['series_id'] === 0) {
-                $department = Department::query()->findOrFail($masters['department_id']);
-                $siteScope = AuthorizationScope::query()->where('company_id', $scope->company_id)->where('site_id', $department->site_id)->where('scope_type', 'site')->firstOrFail();
-                $register = RegisterConfiguration::query()->where('scope_id', $siteScope->id)->where('register_key', 'controlled')->where('active', true)->firstOrFail();
-                $series = app(ManageNumbering::class)->save($actor, $siteScope, [
-                    'register_id' => $register->id, 'purpose' => 'internal_register', 'reset_policy' => 'continuous',
-                    'prefix' => 'XPPL/DCMS/REGISTER/'.$register->id, 'padding' => 4, 'active' => true,
-                    'change_reason' => 'Supporting configuration for explicitly approved official XPPL numbering',
-                ]);
-                $masters = $this->masters($scope->company_id, array_replace($data, ['series_id' => $series->id]));
-                $report = $this->reconcile($masters);
-            }
-            $namespaceId = $report['namespace_id'] ?? DB::table('xppl_numbering_namespaces')->insertGetId(array_intersect_key($masters, array_flip(['company_id', 'prefix', 'format', 'identity_hash'])) + ['created_by' => $actor->id, 'created_at' => now()]);
-            $mapping = DB::table('xppl_numbering_mappings')->where('series_id', $masters['series_id'])->where('department_id', $masters['department_id'])->where('type_id', $masters['type_id'])->first();
-            if ($mapping && ($mapping->namespace_id !== $namespaceId || $mapping->master_hash !== $masters['master_hash'])) {
-                $this->invalid();
-            }
-            if (! $mapping) {
-                DB::table('xppl_numbering_mappings')->insert(array_intersect_key($masters, array_flip(['series_id', 'department_id', 'type_id', 'master_hash'])) + ['namespace_id' => $namespaceId, 'confirmed_by' => $actor->id, 'created_at' => now()]);
-            }
-            if (! $report['confirmed']) {
-                DB::table('xppl_numbering_counters')->insert(['namespace_id' => $namespaceId, 'period' => $report['period'], 'baseline' => $report['next_sequence'] - 1, 'value' => $report['next_sequence'] - 1,
-                    'reconciliation' => json_encode($report, JSON_THROW_ON_ERROR), 'confirmed_by' => $actor->id, 'confirmed_at' => now()]);
-            } elseif ($report['next_sequence'] > 1 + (int) DB::table('xppl_numbering_counters')->where('namespace_id', $namespaceId)->where('period', $report['period'])->value('value')) {
-                $this->invalid();
-            }
 
-            return $this->reconcile($masters);
+            return $this->confirmSetup($actor, $scope->company_id, $data, $masters, $report);
         });
+    }
+
+    /** @param array<string, mixed> $data
+     * @param  array<string, mixed>  $masters
+     * @param  array<string, mixed>  $report
+     * @return array<string, mixed>
+     */
+    private function confirmSetup(User $actor, int $companyId, array $data, array $masters, array $report, ?DocumentScope $policyScope = null): array
+    {
+        if ($masters['series_id'] === 0) {
+            $department = Department::query()->findOrFail($masters['department_id']);
+            $siteScope = AuthorizationScope::query()->where('company_id', $companyId)->where('site_id', $department->site_id)->where('scope_type', 'site')->firstOrFail();
+            $register = RegisterConfiguration::query()->where('scope_id', $siteScope->id)->where('register_key', 'controlled')->where('active', true)->firstOrFail();
+            $series = $policyScope ? app(ManageNumbering::class)->forControlledPolicy($actor, $policyScope) : app(ManageNumbering::class)->save($actor, $siteScope, [
+                'register_id' => $register->id, 'purpose' => 'internal_register', 'reset_policy' => 'continuous',
+                'prefix' => 'XPPL/DCMS/REGISTER/'.$register->id, 'padding' => 4, 'active' => true,
+                'change_reason' => 'Supporting configuration for explicitly approved official XPPL numbering',
+            ]);
+            $masters = $this->masters($companyId, array_replace($data, ['series_id' => $series->id]));
+            $report = $this->reconcile($masters);
+        }
+        $namespaceId = $report['namespace_id'] ?? DB::table('xppl_numbering_namespaces')->insertGetId(array_intersect_key($masters, array_flip(['company_id', 'prefix', 'format', 'identity_hash'])) + ['created_by' => $actor->id, 'created_at' => now()]);
+        $mapping = DB::table('xppl_numbering_mappings')->where('series_id', $masters['series_id'])->where('department_id', $masters['department_id'])->where('type_id', $masters['type_id'])->first();
+        if ($mapping && ($mapping->namespace_id !== $namespaceId || $mapping->master_hash !== $masters['master_hash'])) {
+            $this->invalid();
+        }
+        if (! $mapping) {
+            DB::table('xppl_numbering_mappings')->insert(array_intersect_key($masters, array_flip(['series_id', 'department_id', 'type_id', 'master_hash'])) + ['namespace_id' => $namespaceId, 'confirmed_by' => $actor->id, 'created_at' => now()]);
+        }
+        if (! $report['confirmed']) {
+            if ($policyScope !== null) {
+                $report['policy_company_id'] = $companyId;
+            }
+            DB::table('xppl_numbering_counters')->insert(['namespace_id' => $namespaceId, 'period' => $report['period'], 'baseline' => $report['next_sequence'] - 1, 'value' => $report['next_sequence'] - 1,
+                'reconciliation' => json_encode($report, JSON_THROW_ON_ERROR), 'confirmed_by' => $actor->id, 'confirmed_at' => now()]);
+        } elseif ($report['next_sequence'] > 1 + (int) DB::table('xppl_numbering_counters')->where('namespace_id', $namespaceId)->where('period', $report['period'])->value('value')) {
+            $this->invalid();
+        }
+
+        return $this->reconcile($masters);
     }
 
     /** @return list<array<string, mixed>> */

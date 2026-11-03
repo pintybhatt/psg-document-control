@@ -73,10 +73,8 @@ class ControlledDocumentsConcurrencyTest extends TestCase
                 app(ManageNumbering::class)->save($actor, $scope, ['register_id' => $register->id, 'purpose' => 'internal_register', 'reset_policy' => 'annual', 'prefix' => 'CONCURRENT/CD', 'padding' => 6, 'active' => true]);
             }
             if ($xppl) {
-                $data = ['department_id' => $department->id, 'type_id' => $type->id, 'format' => 'xppl_controlled'];
                 $companyScope = AuthorizationScope::context('company', $site->company_id);
-                $review = app(XpplNumbering::class)->review($actor, $companyScope, $data);
-                app(XpplNumbering::class)->review($actor, $companyScope, $data + ['confirm' => true, 'token' => $review['token'], 'next_sequence' => $review['next_sequence']], true);
+                app(XpplNumbering::class)->activatePolicy($actor, $companyScope, ['confirm' => true]);
             }
             $manager = app(ManageControlledDocuments::class);
             $records = [];

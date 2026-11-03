@@ -15,7 +15,7 @@ class RbacScopeRequest extends FormRequest
     {
         $permission = match ($this->route()?->getName()) {
             'api.v1.numbering.xppl-options', 'api.v1.numbering.xppl-review', 'api.v1.numbering.index', 'api.v1.numbering.registers', 'api.v1.numbering.preview', 'api.v1.numbering.history' => 'numbering.view',
-            'api.v1.numbering.xppl-confirm', 'api.v1.numbering.store', 'api.v1.numbering.update' => 'numbering.manage',
+            'api.v1.numbering.xppl-activate', 'api.v1.numbering.xppl-confirm', 'api.v1.numbering.store', 'api.v1.numbering.update' => 'numbering.manage',
             'api.v1.master-data.index', 'api.v1.master-data.classifications' => 'master-data.view',
             'api.v1.master-data.store', 'api.v1.master-data.update' => 'master-data.manage',
             'api.v1.administration.history' => 'security.audit.view',

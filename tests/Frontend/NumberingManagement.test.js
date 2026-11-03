@@ -29,11 +29,13 @@ afterAll(() => {
 function response(data, status = 200) { return { ok: status < 400, status, json: async () => structuredClone(data) }; }
 function server({ rows = [series], error = null, registerRows = registers, history = [configuration], ambiguous = false, withoutSeries = false, letterTypes = [{ id: 32, scope_id: 9, code: 'LTR', name_en: 'Letter', name_lo: 'ຈົດໝາຍ' }] } = {}) {
     const state = structuredClone(rows);
+    let policy = null;
     const fetch = vi.fn(async (url, options = {}) => {
         const path = new URL(url, 'http://localhost').pathname;
         const method = options.method ?? 'GET';
         if (path === '/contexts') { return response({ data: [{ ...scope, company: { name_en: 'Example Company', name_lo: 'ບໍລິສັດຕົວຢ່າງ' }, site: { name_en: 'Example Site', name_lo: 'ສະຖານທີ່ຕົວຢ່າງ' } }] }); }
-        if (path.endsWith('/xppl/options')) { return response({ departments: [{ id: 21, site_id: 7, code: 'ADM', name_en: 'Administration', name_lo: 'ບໍລິຫານ' }, { id: 22, site_id: 8, code: 'ENG', name_en: 'Engineering', name_lo: 'ວິສະວະກຳ' }], types: [{ id: 31, site_id: 7, scope_id: 8, code: 'SOP', name_en: 'Procedure', name_lo: 'ລະບຽບ' }, ...letterTypes], series: withoutSeries ? [] : [{ id: 1, site_id: 7, scope_id: 8, register: 'controlled', purpose: 'internal_register' }, { id: 2, site_id: 8, scope_id: 9, register: 'outgoing', purpose: 'official_outgoing' }], history: [] }); }
+        if (path.endsWith('/xppl/activate')) { policy = { activated_by: 2 }; return response({ policy_available: true, policy, departments: [], types: [], series: [], history: [], mappings: [] }); }
+        if (path.endsWith('/xppl/options')) { return response({ policy_available: true, policy, departments: [{ id: 21, site_id: 7, code: 'ADM', name_en: 'Administration', name_lo: 'ບໍລິຫານ' }, { id: 22, site_id: 8, code: 'ENG', name_en: 'Engineering', name_lo: 'ວິສະວະກຳ' }], types: [{ id: 31, site_id: 7, scope_id: 8, code: 'SOP', name_en: 'Procedure', name_lo: 'ລະບຽບ' }, ...letterTypes], series: withoutSeries ? [] : [{ id: 1, site_id: 7, scope_id: 8, register: 'controlled', purpose: 'internal_register' }, { id: 2, site_id: 8, scope_id: 9, register: 'outgoing', purpose: 'official_outgoing' }], history: [] }); }
         if (/\/xppl\/(review|confirm)$/.test(path)) { if (JSON.parse(options.body).format === 'xppl_letter') { return response({ preview: 'XPPL-ENG-LTR-26-0043', format: 'xppl_letter', next_sequence: 43, historical_maximum: 42, ambiguous, collision_count: 0, token: 'letter-token' }); } return response({ prefix: 'XPPL-ADM-SOP', format: 'xppl_controlled', preview: 'XPPL-ADM-SOP-0043', historical_maximum: 42, next_sequence: 43, ambiguous, collision_count: 0, token: 'review-token' }); }
         if (method === 'GET' && path === endpoint) { return response({ data: state, meta: { total: state.length } }); }
         if (method === 'GET' && path.endsWith('/registers')) { return response({ data: registerRows }); }
@@ -77,6 +79,25 @@ async function confirmSave(wrapper) {
 }
 
 describe('numbering administration', () => {
+    it('activates company-wide numbering once only after confirmation with bilingual status', async () => {
+        const fetch = server({ withoutSeries: true });
+        const wrapper = await render({ ...scope, scope_type: 'company', site_id: null, scope_key: 'company:4' });
+        const policyPanel = wrapper.get('section[aria-labelledby="xppl-policy-title"]');
+        expect(policyPanel.text()).toContain(en.rbacInactive);
+        const activate = button(wrapper, en.numberingPolicyActivate);
+        expect(activate.element.disabled).toBe(true);
+        expect(fetch.mock.calls.some(([url]) => url.endsWith('/xppl/activate'))).toBe(false);
+        await control(wrapper, en.numberingPolicyConfirm).setValue(true);
+        await activate.trigger('click'); await flushPromises();
+        const calls = fetch.mock.calls.filter(([url]) => url.endsWith('/xppl/activate'));
+        expect(calls).toHaveLength(1);
+        expect(JSON.parse(calls[0][1].body)).toEqual({ scope_type: 'company', company_id: 4, site_id: null, confirm: true });
+        expect(policyPanel.text()).toContain(en.rbacActive);
+        expect(wrapper.findAll('button').some(item => item.text() === en.numberingPolicyActivate)).toBe(false);
+        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        expect(policyPanel.text()).toContain(lo.numberingPolicyStatus);
+        expect(policyPanel.text()).toContain(lo.rbacActive);
+    });
     it('shows simple bilingual guidance with advanced and legacy controls collapsed and no mutations', async () => {
         const fetch = server();
         const wrapper = await render({ ...scope, scope_type: 'company', site_id: null, scope_key: 'company:4' });
@@ -91,7 +112,7 @@ describe('numbering administration', () => {
         expect(wrapper.findAll('label').some(item => item.text().includes(en.numberingSetupType))).toBe(true);
         await wrapper.get('select[aria-label="Language"]').setValue('lo');
         expect(wrapper.text()).toContain(lo.numberingAutomaticHelp);
-        expect(wrapper.get('[data-numbering-advanced] > summary').text()).toBe(lo.numberingAdvanced);
+        expect(wrapper.get('[data-numbering-advanced] > summary').text()).toBe(lo.numberingAdvancedDetails);
         expect(wrapper.get('[data-numbering-legacy] > summary').text()).toBe(lo.numberingLegacySettings);
         expect(fetch.mock.calls.every(([, options]) => !options.method || options.method === 'GET')).toBe(true);
     });

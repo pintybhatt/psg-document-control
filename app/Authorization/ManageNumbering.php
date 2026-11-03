@@ -20,13 +20,39 @@ class ManageNumbering
     /** @param array<string, mixed> $data */
     public function save(User $actor, AuthorizationScope $scope, array $data, ?string $id = null): NumberingSeries
     {
+        return $this->saveAuthorized($actor, $scope, $data, $id);
+    }
+
+    public function forControlledPolicy(User $actor, DocumentScope $unit): NumberingSeries
+    {
+        if (DB::transactionLevel() < 1) {
+            throw new \LogicException('Policy supporting configuration requires the registration transaction.');
+        }
+        abort_unless(app(XpplNumbering::class)->policyActive($unit->companyId), 403);
+        app(ManageControlledDocuments::class)->authorizeContext($actor, $unit, 'controlled.register');
+        $scope = $unit->authorizationScope();
+        $this->access->authorize($actor, 'numbering.issue', $scope);
+        $register = RegisterConfiguration::query()->where('scope_id', $scope->id)->where('register_key', 'controlled')->where('active', true)->firstOrFail();
+
+        return $this->saveAuthorized($actor, $scope, [
+            'register_id' => $register->id, 'purpose' => 'internal_register', 'reset_policy' => 'continuous',
+            'prefix' => 'XPPL/DCMS/REGISTER/'.$register->id, 'padding' => 4, 'active' => true,
+            'change_reason' => 'Supporting configuration under activated company-wide XPPL policy',
+        ], null, true);
+    }
+
+    /** @param array<string, mixed> $data */
+    private function saveAuthorized(User $actor, AuthorizationScope $scope, array $data, ?string $id = null, bool $companyPolicy = false): NumberingSeries
+    {
         try {
-            return DB::transaction(function () use ($actor, $scope, $data, $id): NumberingSeries {
+            return DB::transaction(function () use ($actor, $scope, $data, $id, $companyPolicy): NumberingSeries {
                 if ($id !== null && DB::getDriverName() === 'sqlite') {
                     DB::table('numbering_series')->where('scope_id', $scope->id)->where('id', $id)->update(['id' => DB::raw('id')]);
                 }
                 $scope = AuthorizationScope::context($scope->scope_type, $scope->company_id, $scope->site_id);
-                $this->access->authorize($actor, 'numbering.manage', $scope);
+                if (! $companyPolicy) {
+                    $this->access->authorize($actor, 'numbering.manage', $scope);
+                }
                 $series = $id === null ? null : NumberingSeries::query()->where('scope_id', $scope->id)->whereKey($id)->lockForUpdate()->first();
                 abort_if($id !== null && ! $series, 404);
                 $current = $series?->configurations()->orderByDesc('version')->lockForUpdate()->first();

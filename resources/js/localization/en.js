@@ -1,4 +1,9 @@
 export default {
+    numberingPolicyStatus: 'Company-wide automatic numbering',
+    numberingPolicyActivate: 'Activate company-wide numbering',
+    numberingPolicyConfirm: 'I confirm XPPL will start fresh numbering for new combinations. Existing numbers and counters must be preserved.',
+    numberingPolicyHelp: 'Each company, department and document type has its own continuous sequence, starting at 0001 when unused. Existing sequences continue safely. Drafts reserve no numbers; registration assigns the code. Revisions retain the base code.',
+    numberingAdvancedDetails: 'Advanced configuration and history',
     'controlledNumberPreview': 'Next document code (preview)',
     'controlledNumberProvisional': 'Provisional only, not reserved. The final number is assigned during formal registration.',
     'controlledAutomaticConfiguration': 'Automatic numbering is unavailable. Ask an authorized administrator to configure this department and document type and approve the existing-number baseline.',

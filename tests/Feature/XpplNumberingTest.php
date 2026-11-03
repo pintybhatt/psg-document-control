@@ -49,6 +49,110 @@ class XpplNumberingTest extends TestCase
         $this->signIn($this->actor);
     }
 
+    public function test_company_policy_initializes_independent_combinations_only_at_registration(): void
+    {
+        $this->setupCompany();
+        $first = $this->site(withSeries: false);
+        $second = $this->site('ENG', 'SDF', withSeries: false);
+        $shared = $this->site(withSeries: false);
+        $differentType = $this->site('ADM', 'SDF', withSeries: false);
+        $body = $this->scopeData($this->companyScope);
+        $this->postJson('/api/v1/numbering-series/xppl/activate', $body)->assertUnprocessable();
+        $this->assertDatabaseCount('xppl_numbering_policies', 0);
+        $this->postJson('/api/v1/numbering-series/xppl/activate', $body + ['confirm' => true])->assertOk();
+        $this->postJson('/api/v1/numbering-series/xppl/activate', $body + ['confirm' => true])->assertOk();
+        $this->assertDatabaseCount('xppl_numbering_policies', 1);
+        $this->assertDatabaseCount('numbering_series', 0);
+        $manager = app(ManageControlledDocuments::class);
+        $this->assertSame('XPPL-ADM-SOP-0001-R00', $manager->automaticNumbering($first['scope'], $first['type_id'])['preview']);
+        $draft = $this->draft($first);
+        $this->assertNull($draft->document_code);
+        $this->assertDatabaseCount('xppl_numbering_namespaces', 0);
+        $registered = $this->issue($first, $draft, null);
+        $this->assertSame('XPPL-ADM-SOP-0001', $registered->document_code);
+        $this->assertSame($registered->id, $this->issue($first, $draft, null)->id);
+        $this->assertSame('XPPL-ADM-SOP-0002', $this->issue($first, $this->draft($first), null)->document_code);
+        $this->assertSame('XPPL-ENG-SDF-0001', $this->issue($second, $this->draft($second), null)->document_code);
+        $this->assertSame('XPPL-ADM-SOP-0003', $this->issue($shared, $this->draft($shared), null)->document_code);
+        $this->assertSame('XPPL-ADM-SDF-0001', $this->issue($differentType, $this->draft($differentType), null)->document_code);
+        $this->assertDatabaseCount('xppl_numbering_namespaces', 3);
+        $this->assertDatabaseCount('xppl_numbering_allocations', 5);
+    }
+
+    #[TestWith(['update'])]
+    #[TestWith(['delete'])]
+    public function test_company_policy_activation_audit_cannot_be_rewritten(string $operation): void
+    {
+        $this->setupCompany();
+        app(XpplNumbering::class)->activatePolicy($this->actor, $this->companyScope, ['confirm' => true]);
+        $this->expectException(QueryException::class);
+        if ($operation === 'delete') {
+            DB::table('xppl_numbering_policies')->delete();
+        } else {
+            DB::table('xppl_numbering_policies')->update(['activated_at' => now()->addDay()]);
+        }
+    }
+
+    public function test_activated_policy_blocks_migration_rollback_and_other_companies_cannot_activate(): void
+    {
+        $this->setupCompany();
+        $otherCompany = Company::factory()->create();
+        $otherScope = AuthorizationScope::context('company', $otherCompany->id)->persist();
+        OrganizationMembership::factory()->for($this->actor)->create(['company_id' => $otherCompany->id]);
+        $this->grant($this->actor, $otherScope, ['numbering.manage']);
+        $this->postJson('/api/v1/numbering-series/xppl/activate', $this->scopeData($otherScope) + ['confirm' => true])->assertUnprocessable();
+        $this->assertDatabaseCount('xppl_numbering_policies', 0);
+        app(XpplNumbering::class)->activatePolicy($this->actor, $this->companyScope, ['confirm' => true]);
+        $migration = require database_path('migrations/2026_11_03_054924_create_xppl_numbering_policies_table.php');
+        try {
+            $migration->down();
+            $this->fail('An active policy must not be removed by rollback.');
+        } catch (\LogicException $exception) {
+            $this->assertStringContainsString('Cannot remove an activated', $exception->getMessage());
+        }
+        $this->assertDatabaseHas('xppl_numbering_policies', ['company_id' => $this->company->id, 'activated_by' => $this->actor->id]);
+    }
+
+    public function test_company_policy_continues_existing_history_and_cannot_be_activated_by_readers(): void
+    {
+        $this->setupCompany();
+        $site = $this->site(withSeries: false);
+        $historical = $this->draft($site, 'XPPL-ADM-SOP-0042-R00');
+        $reader = User::factory()->create();
+        $this->grant($reader, $this->companyScope, ['numbering.view']);
+        $this->signIn($reader);
+        $this->postJson('/api/v1/numbering-series/xppl/activate', $this->scopeData($this->companyScope) + ['confirm' => true])->assertForbidden();
+        $this->signIn($this->actor);
+        app(XpplNumbering::class)->activatePolicy($this->actor, $this->companyScope, ['confirm' => true]);
+        $this->assertSame('XPPL-ADM-SOP-0043', $this->issue($site, $this->draft($site), null)->document_code);
+        $this->assertSame('XPPL-ADM-SOP-0042-R00', $historical->fresh()->document_code);
+        $this->assertDatabaseHas('xppl_numbering_counters', ['period' => 0, 'baseline' => 42, 'value' => 43]);
+    }
+
+    public function test_policy_registration_needs_no_configuration_permission_and_preserves_approved_allocations(): void
+    {
+        $this->setupCompany();
+        $site = $this->site();
+        $this->enable($site);
+        $this->issue($site, $this->draft($site), null);
+        $before = DB::table('xppl_numbering_counters')->first();
+        app(XpplNumbering::class)->activatePolicy($this->actor, $this->companyScope, ['confirm' => true]);
+        $issuer = User::factory()->create();
+        OrganizationMembership::factory()->for($issuer)->inDepartment($site['department'])->create();
+        OrganizationMembership::factory()->for($issuer)->atSite(Site::findOrFail($site['scope']->siteId))->create();
+        $this->grant($issuer, $site['scope']->authorizationScope(), ['controlled.drafts.manage', 'controlled.register', 'documents.metadata.view', 'numbering.issue']);
+        $this->actor = $issuer;
+        $record = $this->issue($site, $this->draft($site), null);
+        $this->assertSame('XPPL-ADM-SOP-0002', $record->document_code);
+        $this->assertSame($before->baseline, DB::table('xppl_numbering_counters')->value('baseline'));
+        $this->assertDatabaseCount('xppl_numbering_namespaces', 1);
+        $this->assertDatabaseCount('xppl_numbering_mappings', 1);
+        $this->assertDatabaseCount('xppl_numbering_allocations', 2);
+        $newSite = $this->site('ENG', 'DRW', withSeries: false);
+        $this->grant($issuer, $newSite['scope']->authorizationScope(), ['controlled.drafts.manage', 'controlled.register', 'documents.metadata.view', 'numbering.issue']);
+        $this->assertSame('XPPL-ENG-DRW-0001', $this->issue($newSite, $this->draft($newSite), null)->document_code);
+    }
+
     public function test_official_setup_without_series_is_read_only_until_explicit_baseline_confirmation(): void
     {
         $this->setupCompany();
