@@ -17,8 +17,8 @@ import { useNotifications } from './ui/useNotifications.js';
 import { useLocalization } from '../localization/index.js';
 import { createJsonClient } from '../utilities/jsonClient.js';
 
-const props = defineProps({ scope: { type: Object, required: true }, endpoint: { type: String, required: true }, csrfToken: { type: String, required: true } });
-const emit = defineEmits(['unauthorized']);
+const props = defineProps({ scope: { type: Object, required: true }, endpoint: { type: String, required: true }, csrfToken: { type: String, required: true }, contextKey: { type: String, default: '' }, departmentOptions: { type: Array, default: () => [] } });
+const emit = defineEmits(['unauthorized', 'update:contextKey']);
 const { t, language } = useLocalization();
 const request = createJsonClient(props.csrfToken);
 const { items, notify, dismiss } = useNotifications();
@@ -45,6 +45,7 @@ const editorElement = ref(null);
 const form = reactive({});
 let controller;
 let initialNavigation = true;
+let reopenCreateAfterScopeChange = false;
 const textFields = ['sender_organization', 'sender_contact', 'sender_email', 'sender_phone', 'external_reference', 'correspondence_date', 'received_date', 'subject'];
 const descriptionFields = ['description_en', 'description_lo'];
 const canManage = computed(() => props.scope.permissions.includes('incoming.drafts.manage'));
@@ -54,6 +55,15 @@ const typeOptions = computed(() => [{ value: '', label: t('uiChoose') }, ...type
 const selectedType = computed(() => types.value.find(item => String(item.id) === String(form.type_id)));
 const selectedCategoryLabel = computed(() => label(selectedType.value?.category));
 const scopeDepartmentLabel = computed(() => label(props.scope.department) || t('siteWideDepartment'));
+const authorizedDepartmentOptions = computed(() => props.departmentOptions.length ? props.departmentOptions : [{ value: props.scope.key, label: scopeDepartmentLabel.value }]);
+const departmentContext = computed({
+    get: () => props.contextKey || props.scope.key,
+    set: value => {
+        if (value === (props.contextKey || props.scope.key)) { return; }
+        reopenCreateAfterScopeChange = editing.value && !detail.value;
+        emit('update:contextKey', value);
+    },
+});
 const channelOptions = computed(() => [{ value: '', label: t('uiChoose') }, ...['email', 'courier', 'hand_delivery', 'post', 'other'].map(value => ({ value, label: t(`incomingChannel-${value}`) }))]);
 const filterStatuses = computed(() => [{ value: '', label: t('incomingAllStatuses') }, ...['draft', 'received', 'assigned', 'in_progress', 'responded', 'closed'].map(value => ({ value, label: t(`incomingStatus-${value}`) }))]);
 const dueOptions = computed(() => [{ value: '', label: t('incomingAllDueDates') }, ...['overdue', 'today'].map(value => ({ value, label: t(`incomingDue-${value}`) }))]);
@@ -87,13 +97,17 @@ async function load(signal = controller.signal) {
     finally { if (!signal.aborted) { loading.value = false; } }
 }
 async function reset() {
+    const reopenCreate = reopenCreateAfterScopeChange;
+    reopenCreateAfterScopeChange = false;
     controller?.abort(); controller = new AbortController(); const signal = controller.signal;
     previewOpen.value = false; rows.value = []; types.value = []; detail.value = null; audits.value = []; handling.value = null; editing.value = false; confirmation.value = false; error.value = ''; listError.value = ''; fields.value = {}; page.value = 1; total.value = 0; saving.value = false;
     await load(signal);
     if (signal.aborted) { return; }
     try { const result = await request(url('/lookups'), { signal }); if (!signal.aborted) { types.value = result.data; } }
     catch (failure) { if (!signal.aborted) { fail(failure); } }
-    if (initialNavigation && !signal.aborted && !error.value) {
+    if (reopenCreate && !signal.aborted && !error.value && canManage.value) {
+        await edit(true);
+    } else if (initialNavigation && !signal.aborted && !error.value) {
         initialNavigation = false;
         const query = new URLSearchParams(window.location.search);
         if (/^[1-9][0-9]*$/.test(query.get('record') ?? '')) { await show({ id: query.get('record') }); }
@@ -145,6 +159,7 @@ onBeforeUnmount(() => controller?.abort());
 
 <template>
     <section class="incoming-register flex flex-col gap-5">
+        <SelectInput v-if="!editing && !detail && authorizedDepartmentOptions.length > 1" id="incoming-context" v-model="departmentContext" :label="t('incomingReceivingDepartment')" :options="authorizedDepartmentOptions" :disabled="loading || saving" class="max-w-sm" />
         <div v-if="!editing && !detail" class="flex flex-wrap items-center justify-between gap-3"><h2 id="incoming-list-title" tabindex="-1" class="text-lg font-semibold">{{ t('incomingTitle') }}</h2><UiButton v-if="canManage" :disabled="saving || loading" @click="edit(true)">{{ t('incomingCreate') }}</UiButton></div>
         <UiButton v-if="editing || detail" variant="secondary" class="self-start" :disabled="saving" @click="backToList">{{ t('backToRegister') }} · {{ t('incomingTitle') }}</UiButton>
         <p v-if="error" role="alert" class="rounded-xl bg-red-50 p-4 text-red-800">{{ t(error) }}</p>
@@ -170,7 +185,7 @@ onBeforeUnmount(() => controller?.abort());
             <p class="text-sm text-slate-600">{{ t('incomingDraftRules') }}</p>
             <p v-if="scope.permissions.includes('documents.attachments.manage')" class="text-sm text-slate-600">{{ t('storageDraftHelp') }}</p>
             <fieldset class="grid gap-4 md:grid-cols-2"><legend class="mb-3 font-semibold">{{ t('documentInformation') }}</legend>
-                <TextInput id="incoming-department" :model-value="scopeDepartmentLabel" :label="t('incomingReceivingDepartment')" :helper="t('documentDepartmentHelp')" readonly />
+                <SelectInput id="incoming-department" v-model="departmentContext" :label="t('incomingReceivingDepartment')" :options="authorizedDepartmentOptions" :helper="t('documentDepartmentHelp')" :disabled="!!detail || saving" required />
                 <SelectInput id="incoming-type" v-model="form.type_id" :label="t('documentType')" :options="typeOptions" :error-key="fields.type_id?.[0]" required />
                 <TextInput id="incoming-category" :model-value="selectedCategoryLabel" :label="t('documentCategory')" :helper="t('documentCategoryHelp')" readonly />
                 <SelectInput v-if="!detail" id="incoming-classification" v-model="form.classification" :label="t('incomingClassification')" :options="classificationOptions" :helper="t(`confidentiality-${form.classification}-description`)" :error-key="fields.classification?.[0]" required />

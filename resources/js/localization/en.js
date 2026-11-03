@@ -1028,7 +1028,7 @@ export default {
     'documentType': 'Document type',
     'documentCategory': 'Document category',
     'documentCategoryHelp': 'Set automatically by the selected document type.',
-    'documentDepartmentHelp': 'Selected from your authorized workspace. Change the department before opening a draft.',
+    'documentDepartmentHelp': 'Changing the department clears unsaved fields and reloads the form for that authorized context.',
     'siteWideDepartment': 'Site-wide (no department)',
     'outgoingSearch': 'Search subject, number or recipient',
     'siteCorrespondence': 'Site correspondence',

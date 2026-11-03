@@ -61,8 +61,10 @@ describe('outgoing correspondence', () => {
     it('creates a draft with multiple primary and copy recipients, CSRF and no numbers', async () => {
         const fetch = server(); const wrapper = await render();
         await button(wrapper, 'Create outgoing draft').trigger('click');
-        expect(wrapper.get('#outgoing-department').element.value).toBe('Engineering');
-        expect(wrapper.get('#outgoing-department').attributes('readonly')).toBeDefined();
+        expect(wrapper.get('#outgoing-department').element.value).toBe(scope.key);
+        expect(wrapper.get('#outgoing-department option').text()).toBe('Engineering');
+        expect(wrapper.findAll('#outgoing-department option')).toHaveLength(1);
+        expect(wrapper.get('#outgoing-department').attributes('readonly')).toBeUndefined();
         expect(wrapper.get('#outgoing-type option[value="9"]').text()).toBe('Letter');
         await wrapper.get('#outgoing-type').setValue(9);
         expect(wrapper.get('#outgoing-category').element.value).toBe('Correspondence');
@@ -157,16 +159,32 @@ describe('outgoing correspondence', () => {
         await flushPromises(); expect(wrapper.find('#outgoing-context').exists()).toBe(false);
         expect(wrapper.text()).toContain(draft.subject);
     });
-    it('labels and changes only between authorized issuing departments', async () => {
+    it('selects only authorized issuing departments inside a fresh form and clears stale fields on change', async () => {
         const administration = { ...scope, key: '7:13', department_id: 13, department: { id: 13, name_en: 'Administration', name_lo: 'ບໍລິຫານ' } };
-        const fetch = server({ contexts: [scope, administration] });
+        const siteWide = { ...scope, key: '7:site', department_id: null, department: null };
+        localStorage.setItem('dcms.workspace.standalone', JSON.stringify({ site: '4:7', unit: scope.key }));
+        const fetch = server({ contexts: [scope, administration, siteWide] });
         const wrapper = mount(OutgoingPage, { props: { endpoints: { endpoint: '/outgoing', contexts: '/outgoing/contexts' }, csrfToken: 'sample-csrf' }, global: { plugins: [createLocalization()] } });
         await flushPromises();
 
         expect(wrapper.get('label[for="outgoing-context"]').text()).toBe(en.outgoingIssuingDepartment);
-        expect(wrapper.findAll('#outgoing-context option').map(option => option.text())).toEqual(['Engineering', 'Administration']);
-        await wrapper.get('#outgoing-context').setValue('7:13'); await flushPromises();
+        expect(wrapper.findAll('#outgoing-context option').map(option => option.text())).toEqual(['Engineering', 'Administration', en.siteWideDepartment]);
+        await button(wrapper, en.outgoingCreate).trigger('click');
+        expect(wrapper.find('#outgoing-context').exists()).toBe(false);
+        expect(wrapper.findAll('#outgoing-department option').map(option => option.text())).toEqual(['Engineering', 'Administration', en.siteWideDepartment]);
+        await wrapper.get('#outgoing-subject').setValue('Must be cleared');
+        await wrapper.get('#outgoing-department').setValue('7:13'); await flushPromises();
+
+        expect(wrapper.get('#outgoing-department').element.value).toBe('7:13');
+        expect(wrapper.get('#outgoing-subject').element.value).toBe('');
         expect(fetch.mock.calls.some(([url]) => url.includes('/outgoing?') && url.includes('department_id=13'))).toBe(true);
+
+        await wrapper.get('#outgoing-department').setValue('7:site'); await flushPromises();
+        expect(wrapper.get('#outgoing-department').element.value).toBe('7:site');
+        expect(fetch.mock.calls.some(([url]) => {
+            const requestUrl = new URL(url, 'http://localhost');
+            return requestUrl.pathname === '/outgoing' && requestUrl.searchParams.get('site_id') === '7' && !requestUrl.searchParams.has('department_id');
+        })).toBe(true);
     });
     it('shows request failure separately from a genuine empty register', async () => {
         const fetch = server();

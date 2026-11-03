@@ -1029,7 +1029,7 @@ export default {
     'documentType': 'ປະເພດເອກະສານ',
     'documentCategory': 'ໝວດໝູ່ເອກະສານ',
     'documentCategoryHelp': 'ກຳນົດອັດຕະໂນມັດຕາມປະເພດເອກະສານທີ່ເລືອກ.',
-    'documentDepartmentHelp': 'ເລືອກຈາກພື້ນທີ່ເຮັດວຽກທີ່ທ່ານມີສິດ. ປ່ຽນພະແນກກ່ອນເປີດແບບຮ່າງ.',
+    'documentDepartmentHelp': 'ການປ່ຽນພະແນກຈະລ້າງຂໍ້ມູນທີ່ຍັງບໍ່ໄດ້ບັນທຶກ ແລະ ໂຫຼດແບບຟອມໃໝ່ສຳລັບຂອບເຂດທີ່ອະນຸຍາດ.',
     'siteWideDepartment': 'ທົ່ວສະຖານທີ່ (ບໍ່ລະບຸພະແນກ)',
     'outgoingSearch': 'ຄົ້ນຫາຫົວຂໍ້, ເລກທີ ຫຼື ຜູ້ຮັບ',
     'siteCorrespondence': 'ເອກະສານລະດັບສະຖານທີ່',

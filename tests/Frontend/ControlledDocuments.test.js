@@ -49,8 +49,10 @@ async function show(wrapper) { await button(wrapper, 'Details').trigger('click')
 it('creates drafts with bilingual metadata, exact unit, CSRF and display dates without numbers', async () => {
     const fetch = server(); const wrapper = await render();
     await button(wrapper, en.controlledCreate).trigger('click');
-    expect(wrapper.get('#controlled-department').element.value).toBe('Administration');
-    expect(wrapper.get('#controlled-department').attributes('readonly')).toBeDefined();
+    expect(wrapper.get('#controlled-department').element.value).toBe(scope.key);
+    expect(wrapper.get('#controlled-department option').text()).toBe('Administration');
+    expect(wrapper.findAll('#controlled-department option')).toHaveLength(1);
+    expect(wrapper.get('#controlled-department').attributes('readonly')).toBeUndefined();
     expect(wrapper.get('#controlled-type option[value="9"]').text()).toBe('SOP');
     await wrapper.get('#controlled-document_code').setValue('XPPL/SOP/001');
     await wrapper.get('#controlled-type').setValue(9);
@@ -176,14 +178,30 @@ it('selects an approved XPPL mapping explicitly and displays the full revision i
     expect(wrapper.get('#controlled-detail-title').text()).toBe('XPPL-ADM-SOP-0001-R00');
 });
 
-it('labels and changes only between authorized document owner departments', async () => {
+it('selects only authorized owner departments inside a fresh form and clears stale fields on change', async () => {
     const engineering = { ...scope, key: '7:13', department_id: 13, department: { id: 13, name_en: 'Engineering', name_lo: 'ວິສະວະກຳ' } };
-    const fetch = server({ contexts: [scope, engineering] });
+    const siteWide = { ...scope, key: '7:site', department_id: null, department: null };
+    localStorage.setItem('dcms.workspace.standalone', JSON.stringify({ site: '4:7', unit: scope.key }));
+    const fetch = server({ contexts: [scope, engineering, siteWide] });
     const wrapper = mount(ControlledDocumentsPage, { props: { endpoints: { endpoint: '/controlled', contexts: '/controlled/contexts' }, csrfToken: 'sample-csrf' }, global: { plugins: [createLocalization()] } });
     await flushPromises();
 
     expect(wrapper.get('label[for="controlled-context"]').text()).toBe(en.controlledOwnerDepartment);
-    expect(wrapper.findAll('#controlled-context option').map(option => option.text())).toEqual(['Administration', 'Engineering']);
-    await wrapper.get('#controlled-context').setValue('7:13'); await flushPromises();
+    expect(wrapper.findAll('#controlled-context option').map(option => option.text())).toEqual(['Administration', 'Engineering', en.siteWideDepartment]);
+    await button(wrapper, en.controlledCreate).trigger('click');
+    expect(wrapper.find('#controlled-context').exists()).toBe(false);
+    expect(wrapper.findAll('#controlled-department option').map(option => option.text())).toEqual(['Administration', 'Engineering', en.siteWideDepartment]);
+    await wrapper.get('#controlled-title_en').setValue('Must be cleared');
+    await wrapper.get('#controlled-department').setValue('7:13'); await flushPromises();
+
+    expect(wrapper.get('#controlled-department').element.value).toBe('7:13');
+    expect(wrapper.get('#controlled-title_en').element.value).toBe('');
     expect(fetch.mock.calls.some(([url]) => url.includes('/controlled?') && url.includes('department_id=13'))).toBe(true);
+
+    await wrapper.get('#controlled-department').setValue('7:site'); await flushPromises();
+    expect(wrapper.get('#controlled-department').element.value).toBe('7:site');
+    expect(fetch.mock.calls.some(([url]) => {
+        const requestUrl = new URL(url, 'http://localhost');
+        return requestUrl.pathname === '/controlled' && requestUrl.searchParams.get('site_id') === '7' && !requestUrl.searchParams.has('department_id');
+    })).toBe(true);
 });

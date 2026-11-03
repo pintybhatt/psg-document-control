@@ -13,8 +13,14 @@ import DataTable from './ui/DataTable.vue';
 import ToastNotifications from './ui/ToastNotifications.vue';
 import { useNotifications } from './ui/useNotifications.js';
 
-const props = defineProps({ scope: { type: Object, required: true }, endpoint: { type: String, required: true }, csrfToken: { type: String, required: true } });
-const emit = defineEmits(['unauthorized']);
+const props = defineProps({
+    scope: { type: Object, required: true },
+    contextKey: { type: String, default: '' },
+    departmentOptions: { type: Array, default: () => [] },
+    endpoint: { type: String, required: true },
+    csrfToken: { type: String, required: true },
+});
+const emit = defineEmits(['unauthorized', 'update:contextKey']);
 const { t, language } = useLocalization();
 const request = createJsonClient(props.csrfToken);
 const { items, notify, dismiss } = useNotifications();
@@ -29,6 +35,7 @@ const actionForm = reactive({ reason: '', revision_reason: '', change_descriptio
 const form = reactive({});
 const editor = ref(null);
 let controller;
+let reopenCreateAfterScopeChange = false;
 const textFields = ['title_en', 'title_lo'];
 const dateFields = ['issue_date', 'effective_date', 'review_date'];
 const detailFields = [...textFields, 'description_en', 'description_lo', 'owner_name', 'custodian_name', ...dateFields, 'revision_reason', 'change_description'];
@@ -43,6 +50,17 @@ const typeOptions = computed(() => [{ value: '', label: t('uiChoose') }, ...type
 const selectedType = computed(() => types.value.find(item => String(item.id) === String(form.type_id)));
 const selectedCategoryLabel = computed(() => label(selectedType.value?.category));
 const scopeDepartmentLabel = computed(() => label(props.scope.department) || t('siteWideDepartment'));
+const authorizedDepartmentOptions = computed(() => props.departmentOptions.length
+    ? props.departmentOptions
+    : [{ value: props.scope.key, label: scopeDepartmentLabel.value }]);
+const departmentContext = computed({
+    get: () => props.contextKey || props.scope.key,
+    set: value => {
+        if (value === (props.contextKey || props.scope.key)) { return; }
+        reopenCreateAfterScopeChange = editing.value && !detail.value;
+        emit('update:contextKey', value);
+    },
+});
 const peopleOptions = computed(() => [{ value: '', label: t('uiChoose') }, ...people.value.map(item => ({ value: item.id, label: item.name }))]);
 const statusOptions = computed(() => [{ value: '', label: t('controlledAllStatuses') }, ...statuses.map(value => ({ value, label: t(`controlledStatus-${value}`) }))]);
 const terminalOptions = computed(() => (detail.value?.status === 'current' ? ['obsolete', 'superseded'] : ['archived']).map(value => ({ value, label: t(`controlledStatus-${value}`) })));
@@ -69,13 +87,19 @@ async function load(signal = controller.signal) {
     finally { if (!signal.aborted) { loading.value = false; } }
 }
 async function reset() {
+    const reopenCreate = reopenCreateAfterScopeChange;
+    reopenCreateAfterScopeChange = false;
     controller?.abort(); controller = new AbortController(); const signal = controller.signal;
     rows.value = []; detail.value = null; audits.value = []; related.value = []; types.value = []; people.value = []; replacements.value = []; total.value = 0; page.value = 1; editing.value = false; action.value = ''; error.value = ''; fields.value = {}; saving.value = false;
     await load(signal);
     if (signal.aborted) { return; }
     try { const result = await request(url('/lookups'), { signal }); if (!signal.aborted) { types.value = result.data; people.value = result.people;
-        const query = new URLSearchParams(window.location.search);
-        if (/^[1-9][0-9]*$/.test(query.get('record') ?? '')) { await show({ id: query.get('record') }); }
+        if (reopenCreate && !error.value && can('controlled.drafts.manage')) {
+            await edit(true);
+        } else {
+            const query = new URLSearchParams(window.location.search);
+            if (/^[1-9][0-9]*$/.test(query.get('record') ?? '')) { await show({ id: query.get('record') }); }
+        }
     } }
     catch (failure) { if (!signal.aborted) { fail(failure); } }
 }
@@ -137,6 +161,7 @@ onBeforeUnmount(() => controller?.abort());
 
 <template>
     <section class="flex flex-col gap-5">
+        <SelectInput v-if="!detail && !editing && authorizedDepartmentOptions.length > 1" id="controlled-context" v-model="departmentContext" :label="t('controlledOwnerDepartment')" :options="authorizedDepartmentOptions" :disabled="loading || saving" class="max-w-sm" />
         <div v-if="!detail && !editing" class="flex flex-wrap items-center justify-between gap-3"><h2 class="text-lg font-semibold">{{ t('controlledTitle') }}</h2><UiButton v-if="can('controlled.drafts.manage')" :disabled="loading || saving" @click="edit(true)">{{ t('controlledCreate') }}</UiButton></div>
         <UiButton v-if="detail || editing" variant="secondary" class="self-start" :disabled="saving || loading" @click="back">{{ t('backToRegister') }}</UiButton>
         <p v-if="error" role="alert" class="rounded-xl bg-red-50 p-4 text-red-800">{{ t(error) }}</p>
@@ -158,7 +183,7 @@ onBeforeUnmount(() => controller?.abort());
             <p class="text-sm text-slate-600">{{ t('controlledDraftHelp') }}</p>
             <p v-if="scope.permissions.includes('documents.attachments.manage')" class="text-sm text-slate-600">{{ t('storageControlledDraftHelp') }}</p>
             <fieldset :disabled="saving" class="grid gap-4 md:grid-cols-2"><legend class="mb-3 font-semibold">{{ t('documentInformation') }}</legend>
-                <TextInput id="controlled-department" :model-value="scopeDepartmentLabel" :label="t('controlledOwnerDepartment')" :helper="t('documentDepartmentHelp')" readonly />
+                <SelectInput id="controlled-department" v-model="departmentContext" :label="t('controlledOwnerDepartment')" :options="authorizedDepartmentOptions" :helper="t('documentDepartmentHelp')" :disabled="!!detail || saving" required />
                 <template v-if="!detail?.registered_at"><TextInput id="controlled-document_code" v-model="form.document_code" :label="t('controlled-document_code')" :error-key="fields.document_code?.[0]" maxlength="100" required /><SelectInput id="controlled-type" v-model="form.type_id" :label="t('documentType')" :options="typeOptions" :error-key="fields.type_id?.[0]" required /></template>
                 <TextInput v-else id="controlled-type" :model-value="label(detail.type)" :label="t('documentType')" readonly />
                 <TextInput id="controlled-category" :model-value="selectedCategoryLabel" :label="t('documentCategory')" :helper="t('documentCategoryHelp')" readonly />

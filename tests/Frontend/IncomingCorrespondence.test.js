@@ -79,8 +79,10 @@ describe('incoming correspondence', () => {
     it('creates a draft with CSRF and without a generated number then shows the saved detail', async () => {
         const fetch = server(); const wrapper = await render();
         await button(wrapper, 'Create incoming draft').trigger('click');
-        expect(wrapper.get('#incoming-department').element.value).toBe('Administration');
-        expect(wrapper.get('#incoming-department').attributes('readonly')).toBeDefined();
+        expect(wrapper.get('#incoming-department').element.value).toBe(scope.key);
+        expect(wrapper.get('#incoming-department option').text()).toBe('Administration');
+        expect(wrapper.findAll('#incoming-department option')).toHaveLength(1);
+        expect(wrapper.get('#incoming-department').attributes('readonly')).toBeUndefined();
         expect(wrapper.get('#incoming-type option[value="9"]').text()).toBe('Letter');
         await wrapper.get('#incoming-type').setValue('9');
         expect(wrapper.get('#incoming-category').element.value).toBe('Correspondence');
@@ -159,16 +161,32 @@ describe('incoming correspondence', () => {
         await flushPromises(); expect(wrapper.find('#incoming-context').exists()).toBe(false);
         expect(wrapper.text()).toContain('Example sender');
     });
-    it('labels and changes only between authorized receiving departments', async () => {
+    it('selects only authorized receiving departments inside a fresh form and clears stale fields on change', async () => {
         const finance = { ...scope, key: '7:13', department_id: 13, department: { id: 13, name_en: 'Finance', name_lo: 'ການເງິນ' } };
-        const fetch = server({ contexts: [scope, finance] });
+        const siteWide = { ...scope, key: '7:site', department_id: null, department: null };
+        localStorage.setItem('dcms.workspace.standalone', JSON.stringify({ site: '4:7', unit: scope.key }));
+        const fetch = server({ contexts: [scope, finance, siteWide] });
         const wrapper = mount(IncomingPage, { props: { endpoints: { endpoint: '/incoming', contexts: '/incoming/contexts' }, csrfToken: 'sample-csrf' }, global: { plugins: [createLocalization()] } });
         await flushPromises();
 
         expect(wrapper.get('label[for="incoming-context"]').text()).toBe(en.incomingReceivingDepartment);
-        expect(wrapper.findAll('#incoming-context option').map(option => option.text())).toEqual(['Administration', 'Finance']);
-        await wrapper.get('#incoming-context').setValue('7:13'); await flushPromises();
+        expect(wrapper.findAll('#incoming-context option').map(option => option.text())).toEqual(['Administration', 'Finance', en.siteWideDepartment]);
+        await button(wrapper, en.incomingCreate).trigger('click');
+        expect(wrapper.find('#incoming-context').exists()).toBe(false);
+        expect(wrapper.findAll('#incoming-department option').map(option => option.text())).toEqual(['Administration', 'Finance', en.siteWideDepartment]);
+        await wrapper.get('#incoming-subject').setValue('Must be cleared');
+        await wrapper.get('#incoming-department').setValue('7:13'); await flushPromises();
+
+        expect(wrapper.get('#incoming-department').element.value).toBe('7:13');
+        expect(wrapper.get('#incoming-subject').element.value).toBe('');
         expect(fetch.mock.calls.some(([url]) => url.includes('/incoming?') && url.includes('department_id=13'))).toBe(true);
+
+        await wrapper.get('#incoming-department').setValue('7:site'); await flushPromises();
+        expect(wrapper.get('#incoming-department').element.value).toBe('7:site');
+        expect(fetch.mock.calls.some(([url]) => {
+            const requestUrl = new URL(url, 'http://localhost');
+            return requestUrl.pathname === '/incoming' && requestUrl.searchParams.get('site_id') === '7' && !requestUrl.searchParams.has('department_id');
+        })).toBe(true);
     });
     it('shows request failure separately from a genuine empty register', async () => {
         const fetch = server();
