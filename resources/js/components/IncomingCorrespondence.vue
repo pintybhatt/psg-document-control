@@ -46,6 +46,8 @@ const form = reactive({});
 let controller;
 let initialNavigation = true;
 let reopenCreateAfterScopeChange = false;
+const contextLoading = ref(false);
+const contextValid = ref(true);
 const textFields = ['sender_organization', 'sender_contact', 'sender_email', 'sender_phone', 'external_reference', 'correspondence_date', 'received_date', 'subject'];
 const descriptionFields = ['description_en', 'description_lo'];
 const canManage = computed(() => props.scope.permissions.includes('incoming.drafts.manage'));
@@ -61,6 +63,7 @@ const departmentContext = computed({
     set: value => {
         if (value === (props.contextKey || props.scope.key)) { return; }
         reopenCreateAfterScopeChange = editing.value && !detail.value;
+        if (reopenCreateAfterScopeChange) { contextLoading.value = true; contextValid.value = false; }
         emit('update:contextKey', value);
     },
 });
@@ -96,18 +99,34 @@ async function load(signal = controller.signal) {
     catch (failure) { if (!signal.aborted) { fail(failure); listError.value = error.value; rows.value = []; total.value = 0; } }
     finally { if (!signal.aborted) { loading.value = false; } }
 }
+async function refreshCreateContext() {
+    controller?.abort(); controller = new AbortController(); const signal = controller.signal;
+    contextLoading.value = true; contextValid.value = false; saving.value = false; error.value = ''; fields.value = {};
+    rows.value = []; total.value = 0; types.value = [];
+    form.type_id = ''; form.classification = 'normal';
+
+    try {
+        const result = await request(url('/lookups'), { signal });
+        if (signal.aborted) { return; }
+        types.value = result.data;
+        contextValid.value = canManage.value;
+
+    } catch (failure) { if (!signal.aborted) { fail(failure); } }
+    finally { if (!signal.aborted) { contextLoading.value = false; } }
+}
 async function reset() {
     const reopenCreate = reopenCreateAfterScopeChange;
     reopenCreateAfterScopeChange = false;
+    if (reopenCreate) { await refreshCreateContext(); return; }
+    contextLoading.value = false;
+    contextValid.value = true;
     controller?.abort(); controller = new AbortController(); const signal = controller.signal;
     previewOpen.value = false; rows.value = []; types.value = []; detail.value = null; audits.value = []; handling.value = null; editing.value = false; confirmation.value = false; error.value = ''; listError.value = ''; fields.value = {}; page.value = 1; total.value = 0; saving.value = false;
     await load(signal);
     if (signal.aborted) { return; }
     try { const result = await request(url('/lookups'), { signal }); if (!signal.aborted) { types.value = result.data; } }
     catch (failure) { if (!signal.aborted) { fail(failure); } }
-    if (reopenCreate && !signal.aborted && !error.value && canManage.value) {
-        await edit(true);
-    } else if (initialNavigation && !signal.aborted && !error.value) {
+    if (initialNavigation && !signal.aborted && !error.value) {
         initialNavigation = false;
         const query = new URLSearchParams(window.location.search);
         if (/^[1-9][0-9]*$/.test(query.get('record') ?? '')) { await show({ id: query.get('record') }); }
@@ -131,6 +150,7 @@ async function edit(create = false) {
     await nextTick(); editorElement.value?.querySelector('h2')?.focus();
 }
 async function save() {
+    if (contextLoading.value || !contextValid.value) { return; }
     if (saving.value || !canManage.value) { return; }
     const signal = controller.signal;
     const body = { ...scopeData(), ...form };
@@ -197,7 +217,8 @@ onBeforeUnmount(() => controller?.abort());
                 <TextInput v-for="field in textFields.filter(field => ['sender_contact', 'sender_email', 'sender_phone', 'signatory_title'].includes(field))" :id="`incoming-${field}`" :key="field" v-model="form[field]" :label="t(`incoming-${field}`)" :type="field.endsWith('email') ? 'email' : 'text'" :error-key="fields[field]?.[0]" :maxlength="field.endsWith('phone') ? 64 : 255" />
                 <TextareaInput v-for="field in descriptionFields" :id="`incoming-${field}`" :key="field" v-model="form[field]" :label="t(`incoming-${field}`)" :error-key="fields[field]?.[0]" maxlength="5000" />
             </div></details>
-            <div class="sticky bottom-0 flex flex-wrap gap-3 border-t border-slate-200 bg-white py-3"><UiButton type="submit" :loading="saving">{{ t('incomingSave') }}</UiButton><UiButton variant="secondary" :disabled="saving" @click="editing = false">{{ t('uiCancel') }}</UiButton></div>
+            <p v-if="contextLoading" role="status" class="text-sm text-slate-600">{{ t('documentDepartmentLoading') }}</p>
+            <div class="sticky bottom-0 flex flex-wrap gap-3 border-t border-slate-200 bg-white py-3"><UiButton type="submit" :loading="saving" :disabled="contextLoading || !contextValid">{{ t('incomingSave') }}</UiButton><UiButton variant="secondary" :disabled="saving" @click="editing = false">{{ t('uiCancel') }}</UiButton></div>
         </form>
         <section v-else-if="detail" class="flex flex-col gap-5 rounded-2xl border border-slate-200 bg-white p-5" aria-labelledby="incoming-detail-title">
             <div class="flex flex-wrap items-center justify-between gap-3"><h2 id="incoming-detail-title" tabindex="-1" class="text-lg font-semibold">{{ detail.subject }}</h2><div v-if="detail.status === 'draft'" class="flex gap-3"><UiButton v-if="canManage" variant="secondary" :disabled="saving || loading" @click="edit()">{{ t('incomingEdit') }}</UiButton><UiButton v-if="canRegister" :disabled="saving || loading" @click="confirmation = true">{{ t('incomingRegister') }}</UiButton></div></div>

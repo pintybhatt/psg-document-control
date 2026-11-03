@@ -36,6 +36,8 @@ const form = reactive({});
 const editor = ref(null);
 let controller;
 let reopenCreateAfterScopeChange = false;
+const contextLoading = ref(false);
+const contextValid = ref(true);
 const textFields = ['title_en', 'title_lo'];
 const dateFields = ['issue_date', 'effective_date', 'review_date'];
 const detailFields = [...textFields, 'description_en', 'description_lo', 'owner_name', 'custodian_name', ...dateFields, 'revision_reason', 'change_description'];
@@ -58,6 +60,7 @@ const departmentContext = computed({
     set: value => {
         if (value === (props.contextKey || props.scope.key)) { return; }
         reopenCreateAfterScopeChange = editing.value && !detail.value;
+        if (reopenCreateAfterScopeChange) { contextLoading.value = true; contextValid.value = false; }
         emit('update:contextKey', value);
     },
 });
@@ -86,20 +89,34 @@ async function load(signal = controller.signal) {
     catch (failure) { if (!signal.aborted) { rows.value = []; total.value = 0; fail(failure); } }
     finally { if (!signal.aborted) { loading.value = false; } }
 }
+async function refreshCreateContext() {
+    controller?.abort(); controller = new AbortController(); const signal = controller.signal;
+    contextLoading.value = true; contextValid.value = false; saving.value = false; error.value = ''; fields.value = {};
+    rows.value = []; total.value = 0; types.value = [];
+    form.type_id = ''; form.classification = 'normal';
+    people.value = []; form.owner_id = ''; form.custodian_id = ''; form.document_code = '';
+    try {
+        const result = await request(url('/lookups'), { signal });
+        if (signal.aborted) { return; }
+        types.value = result.data;
+        contextValid.value = can('controlled.drafts.manage');
+        people.value = result.people;
+    } catch (failure) { if (!signal.aborted) { fail(failure); } }
+    finally { if (!signal.aborted) { contextLoading.value = false; } }
+}
 async function reset() {
     const reopenCreate = reopenCreateAfterScopeChange;
     reopenCreateAfterScopeChange = false;
+    if (reopenCreate) { await refreshCreateContext(); return; }
+    contextLoading.value = false;
+    contextValid.value = true;
     controller?.abort(); controller = new AbortController(); const signal = controller.signal;
     rows.value = []; detail.value = null; audits.value = []; related.value = []; types.value = []; people.value = []; replacements.value = []; total.value = 0; page.value = 1; editing.value = false; action.value = ''; error.value = ''; fields.value = {}; saving.value = false;
     await load(signal);
     if (signal.aborted) { return; }
     try { const result = await request(url('/lookups'), { signal }); if (!signal.aborted) { types.value = result.data; people.value = result.people;
-        if (reopenCreate && !error.value && can('controlled.drafts.manage')) {
-            await edit(true);
-        } else {
-            const query = new URLSearchParams(window.location.search);
-            if (/^[1-9][0-9]*$/.test(query.get('record') ?? '')) { await show({ id: query.get('record') }); }
-        }
+        const query = new URLSearchParams(window.location.search);
+        if (/^[1-9][0-9]*$/.test(query.get('record') ?? '')) { await show({ id: query.get('record') }); }
     } }
     catch (failure) { if (!signal.aborted) { fail(failure); } }
 }
@@ -119,6 +136,7 @@ async function edit(create = false) {
     await nextTick(); editor.value?.querySelector('h2')?.focus();
 }
 async function save() {
+    if (contextLoading.value || !contextValid.value) { return; }
     if (saving.value) { return; }
     const body = { ...form };
     if (detail.value) { body.lock_version = detail.value.lock_version; delete body.classification; }
@@ -194,7 +212,8 @@ onBeforeUnmount(() => controller?.abort());
                 <TextareaInput v-for="field in ['revision_reason', 'change_description']" :id="`controlled-${field}`" :key="field" v-model="form[field]" :label="t(`controlled-${field}`)" :error-key="fields[field]?.[0]" maxlength="5000" required />
             </fieldset>
             <details class="rounded-xl border border-slate-200 p-4"><summary class="cursor-pointer text-sm font-semibold">{{ t('additionalInformation') }}</summary><div class="mt-4 grid gap-4 md:grid-cols-2"><TextareaInput v-for="field in ['description_en', 'description_lo']" :id="`controlled-${field}`" :key="field" v-model="form[field]" :label="t(`controlled-${field}`)" :error-key="fields[field]?.[0]" maxlength="5000" :disabled="saving" /></div></details>
-            <div class="flex gap-3"><UiButton type="submit" :loading="saving">{{ t('controlledSave') }}</UiButton><UiButton variant="secondary" :disabled="saving" @click="editing = false">{{ t('uiCancel') }}</UiButton></div>
+            <p v-if="contextLoading" role="status" class="text-sm text-slate-600">{{ t('documentDepartmentLoading') }}</p>
+            <div class="flex gap-3"><UiButton type="submit" :loading="saving" :disabled="contextLoading || !contextValid">{{ t('controlledSave') }}</UiButton><UiButton variant="secondary" :disabled="saving" @click="editing = false">{{ t('uiCancel') }}</UiButton></div>
         </form>
         <section v-else-if="detail" class="flex flex-col gap-5 rounded-2xl border border-slate-200 bg-white p-5" aria-labelledby="controlled-detail-title">
             <div class="flex flex-wrap items-center justify-between gap-3"><h2 id="controlled-detail-title" tabindex="-1" class="text-lg font-semibold">{{ authoritative?.full_identifier || draft?.full_identifier || detail.document_code }}</h2><StatusBadge :status="detail.status" :label="t(`controlledStatus-${detail.status}`)" /></div>

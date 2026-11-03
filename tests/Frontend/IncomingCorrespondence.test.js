@@ -174,18 +174,41 @@ describe('incoming correspondence', () => {
         await button(wrapper, en.incomingCreate).trigger('click');
         expect(wrapper.find('#incoming-context').exists()).toBe(false);
         expect(wrapper.findAll('#incoming-department option').map(option => option.text())).toEqual(['Administration', 'Finance', en.siteWideDepartment]);
-        await wrapper.get('#incoming-subject').setValue('Must be cleared');
+        await wrapper.get('#incoming-subject').setValue('Safe entered value');
+        await wrapper.get('#incoming-type').setValue(9);
+        const formElement = wrapper.get('#incoming-draft-form').element;
+        let finishOldLookup;
+        fetch.mockImplementationOnce((url, options) => new Promise(resolve => {
+            finishOldLookup = () => resolve(response({ data: [{ ...type, id: 99 }], people: [] }));
+        }));
         await wrapper.get('#incoming-department').setValue('7:13'); await flushPromises();
 
         expect(wrapper.get('#incoming-department').element.value).toBe('7:13');
-        expect(wrapper.get('#incoming-subject').element.value).toBe('');
-        expect(fetch.mock.calls.some(([url]) => url.includes('/incoming?') && url.includes('department_id=13'))).toBe(true);
+        expect(wrapper.get('#incoming-subject').element.value).toBe('Safe entered value');
+        expect(wrapper.get('#incoming-draft-form').element).toBe(formElement);
+        expect(wrapper.get('#incoming-type').element.value).toBe('');
+        expect(wrapper.get('#incoming-draft-form > p[role="status"]').text()).toBe(en.documentDepartmentLoading);
+        expect(wrapper.get('#incoming-draft-form button[type="submit"]').element.disabled).toBe(true);
+        await wrapper.get('#incoming-draft-form').trigger('submit');
+        expect(fetch.mock.calls.some(([, options]) => options.method === 'POST')).toBe(false);
+        expect(fetch.mock.calls.some(([url]) => url.includes('/incoming/lookups?') && url.includes('department_id=13'))).toBe(true);
 
         await wrapper.get('#incoming-department').setValue('7:site'); await flushPromises();
-        expect(wrapper.get('#incoming-department').element.value).toBe('7:site');
+        finishOldLookup(); await flushPromises();
+        expect(wrapper.find('#incoming-type option[value="99"]').exists()).toBe(false);
+        expect(wrapper.get('#incoming-draft-form').element).toBe(formElement);
+        expect(wrapper.get('#incoming-draft-form button[type="submit"]').element.disabled).toBe(false);
+        fetch.mockImplementationOnce(async () => response({}, 500));
+        await wrapper.get('#incoming-department').setValue('7:13'); await flushPromises();
+        expect(wrapper.get('#incoming-draft-form').element).toBe(formElement);
+        expect(wrapper.get('[role="alert"]').text()).toContain(en.rbacRequestFailed);
+        expect(wrapper.get('#incoming-draft-form button[type="submit"]').element.disabled).toBe(true);
+        await wrapper.get('#incoming-draft-form').trigger('submit');
+        expect(fetch.mock.calls.some(([, options]) => options.method === 'POST')).toBe(false);
+        expect(wrapper.get('#incoming-department').element.value).toBe('7:13');
         expect(fetch.mock.calls.some(([url]) => {
             const requestUrl = new URL(url, 'http://localhost');
-            return requestUrl.pathname === '/incoming' && requestUrl.searchParams.get('site_id') === '7' && !requestUrl.searchParams.has('department_id');
+            return requestUrl.pathname === '/incoming/lookups' && requestUrl.searchParams.get('site_id') === '7' && !requestUrl.searchParams.has('department_id');
         })).toBe(true);
     });
     it('shows request failure separately from a genuine empty register', async () => {
