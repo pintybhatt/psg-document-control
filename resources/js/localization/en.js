@@ -1,4 +1,13 @@
 export default {
+    'numberingPolicy-incoming': 'Official XPPL Incoming Numbering',
+    'numberingPolicy-outgoing': 'Official XPPL Outgoing Numbering',
+    'numberingPolicyHelp-incoming': 'One company-wide incoming sequence each year. Drafts remain unnumbered. Registration assigns the XPPL number and keeps the sender’s reference separately. Existing numbers are preserved.',
+    'numberingPolicyHelp-outgoing': 'One company-wide internal sequence each year, plus a separate annual official letter sequence for each originating department. Both numbers are assigned together. Select an authorized department and Letter (LTR) type. Existing numbers are preserved.',
+    'numberingPolicyConfirm-incoming': 'I confirm activation of official incoming numbering for this company, preserving existing numbers.',
+    'numberingPolicyConfirm-outgoing': 'I confirm activation of official outgoing numbering for this company, preserving existing numbers.',
+    'numberingPolicyActivate-incoming': 'Activate incoming numbering',
+    'numberingPolicyActivate-outgoing': 'Activate outgoing numbering',
+    'outgoingXpplOriginRequired': 'Official XPPL outgoing letters require an authorized originating department and the Letter (LTR) document type.',
     numberingPolicyStatus: 'Company-wide automatic numbering',
     numberingPolicyActivate: 'Activate company-wide numbering',
     numberingPolicyConfirm: 'I confirm XPPL will start fresh numbering for new combinations. Existing numbers and counters must be preserved.',

@@ -1,4 +1,13 @@
 export default {
+    'numberingPolicy-incoming': 'ການອອກເລກຂາເຂົ້າທາງການ XPPL',
+    'numberingPolicy-outgoing': 'ການອອກເລກຂາອອກທາງການ XPPL',
+    'numberingPolicyHelp-incoming': 'ໃຊ້ລຳດັບຂາເຂົ້າຮ່ວມກັນທົ່ວບໍລິສັດໃນແຕ່ລະປີ. ສະບັບຮ່າງບໍ່ມີເລກ. ເມື່ອລົງທະບຽນຈຶ່ງອອກເລກ XPPL ແລະ ເກັບເລກອ້າງອີງຜູ້ສົ່ງແຍກຕ່າງຫາກ. ຮັກສາເລກເດີມ.',
+    'numberingPolicyHelp-outgoing': 'ໃຊ້ລຳດັບພາຍໃນຮ່ວມກັນທົ່ວບໍລິສັດ ແລະ ລຳດັບຈົດໝາຍທາງການແຍກຕາມພະແນກໃນແຕ່ລະປີ. ອອກທັງສອງເລກພ້ອມກັນ. ເລືອກພະແນກທີ່ມີສິດ ແລະ ປະເພດຈົດໝາຍ LTR. ຮັກສາເລກເດີມ.',
+    'numberingPolicyConfirm-incoming': 'ຂ້ອຍຢືນຢັນເປີດໃຊ້ເລກຂາເຂົ້າທາງການຂອງບໍລິສັດ ໂດຍຮັກສາເລກເດີມ.',
+    'numberingPolicyConfirm-outgoing': 'ຂ້ອຍຢືນຢັນເປີດໃຊ້ເລກຂາອອກທາງການຂອງບໍລິສັດ ໂດຍຮັກສາເລກເດີມ.',
+    'numberingPolicyActivate-incoming': 'ເປີດໃຊ້ເລກຂາເຂົ້າ',
+    'numberingPolicyActivate-outgoing': 'ເປີດໃຊ້ເລກຂາອອກ',
+    'outgoingXpplOriginRequired': 'ຈົດໝາຍຂາອອກທາງການ XPPL ຕ້ອງມີພະແນກຕົ້ນທາງທີ່ມີສິດ ແລະ ປະເພດເອກະສານຈົດໝາຍ LTR.',
     numberingPolicyStatus: 'ການອອກເລກອັດຕະໂນມັດທົ່ວບໍລິສັດ',
     numberingPolicyActivate: 'ເປີດໃຊ້ການອອກເລກທົ່ວບໍລິສັດ',
     numberingPolicyConfirm: 'ຂ້ອຍຢືນຢັນວ່າ XPPL ຈະເລີ່ມລຳດັບໃໝ່ສຳລັບຊຸດໃໝ່ ໂດຍຮັກສາເລກ ແລະ ລຳດັບທີ່ມີແລ້ວ.',

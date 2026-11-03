@@ -45,13 +45,14 @@ const reconciliation = ref(null);
 const cutoverConfirmed = ref(false);
 const xpplBusy = ref(false);
 const policyConfirmed = ref(false);
-async function activatePolicy() {
-    if (!canManage.value || !policyConfirmed.value || xpplBusy.value) { return; }
+const registerPolicyConfirmed = reactive({ incoming: false, outgoing: false });
+async function activatePolicy(kind = 'controlled') {
+    if (!canManage.value || !(kind === 'controlled' ? policyConfirmed.value : registerPolicyConfirmed[kind]) || xpplBusy.value) { return; }
     const signal = controller.signal;
     xpplBusy.value = true; errorKey.value = '';
     try {
-        const result = await request(`${props.endpoint}/xppl/activate`, { method: 'POST', signal, body: { ...scopeData(), confirm: true } });
-        if (!signal.aborted) { xpplOptions.value = result; policyConfirmed.value = false; }
+        const result = await request(`${props.endpoint}/xppl/activate`, { method: 'POST', signal, body: { ...scopeData(), confirm: true, ...(kind === 'controlled' ? {} : { register_kind: kind }) } });
+        if (!signal.aborted) { xpplOptions.value = result; policyConfirmed.value = false; registerPolicyConfirmed.incoming = false; registerPolicyConfirmed.outgoing = false; }
     } catch (error) { if (!signal.aborted) { fail(error); } }
     finally { if (!signal.aborted) { xpplBusy.value = false; } }
 }
@@ -111,6 +112,7 @@ function fail(error) {
         revoked.value = true; controller?.abort(); previewController?.abort(); historyController?.abort();
         xpplOptions.value = { departments: [], types: [], series: [], history: [], mappings: [] }; reconciliation.value = null;
         policyConfirmed.value = false;
+        registerPolicyConfirmed.incoming = false; registerPolicyConfirmed.outgoing = false;
         rows.value = []; registers.value = []; history.value = []; editor.value = null; historySeries.value = null; preview.value = ''; confirmationOpen.value = false;
         loading.value = false; previewLoading.value = false; historyLoading.value = false;
         emit('unauthorized', error);
@@ -131,6 +133,7 @@ async function reset() {
     revoked.value = false; rows.value = []; registers.value = []; editor.value = null; historySeries.value = null; history.value = []; preview.value = ''; fields.value = {}; errorKey.value = ''; confirmationOpen.value = false; page.value = 1; total.value = 0; previewLoading.value = false; historyLoading.value = false;
     xpplOptions.value = { departments: [], types: [], series: [], history: [], mappings: [] }; reconciliation.value = null; cutoverConfirmed.value = false; xpplBusy.value = false;
     policyConfirmed.value = false;
+    registerPolicyConfirmed.incoming = false; registerPolicyConfirmed.outgoing = false;
     xpplKind.value = '';
     Object.assign(xpplForm, { series_id: '', department_id: '', type_id: '' });
     await load();
@@ -206,9 +209,21 @@ onBeforeUnmount(() => { controller?.abort(); previewController?.abort(); history
             <p class="text-sm text-slate-600">{{ t('numberingPolicyHelp') }}</p>
             <template v-if="!xpplOptions.policy && canManage">
                 <CheckboxInput v-model="policyConfirmed" :label="t('numberingPolicyConfirm')" :disabled="xpplBusy" />
-                <UiButton :disabled="xpplBusy || !policyConfirmed" @click="activatePolicy">{{ t('numberingPolicyActivate') }}</UiButton>
+                <UiButton :disabled="xpplBusy || !policyConfirmed" @click="activatePolicy()">{{ t('numberingPolicyActivate') }}</UiButton>
             </template>
         </section>
+        <template v-if="!revoked && scope.scope_type === 'company' && xpplOptions.policy_available">
+            <section v-for="kind in ['incoming', 'outgoing']" :key="kind" class="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-5" :aria-labelledby="`xppl-policy-${kind}`">
+                <h4 :id="`xppl-policy-${kind}`" class="font-semibold">{{ t(`numberingPolicy-${kind}`) }}</h4>
+                <p role="status">{{ t(xpplOptions.correspondence_policies?.[kind] ? 'rbacActive' : 'rbacInactive') }}</p>
+                <p class="font-mono text-sm">{{ kind === 'incoming' ? 'XPPL-IN-YYYY-NNNN' : 'XPPL-OUT-YYYY-NNNN · XPPL-DEPT-LTR-YY-NNNN' }}</p>
+                <p class="text-sm text-slate-600">{{ t(`numberingPolicyHelp-${kind}`) }}</p>
+                <template v-if="!xpplOptions.correspondence_policies?.[kind] && canManage">
+                    <CheckboxInput v-model="registerPolicyConfirmed[kind]" :label="t(`numberingPolicyConfirm-${kind}`)" :disabled="xpplBusy" />
+                    <UiButton :disabled="xpplBusy || !registerPolicyConfirmed[kind]" @click="activatePolicy(kind)">{{ t(`numberingPolicyActivate-${kind}`) }}</UiButton>
+                </template>
+            </section>
+        </template>
         <details v-if="!revoked" :key="`advanced:${scope.scope_key}`" data-numbering-advanced class="rounded-xl border border-slate-200 bg-white p-5">
             <summary class="cursor-pointer font-semibold text-slate-900">{{ t('numberingAdvancedDetails') }}</summary>
             <p v-if="scope.scope_type !== 'company'" class="mt-4 text-sm leading-7 text-slate-600">{{ t('numberingXpplCompany') }}</p>

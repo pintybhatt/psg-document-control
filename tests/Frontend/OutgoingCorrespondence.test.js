@@ -25,14 +25,14 @@ afterAll(() => {
     }
 });
 function response(data, status = 200) { return { ok: status < 400, status, json: async () => structuredClone(data) }; }
-function server({ mutationError = null, detailError = null, registered = false, xppl = false, contexts = [scope] } = {}) {
+function server({ mutationError = null, detailError = null, registered = false, xppl = false, contexts = [scope], automatic = false } = {}) {
     let record = { ...structuredClone(draft), ...(registered ? { status: 'registered', operations: { status: 'dispatched', revision: 1 } } : {}) };
     if (xppl) { record.xppl_namespaces = [{ id: 4, prefix: 'XPPL-ENG-LTR' }]; }
     const fetch = vi.fn(async (url, options = {}) => {
         const path = new URL(url, 'http://localhost').pathname;
         const method = options.method ?? 'GET';
         if (path.endsWith('/contexts')) { return response({ data: contexts.map(item => ({ ...item, company: { name_en: 'Example company' }, site: { name_en: 'Example site' } })) }); }
-        if (path.endsWith('/lookups')) { return response({ data: [type] }); }
+        if (path.endsWith('/lookups')) { return response({ data: [type], automatic_numbering: automatic }); }
         if (method === 'GET' && path === '/outgoing') { return response({ data: [record], meta: { total: 1 } }); }
         if (method === 'GET') { return detailError ? response(detailError.body, detailError.status) : response({ data: record, audits: [{ id: 1, action: 'created', created_at: '2026-10-26', actor_id: 5 }] }); }
         if (mutationError) { return response(mutationError.body, mutationError.status); }
@@ -50,6 +50,15 @@ function button(wrapper, text) { const found = wrapper.findAll('button').find(it
 async function show(wrapper) { await button(wrapper, 'Details').trigger('click'); await flushPromises(); }
 
 describe('outgoing correspondence', () => {
+    it('uses the activated official policy without offering a namespace override', async () => {
+        const fetch = server({ xppl: true, automatic: true });
+        const wrapper = await render(); await show(wrapper);
+        expect(wrapper.findAll('label').some(item => item.text() === en.numberingSelection)).toBe(false);
+        await button(wrapper, 'Register and assign numbers').trigger('click'); await flushPromises();
+        await button(wrapper.get('dialog'), 'Confirm').trigger('click'); await flushPromises();
+        const [, options] = fetch.mock.calls.find(([url]) => url.includes('/register?'));
+        expect(JSON.parse(options.body)).not.toHaveProperty('namespace_id');
+    });
     it('uses the operational status in the register and opens dispatch handling from details', async () => {
         server({ registered: true });
         const wrapper = await render({ ...scope, permissions: [...scope.permissions, 'outgoing.operations.manage'] });

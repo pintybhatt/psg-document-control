@@ -30,12 +30,13 @@ function response(data, status = 200) { return { ok: status < 400, status, json:
 function server({ rows = [series], error = null, registerRows = registers, history = [configuration], ambiguous = false, withoutSeries = false, letterTypes = [{ id: 32, scope_id: 9, code: 'LTR', name_en: 'Letter', name_lo: 'ຈົດໝາຍ' }] } = {}) {
     const state = structuredClone(rows);
     let policy = null;
+    const correspondencePolicies = {};
     const fetch = vi.fn(async (url, options = {}) => {
         const path = new URL(url, 'http://localhost').pathname;
         const method = options.method ?? 'GET';
         if (path === '/contexts') { return response({ data: [{ ...scope, company: { name_en: 'Example Company', name_lo: 'ບໍລິສັດຕົວຢ່າງ' }, site: { name_en: 'Example Site', name_lo: 'ສະຖານທີ່ຕົວຢ່າງ' } }] }); }
-        if (path.endsWith('/xppl/activate')) { policy = { activated_by: 2 }; return response({ policy_available: true, policy, departments: [], types: [], series: [], history: [], mappings: [] }); }
-        if (path.endsWith('/xppl/options')) { return response({ policy_available: true, policy, departments: [{ id: 21, site_id: 7, code: 'ADM', name_en: 'Administration', name_lo: 'ບໍລິຫານ' }, { id: 22, site_id: 8, code: 'ENG', name_en: 'Engineering', name_lo: 'ວິສະວະກຳ' }], types: [{ id: 31, site_id: 7, scope_id: 8, code: 'SOP', name_en: 'Procedure', name_lo: 'ລະບຽບ' }, ...letterTypes], series: withoutSeries ? [] : [{ id: 1, site_id: 7, scope_id: 8, register: 'controlled', purpose: 'internal_register' }, { id: 2, site_id: 8, scope_id: 9, register: 'outgoing', purpose: 'official_outgoing' }], history: [] }); }
+        if (path.endsWith('/xppl/activate')) { const kind = JSON.parse(options.body).register_kind; if (kind) { correspondencePolicies[kind] = { activated_by: 2 }; } else { policy = { activated_by: 2 }; } return response({ policy_available: true, policy, correspondence_policies: correspondencePolicies, departments: [], types: [], series: [], history: [], mappings: [] }); }
+        if (path.endsWith('/xppl/options')) { return response({ policy_available: true, policy, correspondence_policies: correspondencePolicies, departments: [{ id: 21, site_id: 7, code: 'ADM', name_en: 'Administration', name_lo: 'ບໍລິຫານ' }, { id: 22, site_id: 8, code: 'ENG', name_en: 'Engineering', name_lo: 'ວິສະວະກຳ' }], types: [{ id: 31, site_id: 7, scope_id: 8, code: 'SOP', name_en: 'Procedure', name_lo: 'ລະບຽບ' }, ...letterTypes], series: withoutSeries ? [] : [{ id: 1, site_id: 7, scope_id: 8, register: 'controlled', purpose: 'internal_register' }, { id: 2, site_id: 8, scope_id: 9, register: 'outgoing', purpose: 'official_outgoing' }], history: [] }); }
         if (/\/xppl\/(review|confirm)$/.test(path)) { if (JSON.parse(options.body).format === 'xppl_letter') { return response({ preview: 'XPPL-ENG-LTR-26-0043', format: 'xppl_letter', next_sequence: 43, historical_maximum: 42, ambiguous, collision_count: 0, token: 'letter-token' }); } return response({ prefix: 'XPPL-ADM-SOP', format: 'xppl_controlled', preview: 'XPPL-ADM-SOP-0043', historical_maximum: 42, next_sequence: 43, ambiguous, collision_count: 0, token: 'review-token' }); }
         if (method === 'GET' && path === endpoint) { return response({ data: state, meta: { total: state.length } }); }
         if (method === 'GET' && path.endsWith('/registers')) { return response({ data: registerRows }); }
@@ -79,6 +80,24 @@ async function confirmSave(wrapper) {
 }
 
 describe('numbering administration', () => {
+    it.each(['incoming', 'outgoing'])('activates %s only after its explicit company-level confirmation', async kind => {
+        const fetch = server({ withoutSeries: true });
+        const wrapper = await render({ ...scope, scope_type: 'company', site_id: null, scope_key: 'company:4' });
+        const panel = wrapper.get(`section[aria-labelledby="xppl-policy-${kind}"]`);
+        expect(panel.text()).toContain(en.rbacInactive);
+        expect(button(panel, en[`numberingPolicyActivate-${kind}`]).element.disabled).toBe(true);
+        expect(fetch.mock.calls.some(([url]) => url.endsWith('/xppl/activate'))).toBe(false);
+        await control(panel, en[`numberingPolicyConfirm-${kind}`]).setValue(true);
+        await button(panel, en[`numberingPolicyActivate-${kind}`]).trigger('click'); await flushPromises();
+        const calls = fetch.mock.calls.filter(([url]) => url.endsWith('/xppl/activate'));
+        expect(calls).toHaveLength(1);
+        expect(JSON.parse(calls[0][1].body)).toEqual({ scope_type: 'company', company_id: 4, site_id: null, confirm: true, register_kind: kind });
+        expect(panel.text()).toContain(en.rbacActive);
+        expect(wrapper.get('section[aria-labelledby="xppl-policy-title"]').text()).toContain(en.rbacInactive);
+        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        expect(panel.text()).toContain(lo[`numberingPolicy-${kind}`]);
+        expect(panel.text()).toContain(lo.rbacActive);
+    });
     it('activates company-wide numbering once only after confirmation with bilingual status', async () => {
         const fetch = server({ withoutSeries: true });
         const wrapper = await render({ ...scope, scope_type: 'company', site_id: null, scope_key: 'company:4' });

@@ -126,6 +126,25 @@ class ManageOutgoingCorrespondence
             }
             $this->authorizeContext($actor, $scope, 'outgoing.register');
             $canonical = $scope->authorizationScope();
+            $engine = app(XpplNumbering::class);
+            $automatic = $engine->policyActive($scope->companyId, 'outgoing');
+            if ($automatic) {
+                app(AccessControl::class)->authorize($actor, 'numbering.issue', $canonical);
+                if ($namespaceId !== null) {
+                    throw ValidationException::withMessages(['namespace_id' => 'numberingXpplConflict']);
+                }
+                $draft = $this->find($actor, $scope, $id);
+                if ($draft->isFormallyRegistered()) {
+                    return $draft;
+                }
+                if ($scope->departmentId === null || $draft->type->code !== 'LTR') {
+                    throw ValidationException::withMessages(['outgoing' => 'outgoingXpplOriginRequired']);
+                }
+                $support = app(ManageNumbering::class)->forCorrespondencePolicy($actor, $scope, 'outgoing');
+                $officialSupport = app(ManageNumbering::class)->forCorrespondencePolicy($actor, $scope, 'outgoing', NumberingPurpose::OfficialOutgoing);
+                $engine->initializeInternalPolicy($actor, $scope, $support);
+                $namespaceId = $engine->initializeLetterPolicy($actor, $scope, $draft->type_id, $officialSupport);
+            }
             $series = NumberingSeries::query()->where('scope_id', $canonical->id)
                 ->whereHas('register', fn (Builder $query): Builder => $query->where('register_key', 'outgoing'))->get()->keyBy(fn (NumberingSeries $series): string => $series->purpose->value);
             $internal = $series->get(NumberingPurpose::InternalRegister->value);
@@ -167,7 +186,7 @@ class ManageOutgoingCorrespondence
                 }, $xppl);
 
                 return $record;
-            });
+            }, $automatic ? ['format' => 'xppl_outgoing'] : null);
             DB::table('outgoing_registration_links')->insert([
                 ['correspondence_id' => $record->id, 'purpose' => NumberingPurpose::InternalRegister->value, 'issuance_id' => $internalIssuance->id],
                 ['correspondence_id' => $record->id, 'purpose' => NumberingPurpose::OfficialOutgoing->value, 'issuance_id' => $officialIssuance->id],

@@ -30,6 +30,7 @@ class NumberingController extends Controller
         return response()->json([
             'policy_available' => Company::query()->whereKey($scope->company_id)->where('code', 'XPPL')->where('active', true)->exists(),
             'policy' => DB::table('xppl_numbering_policies')->where('company_id', $scope->company_id)->first(),
+            'correspondence_policies' => DB::table('xppl_correspondence_policies')->where('company_id', $scope->company_id)->get()->keyBy('register_kind'),
             'departments' => Department::query()->where('company_id', $scope->company_id)->where('active', true)->orderBy('id')->get(['id', 'site_id', 'code', 'name_en', 'name_lo']),
             'types' => DocumentType::query()->with('scope')->whereIn('scope_id', $scopes)->where('active', true)->orderBy('id')->get()
                 ->map(fn (DocumentType $type): array => $type->only(['id', 'scope_id', 'code', 'name_en', 'name_lo']) + ['site_id' => $type->scope->site_id]),

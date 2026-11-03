@@ -2,6 +2,7 @@
 
 use App\Authorization\DocumentScope;
 use App\Authorization\ManageOutgoingCorrespondence;
+use App\Models\OutgoingCorrespondence;
 use App\Models\User;
 use Illuminate\Contracts\Console\Kernel;
 use Illuminate\Support\Facades\DB;
@@ -27,7 +28,8 @@ if ($driver === 'sqlite') {
     ]]);
 }
 $actor = User::query()->findOrFail((int) $actorId);
-$scope = new DocumentScope((int) $companyId, (int) $siteId);
+$departmentId = OutgoingCorrespondence::query()->findOrFail((int) $recordId)->profile->department_id;
+$scope = new DocumentScope((int) $companyId, (int) $siteId, $departmentId);
 file_put_contents($barrier.'.ready-'.$worker, 'ready');
 $deadline = microtime(true) + 20;
 while (! is_file($barrier.'.go')) {

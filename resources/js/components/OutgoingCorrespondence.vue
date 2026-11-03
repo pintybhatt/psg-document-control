@@ -36,6 +36,7 @@ const previewUrl = computed(() => reportUrl('pdf', previewPath.value));
 const previewFilename = computed(() => previewPath.value === '/export' ? 'outgoing-correspondence.pdf' : 'outgoing-correspondence-' + detail.value?.id + '.pdf');
 const listError = ref('');
 const namespaceId = ref('');
+const automaticOfficial = ref(false);
 const namespaceOptions = computed(() => [{ value: '', label: t('numberingLegacy') }, ...(detail.value?.xppl_namespaces ?? []).map(item => ({ value: item.id, label: item.prefix }))]);
 const detail = ref(null);
 const audits = ref([]);
@@ -110,6 +111,7 @@ async function refreshCreateContext() {
         const result = await request(url('/lookups'), { signal });
         if (signal.aborted) { return; }
         types.value = result.data;
+        automaticOfficial.value = result.automatic_numbering ?? false; namespaceId.value = '';
         contextValid.value = canManage.value;
 
     } catch (failure) { if (!signal.aborted) { fail(failure); } }
@@ -125,7 +127,7 @@ async function reset() {
     previewOpen.value = false; rows.value = []; types.value = []; detail.value = null; audits.value = []; handling.value = null; editing.value = false; confirmation.value = false; error.value = ''; listError.value = ''; fields.value = {}; page.value = 1; total.value = 0; saving.value = false;
     await load(signal);
     if (signal.aborted) { return; }
-    try { const result = await request(url('/lookups'), { signal }); if (!signal.aborted) { types.value = result.data; } }
+    try { const result = await request(url('/lookups'), { signal }); if (!signal.aborted) { types.value = result.data; automaticOfficial.value = result.automatic_numbering ?? false; namespaceId.value = ''; } }
     catch (failure) { if (!signal.aborted) { fail(failure); } }
     if (initialNavigation && !signal.aborted && !error.value) {
         initialNavigation = false;
@@ -168,7 +170,7 @@ async function register() {
     const signal = controller.signal; const id = detail.value.id;
     saving.value = true; error.value = ''; fields.value = {};
     try {
-        const result = await request(url(`/${id}/register`), { method: 'POST', body: { ...scopeData(), ...(namespaceId.value ? { namespace_id: Number(namespaceId.value) } : {}) }, signal });
+        const result = await request(url(`/${id}/register`), { method: 'POST', body: { ...scopeData(), ...(!automaticOfficial.value && namespaceId.value ? { namespace_id: Number(namespaceId.value) } : {}) }, signal });
         if (!signal.aborted) { confirmation.value = false; await show(result.data); notify({ type: 'success', messageKey: 'outgoingRegistered' }); await load(signal); }
     } catch (failure) { if (!signal.aborted) { confirmation.value = false; fail(failure); } }
     finally { if (!signal.aborted) { saving.value = false; } }
@@ -223,7 +225,7 @@ onBeforeUnmount(() => controller?.abort());
             <div class="sticky bottom-0 flex flex-wrap gap-3 border-t border-slate-200 bg-white py-3"><UiButton type="submit" :loading="saving" :disabled="contextLoading || !contextValid">{{ t('outgoingSave') }}</UiButton><UiButton variant="secondary" :disabled="saving" @click="editing = false">{{ t('uiCancel') }}</UiButton></div>
         </form>
         <section v-else-if="detail" class="flex flex-col gap-5 rounded-2xl border border-slate-200 bg-white p-5" aria-labelledby="outgoing-detail-title">
-                <SelectInput v-if="!detail.registered_at && detail.xppl_namespaces?.length" v-model="namespaceId" :label="t('numberingSelection')" :options="namespaceOptions" :disabled="saving || loading" />
+                <SelectInput v-if="!automaticOfficial && !detail.registered_at && detail.xppl_namespaces?.length" v-model="namespaceId" :label="t('numberingSelection')" :options="namespaceOptions" :disabled="saving || loading" />
             <div class="flex flex-wrap items-center justify-between gap-3"><h2 id="outgoing-detail-title" tabindex="-1" class="text-lg font-semibold">{{ detail.subject }}</h2><div v-if="detail.status === 'draft'" class="flex gap-3"><UiButton v-if="canManage" variant="secondary" :disabled="saving || loading" @click="edit()">{{ t('outgoingEdit') }}</UiButton><UiButton v-if="canRegister" :disabled="saving || loading" @click="confirmation = true">{{ t('outgoingRegister') }}</UiButton></div></div>
             <CorrespondenceCorrection :key="detail.id" kind="outgoing" :record="detail" :scope="scope" :endpoint="endpoint" :csrf-token="csrfToken" :history="handling?.history ?? []" @failure="fail" @saved="operationSaved" />
             <div><UiButton variant="secondary" :disabled="loading || saving" @click="preview(`/${detail.id}/pdf`)">{{ t('reportPreviewDetailPdf') }}</UiButton></div>

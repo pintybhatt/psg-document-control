@@ -4,6 +4,7 @@ namespace App\Authorization;
 
 use App\Models\AuthorizationScope;
 use App\Models\ControlledDocument;
+use App\Models\IncomingCorrespondence;
 use App\Models\IssuedDocumentNumber;
 use App\Models\NumberingSeries;
 use App\Models\OutgoingCorrespondence;
@@ -24,7 +25,7 @@ class DocumentNumbering
      * record on this connection and perform no external side effects. Returned numbers
      * are provisional until the caller's outer transaction commits. Never call for drafts.
      *
-     * @param  array{namespace_id: int, department_id: ?int, type_id: int}|null  $xppl
+     * @param  array{namespace_id: int, department_id: ?int, type_id: int}|array{format: string}|null  $xppl
      * @param  Closure(string): (Model&FormalNumberedRegistration)  $persistRegistration
      */
     public function register(User $actor, AuthorizationScope $scope, int $seriesId, Closure $persistRegistration, ?array $xppl = null): IssuedDocumentNumber
@@ -63,20 +64,30 @@ class DocumentNumbering
             $sequence = (int) DB::table('numbering_counters')->where('series_id', $series->id)->where('period', $period)->lockForUpdate()->value('value');
             $number = NumberingFormat::render($configuration->prefix, $configuration->padding, $year, $sequence);
             $shared = null;
+            $registerFormat = $xppl !== null && in_array($xppl['format'] ?? null, ['xppl_incoming', 'xppl_outgoing'], true);
             if ($xppl !== null) {
-                $masters = $this->xpplNumbering->masters($scope->company_id, $xppl + ['series_id' => $series->id,
-                    'format' => $series->purpose === NumberingPurpose::OfficialOutgoing ? 'xppl_letter' : 'xppl_controlled']);
-                $mapping = DB::table('xppl_numbering_mappings')->where('namespace_id', $xppl['namespace_id'])
-                    ->where('series_id', $series->id)->where('department_id', $masters['department_id'])->where('type_id', $masters['type_id'])->first();
-                if (! $mapping || $mapping->master_hash !== $masters['master_hash']) {
-                    $this->xpplNumbering->invalid();
+                if ($registerFormat) {
+                    $masters = $this->xpplNumbering->internalMasters($scope->company_id, $series->id);
+                    if ($masters['format'] !== $xppl['format'] || ! $this->xpplNumbering->policyActive($scope->company_id, $series->register->register_key->value)) {
+                        $this->xpplNumbering->invalid();
+                    }
+                    $namespaceId = DB::table('xppl_numbering_namespaces')->where('company_id', $scope->company_id)->where('prefix', $masters['prefix'])->value('id');
+                } else {
+                    $masters = $this->xpplNumbering->masters($scope->company_id, $xppl + ['series_id' => $series->id,
+                        'format' => $series->purpose === NumberingPurpose::OfficialOutgoing ? 'xppl_letter' : 'xppl_controlled']);
+                    $mapping = DB::table('xppl_numbering_mappings')->where('namespace_id', $xppl['namespace_id'])
+                        ->where('series_id', $series->id)->where('department_id', $masters['department_id'])->where('type_id', $masters['type_id'])->first();
+                    if (! $mapping || $mapping->master_hash !== $masters['master_hash']) {
+                        $this->xpplNumbering->invalid();
+                    }
+                    $namespaceId = $mapping->namespace_id;
                 }
                 $report = $this->xpplNumbering->reconcile($masters);
                 if (! $report['confirmed'] || $report['ambiguous'] || $report['collision_count'] || $report['next_sequence'] > NumberingFormat::MAX_SEQUENCE) {
                     $this->xpplNumbering->invalid();
                 }
-                $shared = ['namespace_id' => $mapping->namespace_id, 'period' => $report['period'], 'sequence' => $report['next_sequence'], 'format' => $masters['format']];
-                $counter = DB::table('xppl_numbering_counters')->where('namespace_id', $mapping->namespace_id)->where('period', $report['period']);
+                $shared = ['namespace_id' => $namespaceId, 'period' => $report['period'], 'sequence' => $report['next_sequence'], 'format' => $masters['format']];
+                $counter = DB::table('xppl_numbering_counters')->where('namespace_id', $namespaceId)->where('period', $report['period']);
                 if ($counter->where('value', $report['next_sequence'] - 1)->increment('value') !== 1) {
                     $this->xpplNumbering->invalid();
                 }
@@ -90,7 +101,10 @@ class DocumentNumbering
             if (! $record->isFormallyRegistered() || $record->numberingScopeId() !== $scope->id || $record->numberingRegisterId() !== $register->id || $record->registeredNumber($series->purpose) !== $number) {
                 throw new LogicException('Formal registration ownership or state does not match the numbering series.');
             }
-            if ($xppl !== null && (! $record instanceof ControlledDocument && ! $record instanceof OutgoingCorrespondence
+            if ($registerFormat && ! ($record instanceof IncomingCorrespondence || $record instanceof OutgoingCorrespondence)) {
+                $this->xpplNumbering->invalid();
+            }
+            if ($xppl !== null && ! $registerFormat && (! $record instanceof ControlledDocument && ! $record instanceof OutgoingCorrespondence
                 || $record->profile->department_id !== $xppl['department_id'] || $record->type_id !== $xppl['type_id'])) {
                 $this->xpplNumbering->invalid();
             }

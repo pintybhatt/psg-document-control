@@ -23,6 +23,30 @@ class ManageNumbering
         return $this->saveAuthorized($actor, $scope, $data, $id);
     }
 
+    public function forCorrespondencePolicy(User $actor, DocumentScope $unit, string $kind, NumberingPurpose $purpose = NumberingPurpose::InternalRegister): NumberingSeries
+    {
+        if (DB::transactionLevel() < 1) {
+            throw new \LogicException('Policy supporting configuration requires its registration transaction.');
+        }
+        abort_unless(in_array($kind, ['incoming', 'outgoing'], true) && app(XpplNumbering::class)->policyActive($unit->companyId, $kind), 403);
+        $manager = $kind === 'incoming' ? app(ManageIncomingCorrespondence::class) : app(ManageOutgoingCorrespondence::class);
+        $manager->authorizeContext($actor, $unit, $kind.'.register');
+        $scope = $unit->authorizationScope();
+        $this->access->authorize($actor, 'numbering.issue', $scope);
+        abort_unless($purpose === NumberingPurpose::InternalRegister || $kind === 'outgoing', 422);
+        $register = RegisterConfiguration::query()->where('scope_id', $scope->id)->where('register_key', $kind)->where('active', true)->firstOrFail();
+        $existing = NumberingSeries::query()->where('register_id', $register->id)->where('purpose', $purpose)->first();
+        if ($existing) {
+            return $existing->load(['register', 'currentConfiguration']);
+        }
+
+        return $this->saveAuthorized($actor, $scope, [
+            'register_id' => $register->id, 'purpose' => $purpose->value, 'reset_policy' => 'annual',
+            'prefix' => 'XPPL/DCMS/'.strtoupper($kind).'/'.$register->id.'/'.strtoupper($purpose->value), 'padding' => 4, 'active' => true,
+            'change_reason' => 'Supporting configuration under activated XPPL correspondence policy',
+        ], null, true);
+    }
+
     public function forControlledPolicy(User $actor, DocumentScope $unit): NumberingSeries
     {
         if (DB::transactionLevel() < 1) {

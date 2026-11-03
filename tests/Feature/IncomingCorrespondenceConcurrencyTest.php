@@ -5,7 +5,9 @@ namespace Tests\Feature;
 use App\Authorization\DocumentScope;
 use App\Authorization\ManageIncomingCorrespondence;
 use App\Authorization\ManageNumbering;
+use App\Authorization\XpplNumbering;
 use App\Models\AuthorizationScope;
+use App\Models\Company;
 use App\Models\DocumentCategory;
 use App\Models\DocumentType;
 use App\Models\IncomingCorrespondence;
@@ -16,6 +18,7 @@ use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabaseState;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\TestWith;
 use Tests\Concerns\InteractsWithRbac;
 use Tests\TestCase;
 
@@ -23,7 +26,9 @@ class IncomingCorrespondenceConcurrencyTest extends TestCase
 {
     use InteractsWithRbac;
 
-    public function test_separate_connections_serialize_duplicate_registration_and_roll_back_failed_registration(): void
+    #[TestWith([false])]
+    #[TestWith([true])]
+    public function test_separate_connections_serialize_duplicate_registration_and_roll_back_failed_registration(bool $xppl): void
     {
         $directory = storage_path('framework/testing');
         if (! is_dir($directory)) {
@@ -44,15 +49,28 @@ class IncomingCorrespondenceConcurrencyTest extends TestCase
             $this->artisan('migrate:fresh', ['--force' => true, '--no-interaction' => true])->assertExitCode(0);
             $this->definitions();
             $site = Site::factory()->create();
+            if ($xppl) {
+                Company::query()->whereKey($site->company_id)->update(['code' => 'XPPL']);
+            }
+
             $scope = AuthorizationScope::context('site', $site->company_id, $site->id)->persist();
             $actor = User::factory()->create();
             OrganizationMembership::factory()->for($actor)->atSite($site)->create();
+
+            if ($xppl) {
+                OrganizationMembership::factory()->for($actor)->create(['company_id' => $site->company_id]);
+                $companyScope = AuthorizationScope::context('company', $site->company_id)->persist();
+                $this->grant($actor, $companyScope, ['numbering.manage']);
+                app(XpplNumbering::class)->activatePolicy($actor, $companyScope, ['register_kind' => 'incoming', 'confirm' => true]);
+            }
             $this->grant($actor, $scope, ['incoming.drafts.manage', 'documents.metadata.view', 'incoming.register', 'numbering.issue', 'numbering.manage']);
             $register = RegisterConfiguration::factory()->create(['scope_id' => $scope->id, 'register_key' => 'incoming']);
             $category = DocumentCategory::factory()->create(['scope_id' => $scope->id]);
             $type = DocumentType::factory()->create(['scope_id' => $scope->id, 'category_id' => $category->id]);
             $type->registers()->attach($register->id, ['scope_id' => $scope->id]);
-            app(ManageNumbering::class)->save($actor, $scope, ['register_id' => $register->id, 'purpose' => 'internal_register', 'reset_policy' => 'annual', 'prefix' => 'CONCURRENT/IN', 'padding' => 6, 'active' => true]);
+            if (! $xppl) {
+                app(ManageNumbering::class)->save($actor, $scope, ['register_id' => $register->id, 'purpose' => 'internal_register', 'reset_policy' => 'annual', 'prefix' => 'CONCURRENT/IN', 'padding' => 6, 'active' => true]);
+            }
             $drafts = [];
             for ($i = 0; $i < 3; $i++) {
                 $drafts[] = app(ManageIncomingCorrespondence::class)->save($actor, new DocumentScope($site->company_id, $site->id), [
@@ -88,14 +106,19 @@ class IncomingCorrespondenceConcurrencyTest extends TestCase
                 $results[] = json_decode($output, true, flags: JSON_THROW_ON_ERROR);
             }
             $processes = [];
-            $this->assertCount(2, array_column($results, 'number'));
-            $this->assertSame([true], array_column($results, 'duplicate'));
+            $this->assertCount($xppl ? 3 : 2, array_column($results, 'number'));
+            $this->assertSame($xppl ? [] : [true], array_column($results, 'duplicate'));
             $this->assertTrue($results[3]['rollback']);
             $this->assertSame(2, IncomingCorrespondence::query()->where('status', 'registered')->count());
             $this->assertDatabaseCount('issued_document_numbers', 2);
             $this->assertDatabaseCount('incoming_registration_links', 2);
             $this->assertDatabaseCount('incoming_correspondence_audits', 5);
             $this->assertSame(2, (int) DB::table('numbering_counters')->value('value'));
+            if ($xppl) {
+                $this->assertDatabaseCount('xppl_numbering_allocations', 2);
+                $this->assertSame(2, (int) DB::table('xppl_numbering_counters')->value('value'));
+                $this->assertSame(['XPPL-IN-'.now()->format('Y').'-0001', 'XPPL-IN-'.now()->format('Y').'-0002'], DB::table('issued_document_numbers')->orderBy('number')->pluck('number')->all());
+            }
             $this->assertDatabaseHas('incoming_correspondences', ['id' => $drafts[2]->id, 'status' => 'draft', 'internal_number' => null]);
         } finally {
             foreach ($processes as [$process, $pipes]) {

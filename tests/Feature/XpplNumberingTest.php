@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Authorization\DocumentScope;
 use App\Authorization\ManageControlledDocuments;
+use App\Authorization\ManageIncomingCorrespondence;
 use App\Authorization\ManageNumbering;
 use App\Authorization\ManageOutgoingCorrespondence;
 use App\Authorization\XpplNumbering;
@@ -14,7 +15,9 @@ use App\Models\ControlledDocument;
 use App\Models\Department;
 use App\Models\DocumentCategory;
 use App\Models\DocumentType;
+use App\Models\IncomingCorrespondence;
 use App\Models\OrganizationMembership;
+use App\Models\OutgoingCorrespondence;
 use App\Models\RegisterConfiguration;
 use App\Models\Site;
 use App\Models\User;
@@ -45,7 +48,7 @@ class XpplNumberingTest extends TestCase
         $this->companyScope = AuthorizationScope::context('company', $this->company->id)->persist();
         OrganizationMembership::factory()->for($this->actor)->create(['company_id' => $this->company->id]);
         $this->grant($this->actor, $this->companyScope, ['numbering.view', 'numbering.manage', 'numbering.issue', 'documents.metadata.view',
-            'controlled.drafts.manage', 'controlled.register', 'controlled.release', 'outgoing.drafts.manage', 'outgoing.register']);
+            'controlled.drafts.manage', 'controlled.register', 'controlled.release', 'incoming.drafts.manage', 'incoming.register', 'outgoing.drafts.manage', 'outgoing.register']);
         $this->signIn($this->actor);
     }
 
@@ -77,6 +80,169 @@ class XpplNumberingTest extends TestCase
         $this->assertSame('XPPL-ADM-SDF-0001', $this->issue($differentType, $this->draft($differentType), null)->document_code);
         $this->assertDatabaseCount('xppl_numbering_namespaces', 3);
         $this->assertDatabaseCount('xppl_numbering_allocations', 5);
+    }
+
+    /** @param array<string, mixed> $site */
+    private function incomingDraft(array $site): IncomingCorrespondence
+    {
+        $scope = $site['scope']->authorizationScope();
+        $register = RegisterConfiguration::query()->where('scope_id', $scope->id)->where('register_key', 'incoming')->first();
+        if (! $register) {
+            $register = RegisterConfiguration::factory()->create(['scope_id' => $scope->id, 'register_key' => 'incoming']);
+            $site['type']->registers()->attach($register->id, ['scope_id' => $scope->id]);
+        }
+
+        return app(ManageIncomingCorrespondence::class)->save($this->actor, $site['scope'], [
+            'type_id' => $site['type_id'], 'classification' => 'normal', 'subject' => 'Incoming letter', 'sender_organization' => 'Sender',
+            'external_reference' => 'SENDER/0042', 'correspondence_date' => today()->format('Y-m-d'), 'received_date' => today()->format('Y-m-d'),
+            'priority' => 'normal', 'channel' => 'email',
+        ]);
+    }
+
+    /** @param array<string, mixed> $site */
+    private function outgoingDraft(array $site): OutgoingCorrespondence
+    {
+        return app(ManageOutgoingCorrespondence::class)->save($this->actor, $site['scope'], [
+            'type_id' => $site['type_id'], 'classification' => 'normal', 'subject' => 'Outgoing letter', 'signatory_name' => 'Signatory',
+            'document_date' => today()->format('Y-m-d'), 'priority' => 'normal', 'recipients' => [['kind' => 'primary', 'organization' => 'Recipient']],
+        ]);
+    }
+
+    public function test_correspondence_policies_allocate_independent_company_and_department_annual_sequences(): void
+    {
+        $this->setupCompany();
+        $in = $this->site('ADM', 'LIN', withSeries: false);
+        $otherIn = $this->site('ADM', 'LIN', withSeries: false);
+        $out = $this->site('ADM', 'LTR', true, false);
+        $otherOut = $this->site('ENG', 'LTR', true, false);
+        foreach (['incoming', 'outgoing'] as $kind) {
+            $body = $this->scopeData($this->companyScope) + ['register_kind' => $kind];
+            $this->postJson('/api/v1/numbering-series/xppl/activate', $body)->assertUnprocessable();
+            $this->postJson('/api/v1/numbering-series/xppl/activate', $body + ['confirm' => true])->assertOk();
+        }
+        $this->assertDatabaseCount('xppl_numbering_policies', 0);
+        $this->assertDatabaseCount('numbering_series', 0);
+        $draft = $this->incomingDraft($in);
+        $this->assertNull($draft->internal_number);
+        $this->assertDatabaseCount('xppl_numbering_counters', 0);
+        $incoming = app(ManageIncomingCorrespondence::class);
+        $outgoing = app(ManageOutgoingCorrespondence::class);
+        $first = $incoming->register($this->actor, $in['scope'], (string) $draft->id);
+        $this->assertSame('XPPL-IN-2026-0001', $first->internal_number);
+        $this->assertSame('SENDER/0042', $first->external_reference);
+        $this->assertSame($first->id, $incoming->register($this->actor, $in['scope'], (string) $draft->id)->id);
+        $this->assertDatabaseCount('issued_document_numbers', 1);
+        $this->assertSame('XPPL-IN-2026-0002', $incoming->register($this->actor, $in['scope'], (string) $this->incomingDraft($in)->id)->internal_number);
+        $this->assertSame('XPPL-IN-2026-0003', $incoming->register($this->actor, $otherIn['scope'], (string) $this->incomingDraft($otherIn)->id)->internal_number);
+        $letterDraft = $this->outgoingDraft($out);
+        $this->assertNull($letterDraft->internal_number);
+        $letter = $outgoing->register($this->actor, $out['scope'], (string) $letterDraft->id);
+        $this->assertSame('XPPL-OUT-2026-0001', $letter->internal_number);
+        $this->assertSame('XPPL-ADM-LTR-26-0001', $letter->official_number);
+        $this->assertSame($letter->id, $outgoing->register($this->actor, $out['scope'], (string) $letterDraft->id)->id);
+        $other = $outgoing->register($this->actor, $otherOut['scope'], (string) $this->outgoingDraft($otherOut)->id);
+        $this->assertSame('XPPL-OUT-2026-0002', $other->internal_number);
+        $this->assertSame('XPPL-ENG-LTR-26-0001', $other->official_number);
+        $this->travelTo(now()->setDate(2027, 1, 1));
+        $this->assertSame('XPPL-IN-2027-0001', $incoming->register($this->actor, $in['scope'], (string) $this->incomingDraft($in)->id)->internal_number);
+        $nextYear = $outgoing->register($this->actor, $out['scope'], (string) $this->outgoingDraft($out)->id);
+        $this->assertSame('XPPL-OUT-2027-0001', $nextYear->internal_number);
+        $this->assertSame('XPPL-ADM-LTR-27-0001', $nextYear->official_number);
+        $this->assertSame('XPPL-IN-2026-0001', $first->fresh()->internal_number);
+        $this->assertDatabaseCount('issued_document_numbers', 10);
+        $this->assertDatabaseCount('xppl_numbering_allocations', 10);
+    }
+
+    public function test_outgoing_policy_rollback_leaves_no_partial_numbers_or_initialization(): void
+    {
+        $this->setupCompany();
+        $site = $this->site('ADM', 'LTR', true, false);
+        app(XpplNumbering::class)->activatePolicy($this->actor, $this->companyScope, ['register_kind' => 'outgoing', 'confirm' => true]);
+        $draft = $this->outgoingDraft($site);
+        DB::beginTransaction();
+        app(ManageOutgoingCorrespondence::class)->register($this->actor, $site['scope'], (string) $draft->id);
+        DB::rollBack();
+        $this->assertNull($draft->fresh()->internal_number);
+        $this->assertNull($draft->fresh()->official_number);
+        $this->assertDatabaseCount('issued_document_numbers', 0);
+        $this->assertDatabaseCount('xppl_numbering_namespaces', 0);
+        $this->assertDatabaseCount('numbering_series', 0);
+        $retry = app(ManageOutgoingCorrespondence::class)->register($this->actor, $site['scope'], (string) $draft->id);
+        $this->assertSame('XPPL-OUT-2026-0001', $retry->internal_number);
+        $this->assertSame('XPPL-ADM-LTR-26-0001', $retry->official_number);
+    }
+
+    #[TestWith(['department'])]
+    #[TestWith(['type'])]
+    public function test_outgoing_policy_requires_eligible_letter_type_and_origin_before_initialization(string $missing): void
+    {
+        $this->setupCompany();
+        $site = $this->site('ADM', $missing === 'type' ? 'MEM' : 'LTR', true, false);
+        if ($missing === 'department') {
+            $site['scope'] = new DocumentScope($this->company->id, $site['scope']->siteId);
+        }
+        app(XpplNumbering::class)->activatePolicy($this->actor, $this->companyScope, ['register_kind' => 'outgoing', 'confirm' => true]);
+        $draft = $this->outgoingDraft($site);
+        try {
+            app(ManageOutgoingCorrespondence::class)->register($this->actor, $site['scope'], (string) $draft->id);
+            $this->fail('Official letter prerequisites must be enforced.');
+        } catch (ValidationException $exception) {
+            $this->assertSame(['outgoingXpplOriginRequired'], $exception->errors()['outgoing']);
+        }
+        $this->assertDatabaseCount('numbering_series', 0);
+        $this->assertDatabaseCount('xppl_numbering_namespaces', 0);
+        $this->assertDatabaseCount('issued_document_numbers', 0);
+    }
+
+    public function test_correspondence_activation_history_prevents_destructive_migration_rollback(): void
+    {
+        $this->setupCompany();
+        app(XpplNumbering::class)->activatePolicy($this->actor, $this->companyScope, ['register_kind' => 'incoming', 'confirm' => true]);
+        $migration = require database_path('migrations/2026_11_03_072914_extend_xppl_numbering_for_correspondence.php');
+        try {
+            $migration->down();
+            $this->fail('Activated correspondence policies cannot be removed by rollback.');
+        } catch (\LogicException $exception) {
+            $this->assertStringContainsString('forward-only repair', $exception->getMessage());
+        }
+        $this->assertDatabaseHas('xppl_correspondence_policies', ['company_id' => $this->company->id, 'register_kind' => 'incoming']);
+    }
+
+    public function test_outgoing_policy_preserves_existing_letter_allocations_and_series_configuration(): void
+    {
+        $this->setupCompany();
+        $site = $this->site('ADM', 'LTR', true);
+        $namespace = $this->enable($site);
+        $manager = app(ManageOutgoingCorrespondence::class);
+        $old = $manager->register($this->actor, $site['scope'], (string) $this->outgoingDraft($site)->id, $namespace);
+        $oldInternal = $old->internal_number;
+        $configurations = DB::table('numbering_configurations')->get()->toArray();
+        app(XpplNumbering::class)->activatePolicy($this->actor, $this->companyScope, ['register_kind' => 'outgoing', 'confirm' => true]);
+        $new = $manager->register($this->actor, $site['scope'], (string) $this->outgoingDraft($site)->id);
+        $this->assertSame('XPPL-OUT-2026-0001', $new->internal_number);
+        $this->assertSame('XPPL-ADM-LTR-26-0002', $new->official_number);
+        $this->assertSame('XPPL-ADM-LTR-26-0001', $old->fresh()->official_number);
+        $this->assertSame($oldInternal, $old->fresh()->internal_number);
+        $this->assertEquals($configurations, DB::table('numbering_configurations')->get()->toArray());
+        $this->assertSame([2, 2], DB::table('numbering_counters')->orderBy('series_id')->pluck('value')->map(fn ($value): int => (int) $value)->all());
+    }
+
+    public function test_correspondence_policy_does_not_bypass_activation_or_registration_authority(): void
+    {
+        $this->setupCompany();
+        $site = $this->site('ADM', 'LIN', withSeries: false);
+        $draft = $this->incomingDraft($site);
+        $reader = User::factory()->create();
+        OrganizationMembership::factory()->for($reader)->atSite(Site::findOrFail($site['scope']->siteId))->create();
+        OrganizationMembership::factory()->for($reader)->inDepartment($site['department'])->create();
+        $this->grant($reader, $this->companyScope, ['numbering.view', 'documents.metadata.view']);
+        $this->signIn($reader);
+        $this->postJson('/api/v1/numbering-series/xppl/activate', $this->scopeData($this->companyScope) + ['register_kind' => 'incoming', 'confirm' => true])->assertForbidden();
+        app(XpplNumbering::class)->activatePolicy($this->actor, $this->companyScope, ['register_kind' => 'incoming', 'confirm' => true]);
+        $unit = $site['scope'];
+        $this->postJson('/api/v1/incoming-correspondence/'.$draft->id.'/register?'.http_build_query(['company_id' => $unit->companyId, 'site_id' => $unit->siteId, 'department_id' => $unit->departmentId]))->assertForbidden();
+        $this->assertDatabaseCount('xppl_numbering_namespaces', 0);
+        $this->assertDatabaseCount('issued_document_numbers', 0);
     }
 
     #[TestWith(['update'])]
@@ -270,7 +436,7 @@ class XpplNumberingTest extends TestCase
         $type->registers()->attach($register->id, ['scope_id' => $scope->id]);
         $series = $withSeries ? app(ManageNumbering::class)->save($this->actor, $scope, ['register_id' => $register->id, 'purpose' => $outgoing ? 'official_outgoing' : 'internal_register',
             'reset_policy' => 'annual', 'prefix' => 'LEGACY/S'.$site->id, 'padding' => 6, 'active' => true]) : null;
-        if ($outgoing) {
+        if ($outgoing && $withSeries) {
             app(ManageNumbering::class)->save($this->actor, $scope, ['register_id' => $register->id, 'purpose' => 'internal_register', 'reset_policy' => 'annual', 'prefix' => 'INTERNAL/S'.$site->id, 'padding' => 6, 'active' => true]);
         }
 

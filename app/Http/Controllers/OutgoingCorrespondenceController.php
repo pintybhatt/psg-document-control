@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Authorization\CorrespondenceContexts;
 use App\Authorization\ManageOutgoingCorrespondence;
 use App\Authorization\ManageOutgoingOperations;
+use App\Authorization\XpplNumbering;
 use App\CorrespondenceReport;
 use App\Http\Requests\OutgoingCorrespondenceRequest;
 use App\Http\Resources\OutgoingCorrespondenceResource;
@@ -58,7 +59,7 @@ class OutgoingCorrespondenceController extends Controller
             ->filter(fn (DocumentType $type): bool => $register && $type->effectiveFor($register))
             ->map(fn (DocumentType $type): array => $type->only(['id', 'name_en', 'name_lo', 'category_id']) + ['category' => $type->category->only(['id', 'name_en', 'name_lo'])])->values();
 
-        return response()->json(['data' => $types]);
+        return response()->json(['data' => $types, 'automatic_numbering' => app(XpplNumbering::class)->policyActive($scope->company_id, 'outgoing')]);
     }
 
     public function show(OutgoingCorrespondenceRequest $request, string $record, ManageOutgoingCorrespondence $outgoing, ManageOutgoingOperations $operations): JsonResponse

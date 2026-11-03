@@ -14,6 +14,7 @@ class NumberingRequest extends RbacScopeRequest
         $rules = parent::rules();
         if (in_array($this->route()->getActionMethod(), ['xpplOptions', 'xpplReview', 'xpplConfirm', 'xpplActivate'], true)) {
             return $rules + ['series_id' => ['sometimes', 'integer'], 'department_id' => ['sometimes', 'integer'], 'type_id' => ['sometimes', 'integer'],
+                'register_kind' => ['sometimes', Rule::in(['incoming', 'outgoing'])],
                 'format' => ['sometimes', Rule::in(['xppl_controlled', 'xppl_letter'])], 'token' => ['sometimes', 'string'],
                 'next_sequence' => ['sometimes', 'integer'], 'confirm' => ['sometimes', 'accepted']];
         }
