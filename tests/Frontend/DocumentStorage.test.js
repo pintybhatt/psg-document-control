@@ -86,3 +86,39 @@ it('clears private metadata when an action loses access', async () => {
     expect(wrapper.text()).not.toContain(copy.identifier); expect(wrapper.text()).not.toContain(version.original_name);
     expect(wrapper.getComponent(DocumentStorage).emitted('failure')[0][0].status).toBe(404);
 });
+
+it('keeps physical storage optional and loads only custody data when expanded', async () => {
+    const fetch = server(); const wrapper = await render({ mode: 'physical', fixedRevision: 12, revisions: [{ id: 12, identifier: '01', status: 'draft' }] });
+    expect(fetch).not.toHaveBeenCalled();
+    await expand(wrapper);
+    expect(fetch.mock.calls.every(([url]) => url.includes('/copies?') && url.includes('revision_id=12'))).toBe(true);
+    expect(wrapper.find('input[type="file"]').exists()).toBe(false);
+    expect(wrapper.text()).toContain(en.controlledPhysicalStorage);
+    expect(wrapper.text()).toContain('01');
+});
+it('opens fixed draft attachments immediately, preserves failed replacement inputs and retries safely', async () => {
+    const fetch = server(); const wrapper = await render({ mode: 'attachments', embedded: true, fixedRevision: 12 });
+    expect(wrapper.getComponent(DocumentStorage).element.tagName).toBe('SECTION');
+    expect(fetch.mock.calls.every(([url]) => url.includes('/attachments?') && url.includes('revision_id=12'))).toBe(true);
+    await button(wrapper, en.storageReplace).trigger('click');
+    const file = new File(['%PDF-test'], 'retry.pdf', { type: 'application/pdf' });
+    const input = wrapper.get('input[type="file"]'); Object.defineProperty(input.element, 'files', { value: [file], configurable: true }); await input.trigger('change');
+    await wrapper.get('#storage-upload-reason').setValue('Replace draft scan');
+    fetch.mockResolvedValueOnce(response({ errors: { file: ['storageInvalidFile'] } }, 422));
+    await button(wrapper, en.storageUpload).trigger('click'); await flushPromises();
+    expect(wrapper.get('input[type="file"]').element.files[0]).toBe(file);
+    expect(wrapper.get('#storage-upload-reason').element.value).toBe('Replace draft scan');
+    expect(wrapper.text()).toContain(en.storageInvalidFile);
+    await button(wrapper, en.storageUpload).trigger('click'); await flushPromises();
+    const uploads = fetch.mock.calls.filter(([, options]) => options.method === 'POST');
+    expect(uploads).toHaveLength(2);
+    for (const [url, options] of uploads) { expect(url).toContain('revision_id=12'); expect(options.body.get('expected_version')).toBe('1'); expect(options.body.get('attachment_id')).toBe('attachment-a'); }
+});
+it('retries an initial attachment load failure without exposing custody controls', async () => {
+    const fetch = server({ failure: { status: 500, body: {} } }); const wrapper = await render({ mode: 'attachments', fixedRevision: 12 });
+    expect(wrapper.text()).toContain(en.controlledRetryLoad);
+    fetch.mockImplementation(async () => response({ data: [], writable: true, capabilities: { preview: false, download: false }, max_upload_kb: 25600 }));
+    await button(wrapper, en.controlledRetryLoad).trigger('click'); await flushPromises();
+    expect(wrapper.text()).toContain(en.storageNoAttachments);
+    expect(wrapper.text()).not.toContain(en.storagePhysical);
+});

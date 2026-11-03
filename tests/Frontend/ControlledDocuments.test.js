@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
 import ControlledDocuments from '../../resources/js/components/ControlledDocuments.vue';
+import DocumentStorage from '../../resources/js/components/DocumentStorage.vue';
+import PdfPreviewDialog from '../../resources/js/components/ui/PdfPreviewDialog.vue';
 import ControlledDocumentsPage from '../../resources/js/pages/ControlledDocumentsPage.vue';
 import LanguageSwitcher from '../../resources/js/components/LanguageSwitcher.vue';
 import { createLocalization } from '../../resources/js/localization/index.js';
@@ -15,14 +17,28 @@ enableAutoUnmount(afterEach);
 beforeEach(() => localStorage.clear());
 afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals(); });
 function response(data, status = 200) { return { ok: status < 400, status, json: async () => structuredClone(data) }; }
-function server({ registered = false, released = false, mutationError = null, detailError = null, xppl = false, contexts = [scope], people = [{ id: 5, name: 'Example owner' }], defaultCustodianId = 5, automatic = null } = {}) {
+function server({ registered = false, released = false, mutationError = null, detailError = null, xppl = false, contexts = [scope], people = [{ id: 5, name: 'Example owner' }], defaultCustodianId = 5, automatic = null, storage = false, hasAttachment = false, uploadFailures = 0 } = {}) {
     let record = structuredClone(draft);
+    if (storage) { record.storage_url = '/storage/controlled/1'; }
+    const files = { 11: hasAttachment ? [{ id: 'attachment-r00', versions: [{ id: 'version-r00', version: 1, original_name: 'original-r00.pdf', mime_type: 'application/pdf', size: 100, previewable: true }] }] : [], 12: [] };
     if (xppl) { record.xppl_namespaces = [{ id: 4, prefix: 'XPPL-ADM-SOP' }]; }
     if (registered || released) { record.registered_at = '2026-10-26T10:00:00Z'; record.internal_number = 'TEST/CD/2026/000001'; record.lock_version = 2; }
     if (released) { record.status = 'current'; record.current_revision_id = record.authoritative_revision_id = 11; record.revisions[0].status = 'current'; record.revisions[0].released_at = '2026-10-26T10:01:00Z'; record.revisions[0].released_by = 5; record.lock_version = 3; }
     const fetch = vi.fn(async (url, options = {}) => {
         const path = new URL(url, 'http://localhost').pathname;
         const method = options.method ?? 'GET';
+        if (path.endsWith('/attachments')) {
+            const id = Number(new URL(url, 'http://localhost').searchParams.get('revision_id'));
+            if (method === 'POST') {
+                if (uploadFailures-- > 0) { return response({ message: 'Upload failed' }, 500); }
+                const previous = files[id][0];
+                const version = { id: `version-${id}-${previous?.versions.length ?? 0}`, version: (previous?.versions.length ?? 0) + 1, original_name: options.body.get('file').name, mime_type: 'application/pdf', size: 100, previewable: true };
+                files[id] = [{ id: previous?.id ?? `attachment-${id}`, versions: [...(previous?.versions ?? []), version] }];
+                return response({ data: files[id][0] });
+            }
+            return response({ data: files[id] ?? [], writable: record.revisions.find(item => item.id === id)?.status === 'draft', capabilities: { preview: true, download: true }, max_upload_kb: 25600 });
+        }
+        if (path.endsWith('/download')) { return { ok: true, status: 200, blob: async () => new Blob(['%PDF-test']), headers: { get: () => null } }; }
         if (path.endsWith('/contexts')) { return response({ data: contexts.map(item => ({ ...item, company: { name_en: 'Example company' }, site: { name_en: 'Example site' } })) }); }
         if (path.endsWith('/lookups')) { return response({ data: [{ ...type, automatic_numbering: automatic }], people, default_custodian_id: defaultCustodianId }); }
         if (method === 'GET' && path === '/controlled') { return response({ data: new URL(url, 'http://localhost').searchParams.get('status') === 'current' ? [{ ...record, id: 2, document_code: 'XPPL/SOP/REPLACEMENT' }] : [record], meta: { total: 1 } }); }
@@ -40,7 +56,7 @@ function server({ registered = false, released = false, mutationError = null, de
     vi.stubGlobal('fetch', fetch); return fetch;
 }
 async function render(currentScope = scope) {
-    const wrapper = mount({ components: { ControlledDocuments, LanguageSwitcher }, props: { scope: Object }, template: '<div id="dcms-app"><LanguageSwitcher /><ControlledDocuments :scope="scope" endpoint="/controlled" csrf-token="sample-csrf" /></div>' }, { props: { scope: structuredClone(currentScope) }, attachTo: document.body, global: { plugins: [createLocalization()] } });
+    const wrapper = mount({ components: { ControlledDocuments, LanguageSwitcher }, props: { scope: Object }, template: '<div id="dcms-app"><LanguageSwitcher /><ControlledDocuments :scope="scope" endpoint="/controlled" csrf-token="sample-csrf" /></div>' }, { props: { scope: structuredClone(currentScope) }, attachTo: document.body, global: { plugins: [createLocalization()], stubs: { PdfPreviewDialog: true } } });
     await flushPromises(); return wrapper;
 }
 function button(wrapper, text) { const found = wrapper.findAll('button').find(item => item.text() === text); expect(found, text).toBeDefined(); return found; }
@@ -266,4 +282,126 @@ it('selects only authorized owner departments inside a fresh form and clears sta
         const requestUrl = new URL(url, 'http://localhost');
         return requestUrl.pathname === '/controlled/lookups' && requestUrl.searchParams.get('site_id') === '7' && !requestUrl.searchParams.has('department_id');
     })).toBe(true);
+});
+
+const attachmentScope = { ...scope, permissions: [...scope.permissions, 'documents.attachments.manage'] };
+async function chooseFile(wrapper, selector, name = 'draft.pdf') {
+    const input = wrapper.get(selector);
+    const file = new File(['%PDF-test'], name, { type: 'application/pdf' });
+    Object.defineProperty(input.element, 'files', { value: [file], configurable: true });
+    await input.trigger('change');
+    return file;
+}
+it.each([false, true])('saves a new draft with an optional attachment=%s through the authorized APIs', async withFile => {
+    const fetch = server({ storage: true }); const wrapper = await render(attachmentScope);
+    await button(wrapper, en.controlledCreate).trigger('click');
+    expect(wrapper.text()).toContain(en.controlledAttachment);
+    expect(wrapper.get('#controlled-attachment-file').attributes('required')).toBeUndefined();
+    if (withFile) { await chooseFile(wrapper, '#controlled-attachment-file'); }
+    await wrapper.get('#controlled-draft-form').trigger('submit'); await flushPromises();
+    const uploads = fetch.mock.calls.filter(([url, options]) => options.method === 'POST' && url.includes('/attachments?'));
+    expect(uploads).toHaveLength(withFile ? 1 : 0);
+    if (withFile) {
+        expect(uploads[0][0]).toContain('revision_id=11');
+        expect(uploads[0][1].body.get('file').name).toBe('draft.pdf');
+        expect(uploads[0][1].headers['X-CSRF-TOKEN']).toBe('sample-csrf');
+        expect(uploads[0][1].headers).not.toHaveProperty('Content-Type');
+        expect(wrapper.text()).toContain('draft.pdf');
+    }
+    expect(fetch.mock.calls.filter(([url, options]) => options.method === 'POST' && url.startsWith('/controlled?'))).toHaveLength(1);
+    expect(wrapper.find('#controlled-draft-form').exists()).toBe(false);
+    expect(wrapper.find('#storage-revision').exists()).toBe(false);
+    expect(wrapper.getComponent(DocumentStorage).element.tagName).toBe('SECTION');
+    expect(wrapper.findAllComponents(DocumentStorage)).toHaveLength(2);
+    expect(fetch.mock.calls.some(([url]) => url.includes('/copies?'))).toBe(false);
+});
+it('retains the saved draft identity and file on upload failure and retries only the attachment', async () => {
+    const fetch = server({ storage: true, uploadFailures: 1 }); const wrapper = await render(attachmentScope);
+    await button(wrapper, en.controlledCreate).trigger('click');
+    await wrapper.get('#controlled-title_en').setValue('Preserved document');
+    const file = await chooseFile(wrapper, '#controlled-attachment-file');
+    await wrapper.get('#controlled-draft-form').trigger('submit'); await flushPromises();
+    expect(wrapper.text()).toContain(en.controlledDraftSavedUploadPending);
+    expect(wrapper.text()).toContain(en.controlledAttachmentFailed);
+    expect(wrapper.get('#controlled-title_en').element.value).toBe('Preserved document');
+    expect(wrapper.get('#controlled-attachment-file').element.files[0]).toBe(file);
+    await wrapper.get('#controlled-draft-form').trigger('submit'); await flushPromises();
+    expect(fetch.mock.calls.filter(([url, options]) => options.method === 'POST' && url.startsWith('/controlled?'))).toHaveLength(1);
+    expect(fetch.mock.calls.filter(([url, options]) => options.method === 'POST' && url.includes('/attachments?'))).toHaveLength(2);
+    expect(fetch.mock.calls.some(([, options]) => options.method === 'PATCH')).toBe(false);
+    expect(wrapper.find('#controlled-draft-form').exists()).toBe(false);
+    expect(wrapper.text()).toContain('draft.pdf');
+});
+it('preserves metadata and the selected file when draft validation fails', async () => {
+    const fetch = server({ storage: true, mutationError: { status: 422, body: { errors: { title_en: ['controlledValidation'] } } } });
+    const wrapper = await render(attachmentScope); await button(wrapper, en.controlledCreate).trigger('click');
+    const file = await chooseFile(wrapper, '#controlled-attachment-file');
+    await wrapper.get('#controlled-title_en').setValue('Keep this title');
+    await wrapper.get('#controlled-draft-form').trigger('submit'); await flushPromises();
+    expect(wrapper.get('#controlled-title_en').element.value).toBe('Keep this title');
+    expect(wrapper.get('#controlled-attachment-file').element.files[0]).toBe(file);
+    expect(fetch.mock.calls.some(([url, options]) => url.includes('/attachments?') && options.method === 'POST')).toBe(false);
+});
+it('shows and replaces the draft attachment inside the editor without nested forms or revision selection', async () => {
+    const fetch = server({ storage: true, hasAttachment: true }); const wrapper = await render(attachmentScope); await show(wrapper);
+    await button(wrapper, en.controlledEdit).trigger('click'); await flushPromises();
+    expect(wrapper.text()).toContain('original-r00.pdf');
+    expect(wrapper.find('#storage-revision').exists()).toBe(false);
+    await button(wrapper, en.storagePreview).trigger('click'); await flushPromises();
+    expect(wrapper.findComponent(PdfPreviewDialog).props('url')).toContain('revision_id=11');
+    await button(wrapper, en.storageReplace).trigger('click');
+    await chooseFile(wrapper, '#storage-upload-form input[type="file"]', 'replacement.pdf');
+    await wrapper.get('#storage-upload-reason').setValue('Corrected scan');
+    expect(wrapper.find('form form').exists()).toBe(false);
+    await button(wrapper, en.storageUpload).trigger('click'); await flushPromises();
+    const upload = fetch.mock.calls.find(([url, options]) => options.method === 'POST' && url.includes('/attachments?'));
+    expect(upload[0]).toContain('revision_id=11');
+    expect(upload[1].body.get('attachment_id')).toBe('attachment-r00');
+    expect(upload[1].body.get('expected_version')).toBe('1');
+    expect(wrapper.text()).toContain('replacement.pdf');
+    expect(wrapper.find('#controlled-draft-form').exists()).toBe(true);
+    expect(fetch.mock.calls.some(([, options]) => options.method === 'PATCH')).toBe(false);
+});
+it('automatically targets draft R01 while keeping the released R00 attachment read-only', async () => {
+    const fetch = server({ storage: true, hasAttachment: true, released: true }); const wrapper = await render(attachmentScope); await show(wrapper);
+    await button(wrapper, en['controlledAction-revisions']).trigger('click');
+    await wrapper.get('#controlled-action-revision_reason').setValue('Update file');
+    await wrapper.get('#controlled-action-change_description').setValue('New edition');
+    await wrapper.get('#controlled-action-form').trigger('submit'); await flushPromises();
+    expect(wrapper.text()).toContain(en.controlledDraftAttachment.replace('{revision}', 'R01'));
+    expect(wrapper.text()).toContain(en.controlledReleasedAttachment.replace('{revision}', 'R00'));
+    const attachments = wrapper.findAllComponents(DocumentStorage).find(item => item.props('mode') === 'attachments');
+    expect(attachments.props('fixedRevision')).toBe(12);
+    await button(wrapper, en.controlledReleasedAttachment.replace('{revision}', 'R00')).trigger('click'); await flushPromises();
+    expect(wrapper.text()).toContain('original-r00.pdf');
+    expect(wrapper.findAll('button').some(item => item.text() === en.storageReplace)).toBe(false);
+    await button(wrapper, en.controlledEdit).trigger('click'); await flushPromises();
+    expect(wrapper.findAllComponents(DocumentStorage)[0].props('fixedRevision')).toBe(12);
+    expect(wrapper.text()).toContain(en.controlledReleasedAttachment.replace('{revision}', 'R00'));
+    expect(wrapper.text()).toContain(en.controlledDraftFileHelp);
+    await button(wrapper, en.storageUpload).trigger('click');
+    await chooseFile(wrapper, '#storage-upload-form input[type="file"]', 'r01.pdf');
+    await wrapper.get('#storage-upload-reason').setValue('New revision file');
+    await button(wrapper, en.storageUpload).trigger('click'); await flushPromises();
+    const upload = fetch.mock.calls.find(([url, options]) => options.method === 'POST' && url.includes('/attachments?'));
+    expect(upload[0]).toContain('revision_id=12');
+    expect(upload[1].body.has('attachment_id')).toBe(false);
+    await wrapper.get('select[aria-label="Language"]').setValue('lo');
+    expect(wrapper.text()).toContain(lo.controlledAttachment);
+    expect(wrapper.text()).not.toContain('controlledDraftAttachment');
+});
+it('does not offer file selection without attachment permission', async () => {
+    server({ storage: true }); const wrapper = await render(); await button(wrapper, en.controlledCreate).trigger('click');
+    expect(wrapper.find('input[type="file"]').exists()).toBe(false);
+    expect(wrapper.text()).toContain(en.controlledAttachmentPermission);
+});
+
+it('allows continuing with the saved draft when an optional upload fails', async () => {
+    const fetch = server({ storage: true, uploadFailures: 1 }); const wrapper = await render(attachmentScope);
+    await button(wrapper, en.controlledCreate).trigger('click'); await chooseFile(wrapper, '#controlled-attachment-file');
+    await wrapper.get('#controlled-draft-form').trigger('submit'); await flushPromises();
+    await button(wrapper, en.controlledContinueWithoutAttachment).trigger('click'); await flushPromises();
+    expect(wrapper.find('#controlled-draft-form').exists()).toBe(false);
+    expect(wrapper.text()).toContain(en.storageNoAttachments);
+    expect(fetch.mock.calls.filter(([url, options]) => options.method === 'POST' && url.startsWith('/controlled?'))).toHaveLength(1);
 });

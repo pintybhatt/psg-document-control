@@ -67,11 +67,13 @@ class DocumentStorageTest extends TestCase
         $this->assertDatabaseCount('attachment_versions', 0);
     }
 
-    public function test_metadata_permission_does_not_grant_upload_and_denials_are_durable(): void
+    #[TestWith(['incoming'])]
+    #[TestWith(['controlled'])]
+    public function test_metadata_permission_does_not_grant_upload_and_denials_are_durable(string $resource): void
     {
-        [$record, $actor, $role] = $this->fixture();
+        [$record, $actor, $role] = $this->fixture($resource);
         $role->permissions()->detach(Permission::where('key', 'documents.attachments.manage')->value('id'));
-        $this->postJson($this->url($record), ['file' => $this->pdf(), 'reason' => 'Unauthorized'])->assertForbidden();
+        $this->postJson($this->url($record, type: $resource, extra: $resource === 'controlled' ? ['revision_id' => $record->revisions()->sole()->id] : []), ['file' => $this->pdf(), 'reason' => 'Unauthorized'])->assertForbidden();
         $this->assertDatabaseHas('storage_events', ['actor_id' => $actor->id, 'action' => 'request.denied']);
         $this->assertDatabaseCount('attachment_versions', 0);
     }
@@ -177,9 +179,26 @@ class DocumentStorageTest extends TestCase
         $this->postJson($this->url($record, type: 'controlled', extra: $extra), ['file' => $this->pdf(), 'reason' => 'Forbidden addition'])->assertUnprocessable();
         $record = $manager->revise($actor, $scope, (string) $record->id, ['lock_version' => 3, 'revision_reason' => 'File correction', 'change_description' => 'Corrected scan']);
         $next = $record->revisions()->whereNull('released_at')->sole();
-        $this->postJson($this->url($record, type: 'controlled', extra: ['revision_id' => $next->id]), ['file' => $this->pdf('corrected.pdf'), 'reason' => 'Corrected scan'])->assertCreated();
+        $nextAttachment = $this->postJson($this->url($record, type: 'controlled', extra: ['revision_id' => $next->id]), ['file' => $this->pdf('corrected.pdf'), 'reason' => 'Corrected scan'])->assertCreated()->json('data');
+        $this->postJson($this->url($record, type: 'controlled', extra: ['revision_id' => $next->id]), ['file' => $this->pdf('r01-replaced.pdf'), 'reason' => 'Replace draft scan', 'attachment_id' => $nextAttachment['id'], 'expected_version' => 1])->assertOk()->assertJsonPath('data.versions.1.original_name', 'r01-replaced.pdf');
+        $this->getJson($this->url($record, type: 'controlled', extra: $extra))->assertOk()->assertJsonPath('data.0.versions.0.original_name', 'ຄວາມປອດໄພ.pdf');
+        $this->getJson($this->url($record, 'versions/'.$attachment['versions'][0]['id'].'/download', 'controlled', $extra))->assertOk()->assertHeader('Content-Type', 'application/pdf');
+        $this->postJson($this->url($record, type: 'controlled', extra: ['revision_id' => $next->id]), ['file' => $this->pdf(), 'reason' => 'Wrong revision attachment', 'attachment_id' => $attachment['id'], 'expected_version' => 1])->assertNotFound();
         $this->getJson($this->url($record, type: 'controlled', extra: $extra))->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('writable', false);
-        $this->assertDatabaseCount('attachment_versions', 2);
+        $this->assertDatabaseCount('attachment_versions', 3);
+    }
+
+    public function test_controlled_draft_can_be_registered_and_released_without_an_attachment(): void
+    {
+        $this->travelTo('2026-10-26 10:00:00');
+        [$record, $actor] = $this->fixture('controlled');
+        $scope = $record->profile->documentScope();
+        app(ManageNumbering::class)->save($actor, $scope->authorizationScope(), ['register_id' => $record->register_id, 'purpose' => 'internal_register', 'reset_policy' => 'annual', 'prefix' => 'TEST/CD', 'padding' => 6, 'active' => true]);
+        $parameters = '?'.http_build_query(['company_id' => $scope->companyId, 'site_id' => $scope->siteId]);
+        $this->postJson('/api/v1/controlled-documents/'.$record->id.'/register'.$parameters, ['lock_version' => 1])->assertOk();
+        $this->postJson('/api/v1/controlled-documents/'.$record->id.'/release'.$parameters, ['lock_version' => 2, 'revision_id' => $record->revisions()->sole()->id, 'reason' => 'Authorized physical-only release'])->assertOk()->assertJsonPath('data.status', 'current');
+        $this->assertDatabaseCount('attachment_versions', 0);
+        $this->assertDatabaseHas('controlled_document_audits', ['document_id' => $record->id, 'action' => 'released']);
     }
 
     public function test_drawing_formats_are_download_only_and_outgoing_register_is_supported(): void
@@ -191,24 +210,27 @@ class DocumentStorageTest extends TestCase
         $this->getJson($this->url($record, 'versions/'.$version->id.'/download', 'outgoing'))->assertOk();
     }
 
-    public function test_highly_confidential_files_need_clearance_and_operation_specific_grants(): void
+    #[TestWith(['incoming'])]
+    #[TestWith(['controlled'])]
+    public function test_highly_confidential_files_need_clearance_and_operation_specific_grants(string $resource): void
     {
-        [$record] = $this->fixture(classification: 'highly_confidential');
-        $this->postJson($this->url($record), ['file' => $this->pdf('secret.pdf'), 'reason' => 'Secret'])->assertCreated();
+        [$record] = $this->fixture($resource, classification: 'highly_confidential');
+        $url = fn (string $suffix = 'attachments'): string => $this->url($record, $suffix, $resource, $resource === 'controlled' ? ['revision_id' => $record->revisions()->sole()->id] : []);
+        $this->postJson($url(), ['file' => $this->pdf('secret.pdf'), 'reason' => 'Secret'])->assertCreated();
         $version = AttachmentVersion::sole();
         $reader = User::factory()->create();
         OrganizationMembership::factory()->for($reader)->atSite($record->profile->documentScope()->authorizationScope()->site)->create();
         $this->grant($reader, $record->profile->documentScope()->authorizationScope(), ['documents.metadata.view', 'documents.content.preview', 'documents.attachments.download']);
         $this->signIn($reader);
-        $this->getJson($this->url($record))->assertNotFound()->assertDontSee('secret.pdf');
-        $this->getJson($this->url($record, 'versions/'.$version->id.'/download'))->assertNotFound();
+        $this->getJson($url())->assertNotFound()->assertDontSee('secret.pdf');
+        $this->getJson($url('versions/'.$version->id.'/download'))->assertNotFound();
         ConfidentialityClearance::factory()->forProfile($record->profile)->create(['user_id' => $reader->id]);
         DocumentAccessGrant::factory()->create(['profile_id' => $record->profile_id, 'user_id' => $reader->id, 'operation' => 'metadata']);
-        $this->getJson($this->url($record))->assertOk();
-        $this->getJson($this->url($record, 'versions/'.$version->id.'/preview'))->assertNotFound();
+        $this->getJson($url())->assertOk();
+        $this->getJson($url('versions/'.$version->id.'/preview'))->assertNotFound();
         DocumentAccessGrant::factory()->create(['profile_id' => $record->profile_id, 'user_id' => $reader->id, 'operation' => 'preview']);
-        $this->getJson($this->url($record, 'versions/'.$version->id.'/preview'))->assertOk();
-        $this->getJson($this->url($record, 'versions/'.$version->id.'/download'))->assertNotFound();
+        $this->getJson($url('versions/'.$version->id.'/preview'))->assertOk();
+        $this->getJson($url('versions/'.$version->id.'/download'))->assertNotFound();
         $this->assertDatabaseHas('document_security_audits', ['reason' => 'system_administrator']);
     }
 

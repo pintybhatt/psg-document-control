@@ -20,7 +20,7 @@ afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals(); });
 const response = (body, status = 200) => ({ ok: status < 400, status, json: async () => structuredClone(body) });
 function button(wrapper, text) { const result = wrapper.findAll('button').find(item => item.text() === text); expect(result, text).toBeDefined(); return result; }
 
-it.each(registers.flatMap(register => ['en', 'lo'].map(language => ({ ...register, language }))))('saves a $kind draft then uploads through its existing detail panel in $language', async ({ kind, component, createKey, fields, dateKey, language }) => {
+it.each(registers.flatMap(register => ['en', 'lo'].map(language => ({ ...register, language }))))('saves a $kind draft and attachment through existing APIs in $language', async ({ kind, component, createKey, fields, dateKey, language }) => {
     const dictionary = language === 'lo' ? lo : en;
     const scope = { key: '7:site', company_id: 4, site_id: 7, department_id: null, permissions: [`${kind}.drafts.manage`, 'documents.attachments.manage'] };
     const endpoint = `/${kind}`, storageUrl = `/storage/${kind}/1`;
@@ -50,24 +50,35 @@ it.each(registers.flatMap(register => ['en', 'lo'].map(language => ({ ...registe
     const wrapper = mount(component, { props: { scope, endpoint, csrfToken: 'sample-csrf', ...(kind === 'outgoing' ? { incomingEndpoint: '/incoming' } : {}) }, attachTo: document.body, global: { plugins: [createLocalization(language)], stubs: { ConfirmDialog: true } } });
     await flushPromises();
     await button(wrapper, dictionary[createKey]).trigger('click');
-    expect(wrapper.text()).toContain(dictionary[kind === 'controlled' ? 'storageControlledDraftHelp' : 'storageDraftHelp']);
-    expect(wrapper.find('input[type="file"]').exists()).toBe(false);
+    expect(wrapper.text()).toContain(dictionary[kind === 'controlled' ? 'controlledAttachmentHelp' : 'storageDraftHelp']);
+    expect(wrapper.find('input[type="file"]').exists()).toBe(kind === 'controlled');
     for (const [field, value] of Object.entries(fields)) { await wrapper.get(`#${kind}-${field}`).setValue(value); }
+    if (kind === 'controlled') {
+        const input = wrapper.get('#controlled-attachment-file');
+        Object.defineProperty(input.element, 'files', { value: [new File(['%PDF-test'], 'signed-original.pdf', { type: 'application/pdf' })], configurable: true });
+        await input.trigger('change');
+        await wrapper.get('#controlled-attachment-reason').setValue('Signed original');
+    }
     await wrapper.get(`#${kind}-draft-form`).trigger('submit'); await flushPromises();
     expect(record[dateKey]).toBe('2026-10-25');
     const panel = wrapper.getComponent(DocumentStorage);
     expect(panel.props('endpoint')).toBe(storageUrl);
-    const details = panel.get('details'); details.element.open = true; await details.trigger('toggle'); await flushPromises();
-    await button(panel, dictionary.storageUpload).trigger('click');
-    const input = panel.get('input[type="file"]');
-    Object.defineProperty(input.element, 'files', { value: [new File(['%PDF-test'], 'signed-original.pdf', { type: 'application/pdf' })], configurable: true });
-    await input.trigger('change');
-    await panel.get('#storage-upload-reason').setValue('Signed original');
-    await panel.get('#storage-upload-form').trigger('submit'); await flushPromises();
+    if (kind !== 'controlled') {
+        const details = panel.get('details'); details.element.open = true; await details.trigger('toggle'); await flushPromises();
+        await button(panel, dictionary.storageUpload).trigger('click');
+        const input = panel.get('input[type="file"]');
+        Object.defineProperty(input.element, 'files', { value: [new File(['%PDF-test'], 'signed-original.pdf', { type: 'application/pdf' })], configurable: true });
+        await input.trigger('change');
+        await panel.get('#storage-upload-reason').setValue('Signed original');
+        await panel.get('#storage-upload-form').trigger('submit'); await flushPromises();
+    } else {
+        expect(panel.element.tagName).toBe('SECTION');
+        expect(panel.find('#storage-revision').exists()).toBe(false);
+    }
     const upload = fetch.mock.calls.find(([url, options]) => url.startsWith(`${storageUrl}/attachments`) && options.method === 'POST');
     expect(upload[1].body).toBeInstanceOf(FormData);
     expect(upload[1].headers['X-CSRF-TOKEN']).toBe('sample-csrf');
     expect(new URL(upload[0], 'http://localhost').searchParams.get('revision_id')).toBe(kind === 'controlled' ? '11' : null);
     expect(panel.text()).toContain('signed-original.pdf');
-    expect(panel.text()).toContain(dictionary.storageSaved);
+    expect(kind === 'controlled' ? wrapper.text() : panel.text()).toContain(dictionary[kind === 'controlled' ? 'controlledSavedWithAttachment' : 'storageSaved']);
 });
