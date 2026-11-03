@@ -46,8 +46,9 @@ const cutoverConfirmed = ref(false);
 const xpplBusy = ref(false);
 const xpplSeries = computed(() => xpplOptions.value.series.filter(item => xpplKind.value === 'xppl_controlled' ? item.register === 'controlled' && item.purpose === 'internal_register' : xpplKind.value === 'xppl_letter' && item.register === 'outgoing' && item.purpose === 'official_outgoing').map(item => ({ value: item.id, label: `${item.id} · ${item.site_name_en ?? item.site_id} · ${item.site_name_lo ?? ''} · ${t(`masterRegister-${item.register}`)} · ${t(`numberingPurpose-${item.purpose}`)}` })));
 const selectedXpplSeries = computed(() => xpplOptions.value.series.find(item => item.id === Number(xpplForm.series_id)));
-const xpplDepartments = computed(() => xpplOptions.value.departments.filter(item => item.site_id === selectedXpplSeries.value?.site_id).map(item => ({ value: item.id, label: `${item.code} · ${item.name_en} · ${item.name_lo}` })));
-const xpplTypes = computed(() => xpplOptions.value.types.filter(item => item.scope_id === selectedXpplSeries.value?.scope_id).map(item => ({ value: item.id, label: `${item.code} · ${item.name_en} · ${item.name_lo}` })));
+const selectedXpplDepartment = computed(() => xpplOptions.value.departments.find(item => item.id === Number(xpplForm.department_id)));
+const xpplDepartments = computed(() => xpplOptions.value.departments.filter(item => xpplKind.value === 'xppl_controlled' || item.site_id === selectedXpplSeries.value?.site_id).map(item => ({ value: item.id, label: `${item.code} · ${item.name_en} · ${item.name_lo} · ${t('site')} ${item.site_id}` })));
+const xpplTypes = computed(() => xpplOptions.value.types.filter(item => xpplKind.value === 'xppl_controlled' ? item.site_id === selectedXpplDepartment.value?.site_id : item.scope_id === selectedXpplSeries.value?.scope_id).map(item => ({ value: item.id, label: `${item.code} · ${item.name_en} · ${item.name_lo}` })));
 async function loadXppl() {
     if (props.scope.scope_type !== 'company') { return; }
     const signal = controller.signal;
@@ -58,7 +59,8 @@ async function reviewXppl(confirm = false) {
     if (xpplBusy.value || (confirm && (!cutoverConfirmed.value || !canManage.value))) { return; }
     const signal = controller.signal;
     xpplBusy.value = true; errorKey.value = ''; cutoverConfirmed.value = false;
-    const body = { ...scopeData(), ...xpplForm, format: selectedXpplSeries.value?.register === 'controlled' ? 'xppl_controlled' : 'xppl_letter' };
+    const body = { ...scopeData(), ...xpplForm, format: xpplKind.value };
+    if (xpplKind.value === 'xppl_controlled') { delete body.series_id; }
     if (confirm) { Object.assign(body, { token: reconciliation.value.token, next_sequence: reconciliation.value.next_sequence, confirm: true }); }
     try {
         const result = await request(`${props.endpoint}/xppl/${confirm ? 'confirm' : 'review'}`, { method: 'POST', signal, body });
@@ -67,6 +69,7 @@ async function reviewXppl(confirm = false) {
     finally { if (!signal.aborted) { xpplBusy.value = false; } }
 }
 watch(xpplKind, () => { xpplForm.series_id = ''; xpplForm.department_id = ''; xpplForm.type_id = ''; reconciliation.value = null; cutoverConfirmed.value = false; });
+watch(() => xpplForm.department_id, () => { if (xpplKind.value === 'xppl_controlled') { xpplForm.type_id = ''; } });
 watch(() => xpplForm.series_id, () => {
     xpplForm.department_id = ''; xpplForm.type_id = '';
     if (xpplKind.value === 'xppl_letter') {
@@ -192,12 +195,12 @@ onBeforeUnmount(() => { controller?.abort(); previewController?.abort(); history
                 <SelectInput v-model="xpplKind" :label="t('numberingSetupType')" :options="xpplKinds" :disabled="xpplBusy" />
                 <p v-if="xpplKind" class="text-sm text-slate-600">{{ t(xpplKind === 'xppl_letter' ? 'numberingLetterSetupHelp' : 'numberingControlledSetupHelp') }}</p>
                 <div v-if="xpplKind" class="grid gap-4 sm:grid-cols-2">
-                    <SelectInput v-model="xpplForm.series_id" :label="t('numberingXpplSeries')" :options="[{ value: '', label: t('uiChoose') }, ...xpplSeries]" :disabled="xpplBusy" />
-                    <SelectInput v-if="selectedXpplSeries" v-model="xpplForm.department_id" :label="t('numberingXpplDepartment')" :options="[{ value: '', label: t('uiChoose') }, ...xpplDepartments]" :disabled="xpplBusy" />
-                    <SelectInput v-if="selectedXpplSeries && xpplKind === 'xppl_controlled'" v-model="xpplForm.type_id" :label="t('numberingXpplType')" :options="[{ value: '', label: t('uiChoose') }, ...xpplTypes]" :disabled="xpplBusy" />
+                    <SelectInput v-if="xpplKind === 'xppl_letter'" v-model="xpplForm.series_id" :label="t('numberingXpplSeries')" :options="[{ value: '', label: t('uiChoose') }, ...xpplSeries]" :disabled="xpplBusy" />
+                    <SelectInput v-if="xpplKind === 'xppl_controlled' || selectedXpplSeries" v-model="xpplForm.department_id" :label="t('numberingXpplDepartment')" :options="[{ value: '', label: t('uiChoose') }, ...xpplDepartments]" :disabled="xpplBusy" />
+                    <SelectInput v-if="selectedXpplDepartment && xpplKind === 'xppl_controlled'" v-model="xpplForm.type_id" :label="t('numberingXpplType')" :options="[{ value: '', label: t('uiChoose') }, ...xpplTypes]" :disabled="xpplBusy" />
                 </div>
                 <p v-if="selectedXpplSeries && xpplKind === 'xppl_letter' && !xpplForm.type_id" role="status" class="text-sm text-slate-600">{{ t('numberingLetterTypeMissing') }}</p>
-                <UiButton v-if="xpplKind" variant="secondary" :disabled="xpplBusy || !xpplForm.series_id || !xpplForm.department_id || !xpplForm.type_id" @click="reviewXppl()">{{ t('numberingXpplReview') }}</UiButton>
+                <UiButton v-if="xpplKind" variant="secondary" :disabled="xpplBusy || (xpplKind === 'xppl_letter' && !xpplForm.series_id) || !xpplForm.department_id || !xpplForm.type_id" @click="reviewXppl()">{{ t('numberingXpplReview') }}</UiButton>
                 <div v-if="reconciliation" role="status" class="flex flex-col gap-3 text-sm">
                     <p class="font-mono">{{ t(`numberingFormat-${reconciliation.format}`) }} · {{ reconciliation.preview }}{{ reconciliation.format === 'xppl_controlled' ? '-R00' : '' }}</p>
                     <p>{{ t('numberingXpplMaximum') }}: {{ reconciliation.historical_maximum }} · {{ t('numberingXpplNext') }}: {{ reconciliation.next_sequence }}</p>

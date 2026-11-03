@@ -6,7 +6,9 @@ use App\Models\AuthorizationScope;
 use App\Models\Company;
 use App\Models\Department;
 use App\Models\DocumentType;
+use App\Models\NumberingConfiguration;
 use App\Models\NumberingSeries;
+use App\Models\RegisterConfiguration;
 use App\Models\User;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Facades\DB;
@@ -32,11 +34,25 @@ class XpplNumbering
     public function masters(int $companyId, array $data): array
     {
         $validated = Validator::make($data, [
-            'series_id' => ['required', 'integer'], 'department_id' => ['required', 'integer'],
+            'series_id' => ['sometimes', 'integer'], 'department_id' => ['required', 'integer'],
             'type_id' => ['required', 'integer'], 'format' => ['required', Rule::in(['xppl_controlled', 'xppl_letter'])],
         ])->validate();
-        $series = NumberingSeries::query()->with('scope', 'register', 'currentConfiguration')->findOrFail($validated['series_id']);
         $department = Department::query()->findOrFail($validated['department_id']);
+        if (isset($validated['series_id'])) {
+            $series = NumberingSeries::query()->with('scope', 'register', 'currentConfiguration')->findOrFail($validated['series_id']);
+        } else {
+            abort_unless($validated['format'] === 'xppl_controlled' && $department->company_id === $companyId
+                && Company::query()->whereKey($companyId)->where('code', 'XPPL')->exists(), 422, 'numberingXpplConflict');
+            $scope = AuthorizationScope::query()->where('company_id', $companyId)->where('site_id', $department->site_id)->where('scope_type', 'site')->firstOrFail();
+            $register = RegisterConfiguration::query()->where('scope_id', $scope->id)->where('register_key', 'controlled')->where('active', true)->firstOrFail();
+            $series = NumberingSeries::query()->with('scope', 'register', 'currentConfiguration')->where('register_id', $register->id)
+                ->where('purpose', NumberingPurpose::InternalRegister)->first();
+            if (! $series) {
+                $series = new NumberingSeries(['scope_id' => $scope->id, 'register_id' => $register->id, 'purpose' => NumberingPurpose::InternalRegister, 'reset_policy' => NumberingResetPolicy::Continuous]);
+                $series->id = 0;
+                $series->setRelation('scope', $scope)->setRelation('register', $register)->setRelation('currentConfiguration', new NumberingConfiguration(['active' => true]));
+            }
+        }
         $type = DocumentType::query()->with('category')->findOrFail($validated['type_id']);
         $company = Company::query()->findOrFail($companyId);
         $controlled = $validated['format'] === 'xppl_controlled';
@@ -156,6 +172,18 @@ class XpplNumbering
             Validator::make($data, ['token' => ['required', 'string'], 'next_sequence' => ['required', 'integer', 'min:1', 'max:'.NumberingFormat::MAX_SEQUENCE], 'confirm' => ['required', 'accepted']])->validate();
             if ($report['ambiguous'] || $report['collision_count'] || ! hash_equals($report['token'], $data['token']) || (int) $data['next_sequence'] !== $report['next_sequence']) {
                 $this->invalid();
+            }
+            if ($masters['series_id'] === 0) {
+                $department = Department::query()->findOrFail($masters['department_id']);
+                $siteScope = AuthorizationScope::query()->where('company_id', $scope->company_id)->where('site_id', $department->site_id)->where('scope_type', 'site')->firstOrFail();
+                $register = RegisterConfiguration::query()->where('scope_id', $siteScope->id)->where('register_key', 'controlled')->where('active', true)->firstOrFail();
+                $series = app(ManageNumbering::class)->save($actor, $siteScope, [
+                    'register_id' => $register->id, 'purpose' => 'internal_register', 'reset_policy' => 'continuous',
+                    'prefix' => 'XPPL/DCMS/REGISTER/'.$register->id, 'padding' => 4, 'active' => true,
+                    'change_reason' => 'Supporting configuration for explicitly approved official XPPL numbering',
+                ]);
+                $masters = $this->masters($scope->company_id, array_replace($data, ['series_id' => $series->id]));
+                $report = $this->reconcile($masters);
             }
             $namespaceId = $report['namespace_id'] ?? DB::table('xppl_numbering_namespaces')->insertGetId(array_intersect_key($masters, array_flip(['company_id', 'prefix', 'format', 'identity_hash'])) + ['created_by' => $actor->id, 'created_at' => now()]);
             $mapping = DB::table('xppl_numbering_mappings')->where('series_id', $masters['series_id'])->where('department_id', $masters['department_id'])->where('type_id', $masters['type_id'])->first();

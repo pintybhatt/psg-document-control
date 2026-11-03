@@ -27,13 +27,13 @@ afterAll(() => {
     }
 });
 function response(data, status = 200) { return { ok: status < 400, status, json: async () => structuredClone(data) }; }
-function server({ rows = [series], error = null, registerRows = registers, history = [configuration], ambiguous = false, letterTypes = [{ id: 32, scope_id: 9, code: 'LTR', name_en: 'Letter', name_lo: 'ຈົດໝາຍ' }] } = {}) {
+function server({ rows = [series], error = null, registerRows = registers, history = [configuration], ambiguous = false, withoutSeries = false, letterTypes = [{ id: 32, scope_id: 9, code: 'LTR', name_en: 'Letter', name_lo: 'ຈົດໝາຍ' }] } = {}) {
     const state = structuredClone(rows);
     const fetch = vi.fn(async (url, options = {}) => {
         const path = new URL(url, 'http://localhost').pathname;
         const method = options.method ?? 'GET';
         if (path === '/contexts') { return response({ data: [{ ...scope, company: { name_en: 'Example Company', name_lo: 'ບໍລິສັດຕົວຢ່າງ' }, site: { name_en: 'Example Site', name_lo: 'ສະຖານທີ່ຕົວຢ່າງ' } }] }); }
-        if (path.endsWith('/xppl/options')) { return response({ departments: [{ id: 21, site_id: 7, code: 'ADM', name_en: 'Administration', name_lo: 'ບໍລິຫານ' }, { id: 22, site_id: 8, code: 'ENG', name_en: 'Engineering', name_lo: 'ວິສະວະກຳ' }], types: [{ id: 31, scope_id: 8, code: 'SOP', name_en: 'Procedure', name_lo: 'ລະບຽບ' }, ...letterTypes], series: [{ id: 1, site_id: 7, scope_id: 8, register: 'controlled', purpose: 'internal_register' }, { id: 2, site_id: 8, scope_id: 9, register: 'outgoing', purpose: 'official_outgoing' }], history: [] }); }
+        if (path.endsWith('/xppl/options')) { return response({ departments: [{ id: 21, site_id: 7, code: 'ADM', name_en: 'Administration', name_lo: 'ບໍລິຫານ' }, { id: 22, site_id: 8, code: 'ENG', name_en: 'Engineering', name_lo: 'ວິສະວະກຳ' }], types: [{ id: 31, site_id: 7, scope_id: 8, code: 'SOP', name_en: 'Procedure', name_lo: 'ລະບຽບ' }, ...letterTypes], series: withoutSeries ? [] : [{ id: 1, site_id: 7, scope_id: 8, register: 'controlled', purpose: 'internal_register' }, { id: 2, site_id: 8, scope_id: 9, register: 'outgoing', purpose: 'official_outgoing' }], history: [] }); }
         if (/\/xppl\/(review|confirm)$/.test(path)) { if (JSON.parse(options.body).format === 'xppl_letter') { return response({ preview: 'XPPL-ENG-LTR-26-0043', format: 'xppl_letter', next_sequence: 43, historical_maximum: 42, ambiguous, collision_count: 0, token: 'letter-token' }); } return response({ prefix: 'XPPL-ADM-SOP', format: 'xppl_controlled', preview: 'XPPL-ADM-SOP-0043', historical_maximum: 42, next_sequence: 43, ambiguous, collision_count: 0, token: 'review-token' }); }
         if (method === 'GET' && path === endpoint) { return response({ data: state, meta: { total: state.length } }); }
         if (method === 'GET' && path.endsWith('/registers')) { return response({ data: registerRows }); }
@@ -114,7 +114,7 @@ describe('numbering administration', () => {
         expect(fetch.mock.calls.some(([url]) => url.endsWith('/xppl/confirm'))).toBe(false);
         await control(wrapper, en.numberingSetupType).setValue('xppl_controlled');
         expect(wrapper.text()).not.toContain('XPPL-ENG-LTR-26-0043');
-        expect(control(wrapper, en.numberingXpplSeries).element.value).toBe('');
+        expect(wrapper.findAll('label').some(item => item.text() === en.numberingXpplSeries)).toBe(false);
     });
 
     it.each([{ letterTypes: [] }, { letterTypes: [{ id: 32, scope_id: 9, code: 'LTR' }, { id: 33, scope_id: 9, code: 'LTR' }] }])('keeps letter review unavailable without a unique LTR master entry (%j)', async ({ letterTypes }) => {
@@ -133,7 +133,6 @@ describe('numbering administration', () => {
         const wrapper = await render({ ...scope, scope_type: 'company', site_id: null, scope_key: 'company:4', permissions: ['numbering.view'] });
         await expand(wrapper, '[data-numbering-advanced]');
         await control(wrapper, en.numberingSetupType).setValue('xppl_controlled');
-        await control(wrapper, en.numberingXpplSeries).setValue(1);
         await control(wrapper, en.numberingXpplDepartment).setValue(21);
         await control(wrapper, en.numberingXpplType).setValue(31);
         await button(wrapper, en.numberingXpplReview).trigger('click'); await flushPromises();
@@ -196,12 +195,11 @@ describe('numbering administration', () => {
         expect(wrapper.text()).toContain('does not reserve a number');
     });
 
-    it('requires an explicit reviewed baseline confirmation and translates XPPL controls', async () => {
-        const fetch = server();
+    it('requires an explicit reviewed baseline confirmation without a legacy series and translates XPPL controls', async () => {
+        const fetch = server({ withoutSeries: true });
         const wrapper = await render({ ...scope, scope_type: 'company', site_id: null, scope_key: 'company:4' });
         await expand(wrapper, '[data-numbering-advanced]');
         await control(wrapper, 'Numbering type').setValue('xppl_controlled');
-        await control(wrapper, 'Site and register').setValue('1');
         await control(wrapper, 'Originating department').setValue('21');
         await control(wrapper, 'Document type').setValue('31');
         await button(wrapper, 'Check existing numbers and preview').trigger('click');
@@ -213,6 +211,7 @@ describe('numbering administration', () => {
         await confirm.trigger('click');
         await flushPromises();
         const [, options] = fetch.mock.calls.find(([url]) => url.endsWith('/xppl/confirm'));
+        expect(JSON.parse(options.body)).not.toHaveProperty('series_id');
         expect(JSON.parse(options.body)).toMatchObject({ token: 'review-token', next_sequence: 43, confirm: true, format: 'xppl_controlled', department_id: 21, type_id: 31 });
         expect(confirm.element.disabled).toBe(true);
         await wrapper.get('select[aria-label="Language"]').setValue('lo');
@@ -224,7 +223,6 @@ describe('numbering administration', () => {
         const wrapper = await render({ ...scope, scope_type: 'company', site_id: null, scope_key: 'company:4' });
         await expand(wrapper, '[data-numbering-advanced]');
         await control(wrapper, 'Numbering type').setValue('xppl_controlled');
-        await control(wrapper, 'Site and register').setValue('1');
         await control(wrapper, 'Originating department').setValue('21');
         await control(wrapper, 'Document type').setValue('31');
         await button(wrapper, 'Check existing numbers and preview').trigger('click');

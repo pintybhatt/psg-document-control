@@ -49,6 +49,65 @@ class XpplNumberingTest extends TestCase
         $this->signIn($this->actor);
     }
 
+    public function test_official_setup_without_series_is_read_only_until_explicit_baseline_confirmation(): void
+    {
+        $this->setupCompany();
+        $site = $this->site(withSeries: false);
+        $historical = $this->draft($site, 'XPPL-ADM-SOP-0042-R00');
+        $body = $this->scopeData($this->companyScope) + ['department_id' => $site['department_id'], 'type_id' => $site['type_id'], 'format' => 'xppl_controlled'];
+        $report = $this->postJson('/api/v1/numbering-series/xppl/review', $body)->assertOk()->assertJsonPath('preview', 'XPPL-ADM-SOP-0043')->assertJsonPath('historical_maximum', 42)->json();
+        $this->assertDatabaseCount('numbering_series', 0);
+        $this->assertDatabaseCount('xppl_numbering_namespaces', 0);
+        $this->postJson('/api/v1/numbering-series/xppl/confirm', $body + ['token' => 'stale', 'next_sequence' => $report['next_sequence'], 'confirm' => true])->assertUnprocessable();
+        $this->assertDatabaseCount('numbering_series', 0);
+        $this->postJson('/api/v1/numbering-series/xppl/confirm', $body + ['token' => $report['token'], 'next_sequence' => $report['next_sequence']])->assertUnprocessable();
+        $this->assertDatabaseCount('numbering_series', 0);
+        $this->postJson('/api/v1/numbering-series/xppl/confirm', $body + ['token' => $report['token'], 'next_sequence' => $report['next_sequence'], 'confirm' => true])->assertOk();
+        $this->assertDatabaseCount('numbering_series', 1);
+        $this->assertDatabaseCount('numbering_configurations', 1);
+        $this->assertDatabaseHas('xppl_numbering_counters', ['period' => 0, 'baseline' => 42, 'value' => 42]);
+        $this->assertDatabaseCount('issued_document_numbers', 0);
+        $this->assertDatabaseCount('numbering_counters', 0);
+        $draft = $this->draft($site);
+        $this->assertNull($draft->document_code);
+        $record = $this->issue($site, $draft, null);
+        $this->assertSame('XPPL-ADM-SOP-0043', $record->document_code);
+        $this->assertSame($record->id, $this->issue($site, $draft, null)->id);
+        $this->assertDatabaseCount('issued_document_numbers', 1);
+        $this->assertDatabaseCount('xppl_numbering_allocations', 1);
+        $this->assertSame('XPPL-ADM-SOP-0042-R00', $historical->fresh()->document_code);
+        $this->postJson('/api/v1/numbering-series/xppl/review', $body)->assertOk()->assertJsonPath('preview', 'XPPL-ADM-SOP-0044');
+    }
+
+    public function test_direct_official_setup_reuses_existing_series_without_modifying_configuration(): void
+    {
+        $this->setupCompany();
+        $site = $this->site();
+        $before = DB::table('numbering_configurations')->get()->toArray();
+        $body = $this->scopeData($this->companyScope) + ['department_id' => $site['department_id'], 'type_id' => $site['type_id'], 'format' => 'xppl_controlled'];
+        $report = $this->postJson('/api/v1/numbering-series/xppl/review', $body)->assertOk()->json();
+        $this->postJson('/api/v1/numbering-series/xppl/confirm', $body + ['token' => $report['token'], 'next_sequence' => $report['next_sequence'], 'confirm' => true])->assertOk();
+        $this->assertDatabaseCount('numbering_series', 1);
+        $this->assertEquals($before, DB::table('numbering_configurations')->get()->toArray());
+    }
+
+    public function test_direct_official_setup_requires_company_authority_and_company_matching_masters(): void
+    {
+        $this->setupCompany();
+        $site = $this->site(withSeries: false);
+        $body = $this->scopeData($this->companyScope) + ['department_id' => $site['department_id'], 'type_id' => $site['type_id'], 'format' => 'xppl_controlled'];
+        $report = $this->postJson('/api/v1/numbering-series/xppl/review', $body)->assertOk()->json();
+        $reader = User::factory()->create();
+        $this->grant($reader, $this->companyScope, ['numbering.view']);
+        $this->signIn($reader);
+        $this->postJson('/api/v1/numbering-series/xppl/confirm', $body + ['token' => $report['token'], 'next_sequence' => $report['next_sequence'], 'confirm' => true])->assertForbidden();
+        $this->signIn($this->actor);
+        $foreignDepartment = Department::factory()->create();
+        $this->postJson('/api/v1/numbering-series/xppl/review', array_replace($body, ['department_id' => $foreignDepartment->id]))->assertUnprocessable();
+        $this->assertDatabaseCount('numbering_series', 0);
+        $this->assertDatabaseCount('xppl_numbering_namespaces', 0);
+    }
+
     public function test_unnumbered_xppl_draft_registers_from_server_mapping_and_retries_do_not_allocate(): void
     {
         $this->setupCompany();
@@ -94,7 +153,7 @@ class XpplNumberingTest extends TestCase
     }
 
     /** @return array<string, mixed> */
-    private function site(string $department = 'ADM', string $typeCode = 'SOP', bool $outgoing = false): array
+    private function site(string $department = 'ADM', string $typeCode = 'SOP', bool $outgoing = false, bool $withSeries = true): array
     {
         $site = Site::factory()->create(['company_id' => $this->company->id]);
         $scope = AuthorizationScope::context('site', $this->company->id, $site->id)->persist();
@@ -105,14 +164,14 @@ class XpplNumberingTest extends TestCase
         $category = DocumentCategory::factory()->create(['scope_id' => $scope->id, 'code' => 'DOC']);
         $type = DocumentType::factory()->create(['scope_id' => $scope->id, 'category_id' => $category->id, 'code' => $typeCode, 'name_en' => $typeCode, 'name_lo' => $typeCode]);
         $type->registers()->attach($register->id, ['scope_id' => $scope->id]);
-        $series = app(ManageNumbering::class)->save($this->actor, $scope, ['register_id' => $register->id, 'purpose' => $outgoing ? 'official_outgoing' : 'internal_register',
-            'reset_policy' => 'annual', 'prefix' => 'LEGACY/S'.$site->id, 'padding' => 6, 'active' => true]);
+        $series = $withSeries ? app(ManageNumbering::class)->save($this->actor, $scope, ['register_id' => $register->id, 'purpose' => $outgoing ? 'official_outgoing' : 'internal_register',
+            'reset_policy' => 'annual', 'prefix' => 'LEGACY/S'.$site->id, 'padding' => 6, 'active' => true]) : null;
         if ($outgoing) {
             app(ManageNumbering::class)->save($this->actor, $scope, ['register_id' => $register->id, 'purpose' => 'internal_register', 'reset_policy' => 'annual', 'prefix' => 'INTERNAL/S'.$site->id, 'padding' => 6, 'active' => true]);
         }
 
         return ['scope' => new DocumentScope($this->company->id, $site->id, $dept->id), 'type' => $type, 'department' => $dept,
-            'series_id' => $series->id, 'department_id' => $dept->id, 'type_id' => $type->id, 'format' => $outgoing ? 'xppl_letter' : 'xppl_controlled'];
+            'series_id' => $series?->id, 'department_id' => $dept->id, 'type_id' => $type->id, 'format' => $outgoing ? 'xppl_letter' : 'xppl_controlled'];
     }
 
     /** @param array<string, mixed> $site

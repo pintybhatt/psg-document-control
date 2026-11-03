@@ -13,7 +13,6 @@ use App\Models\ControlledRevision;
 use App\Models\Department;
 use App\Models\DocumentCategory;
 use App\Models\DocumentType;
-use App\Models\NumberingSeries;
 use App\Models\OrganizationMembership;
 use App\Models\RegisterConfiguration;
 use App\Models\Site;
@@ -70,23 +69,24 @@ class ControlledDocumentsConcurrencyTest extends TestCase
             $category = DocumentCategory::factory()->create(['scope_id' => $scope->id]);
             $type = DocumentType::factory()->create(['scope_id' => $scope->id, 'category_id' => $category->id] + ($xppl ? ['code' => 'SOP'] : []));
             $type->registers()->attach($register->id, ['scope_id' => $scope->id]);
-            app(ManageNumbering::class)->save($actor, $scope, ['register_id' => $register->id, 'purpose' => 'internal_register', 'reset_policy' => 'annual', 'prefix' => 'CONCURRENT/CD', 'padding' => 6, 'active' => true]);
+            if (! $xppl) {
+                app(ManageNumbering::class)->save($actor, $scope, ['register_id' => $register->id, 'purpose' => 'internal_register', 'reset_policy' => 'annual', 'prefix' => 'CONCURRENT/CD', 'padding' => 6, 'active' => true]);
+            }
             if ($xppl) {
-                $series = NumberingSeries::query()->where('register_id', $register->id)->sole();
-                $data = ['series_id' => $series->id, 'department_id' => $department->id, 'type_id' => $type->id, 'format' => 'xppl_controlled'];
+                $data = ['department_id' => $department->id, 'type_id' => $type->id, 'format' => 'xppl_controlled'];
                 $companyScope = AuthorizationScope::context('company', $site->company_id);
                 $review = app(XpplNumbering::class)->review($actor, $companyScope, $data);
-                $this->namespaceId = app(XpplNumbering::class)->review($actor, $companyScope, $data + ['confirm' => true, 'token' => $review['token'], 'next_sequence' => 1], true)['namespace_id'];
+                app(XpplNumbering::class)->review($actor, $companyScope, $data + ['confirm' => true, 'token' => $review['token'], 'next_sequence' => $review['next_sequence']], true);
             }
             $manager = app(ManageControlledDocuments::class);
             $records = [];
             for ($i = 0; $i < 3; $i++) {
-                $records[] = $manager->save($actor, $unit, ['document_code' => 'CONCURRENT/SOP/'.$i, 'type_id' => $type->id, 'classification' => 'normal', 'title_en' => 'Concurrent controlled procedure',
+                $records[] = $manager->save($actor, $unit, ($xppl ? [] : ['document_code' => 'CONCURRENT/SOP/'.$i]) + ['type_id' => $type->id, 'classification' => 'normal', 'title_en' => 'Concurrent controlled procedure',
                     'owner_id' => $actor->id, 'custodian_id' => $actor->id, 'issue_date' => '2026-10-25', 'effective_date' => '2026-10-26', 'revision_reason' => 'Initial', 'change_description' => 'Initial issue']);
             }
             $results = $this->race($mysql, $database, $actor, $site, $barrier, 'register', [[$records[0], false], [$records[0], false], [$records[1], false], [$records[2], true]]);
-            $this->assertCount(2, array_column($results, 'success'));
-            $this->assertCount(1, array_column($results, 'stale'));
+            $this->assertCount($xppl ? 3 : 2, array_column($results, 'success'));
+            $this->assertCount($xppl ? 0 : 1, array_column($results, 'stale'));
             $this->assertTrue($results[3]['rollback']);
             $this->assertDatabaseCount('issued_document_numbers', 2);
             $this->assertSame(2, (int) DB::table('numbering_counters')->value('value'));

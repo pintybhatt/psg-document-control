@@ -28,7 +28,8 @@ class NumberingController extends Controller
 
         return response()->json([
             'departments' => Department::query()->where('company_id', $scope->company_id)->where('active', true)->orderBy('id')->get(['id', 'site_id', 'code', 'name_en', 'name_lo']),
-            'types' => DocumentType::query()->whereIn('scope_id', $scopes)->where('active', true)->orderBy('id')->get(['id', 'scope_id', 'code', 'name_en', 'name_lo']),
+            'types' => DocumentType::query()->with('scope')->whereIn('scope_id', $scopes)->where('active', true)->orderBy('id')->get()
+                ->map(fn (DocumentType $type): array => $type->only(['id', 'scope_id', 'code', 'name_en', 'name_lo']) + ['site_id' => $type->scope->site_id]),
             'series' => NumberingSeries::query()->whereIn('scope_id', $scopes)->with('scope.site', 'register')->orderBy('id')->get()->map(fn (NumberingSeries $series): array => [
                 'id' => $series->id, 'scope_id' => $series->scope_id, 'site_id' => $series->scope->site_id, 'site_name_en' => $series->scope->site?->name_en, 'site_name_lo' => $series->scope->site?->name_lo, 'register' => $series->register->register_key, 'purpose' => $series->purpose]),
             'mappings' => DB::table('xppl_numbering_mappings as m')->join('xppl_numbering_namespaces as n', 'n.id', '=', 'm.namespace_id')->where('n.company_id', $scope->company_id)
