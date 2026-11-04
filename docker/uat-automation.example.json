@@ -1,0 +1,15 @@
+{
+  "enabled": false,
+  "automatic_migrations": false,
+  "target": "uat",
+  "project": "dcms-uat-xppl",
+  "authorization": "github-oidc",
+  "repository_id": null,
+  "operator_ids": [],
+  "runner_ids": [],
+  "maximum_release_age_hours": 168,
+  "recovery_reference": null,
+  "health_url": "https://REPLACE_WITH_APPROVED_HOST:8444/up",
+  "minimum_free_memory_mib": null,
+  "minimum_free_disk_bytes": null
+}

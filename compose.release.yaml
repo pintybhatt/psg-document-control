@@ -1,0 +1,70 @@
+# Always pass an explicit --project-name and --env-file; never reuse test Compose.
+services:
+  app:
+    image: ${DCMS_IMAGE:?Set an approved immutable image digest}
+    env_file: ${DCMS_APP_ENV_FILE:?Set an absolute protected application env file}
+    environment:
+      APP_ENV: ${DCMS_ENVIRONMENT:?Select uat or production}
+      APP_DEBUG: "false"
+    ports:
+      - "${DCMS_BIND_ADDRESS:-127.0.0.1}:${DCMS_HTTP_PORT:?Select a free ingress port}:8080"
+    volumes:
+      - documents:/var/www/html/storage/app/document-vault
+      - private:/var/www/html/storage/app/private
+      - framework:/var/www/html/storage/framework
+    tmpfs:
+      - /tmp:uid=33,gid=33,mode=1770
+      - /var/www/html/bootstrap/cache:uid=33,gid=33,mode=0750
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [ingress, backend]
+    restart: unless-stopped
+    stop_grace_period: 30s
+    logging: &logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+  db:
+    image: mysql:8.4.13@sha256:76f0358884cb92d9a086d24e5671c38048d3fef40f2588703d73eb55392d6b69
+    environment:
+      MYSQL_DATABASE: ${DCMS_DB_DATABASE:?Set database name}
+      MYSQL_USER: ${DCMS_DB_USERNAME:?Set database user}
+      MYSQL_PASSWORD_FILE: /run/secrets/db_password
+      MYSQL_ROOT_PASSWORD_FILE: /run/secrets/db_root_password
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-storage-engine=InnoDB
+      - --mysqlx=OFF
+    secrets: [db_password, db_root_password]
+    volumes:
+      - database:/var/lib/mysql
+    networks: [backend]
+    healthcheck:
+      test: [CMD-SHELL, 'MYSQL_PWD="$$(cat /run/secrets/db_password)" mysql --user="$$MYSQL_USER" --database="$$MYSQL_DATABASE" --execute="SELECT 1" --silent >/dev/null']
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+    restart: unless-stopped
+    stop_grace_period: 60s
+    logging: *logging
+secrets:
+  db_password:
+    file: ${DCMS_DB_PASSWORD_FILE:?Set protected database password file}
+  db_root_password:
+    file: ${DCMS_DB_ROOT_PASSWORD_FILE:?Set protected root password file}
+volumes:
+  database:
+  documents:
+  private:
+  framework:
+networks:
+  ingress:
+  backend:
+    internal: true

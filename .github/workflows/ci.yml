@@ -1,0 +1,278 @@
+name: DCMS CI
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      retain_image:
+        description: Retain the exact tested image for an approved release candidate
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      source_commit:
+        type: string
+        required: true
+      retain_image:
+        type: boolean
+        default: false
+    outputs:
+      image_artifact:
+        description: Exact tested image archive; available only after full validation and explicit retention
+        value: ${{ jobs.full_release.outputs.image_artifact }}
+permissions:
+  contents: read
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}-${{ inputs.source_commit }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+jobs:
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.source_commit || github.sha }}
+          persist-credentials: false
+      - name: Verify exact source identity
+        env:
+          SOURCE: ${{ inputs.source_commit || github.sha }}
+        run: |
+          [[ "$SOURCE" =~ ^[a-f0-9]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'
+          cache: npm
+      - name: Locked frontend dependencies and security
+        run: |
+          npm ci --ignore-scripts
+          npm audit --audit-level=high
+      - name: Frontend tests
+        run: npm test
+      - name: Production assets
+        run: npm run build
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: frontend-assets
+          path: public/build
+          if-no-files-found: error
+          retention-days: 1
+
+  php:
+    name: PHP / SQLite
+    needs: frontend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.source_commit || github.sha }}
+          persist-credentials: false
+      - uses: shivammathur/setup-php@bf6b4fbd49ca58e4608c9c89fba0b8d90bd2a39f # 2.35.5
+        with:
+          php-version: '8.5'
+          extensions: pdo_sqlite, pdo_mysql, gd, mbstring, zip, dom, xml, xmlreader, xmlwriter
+          coverage: none
+          tools: composer:v2
+      - name: Locate Composer download cache
+        id: composer_cache
+        run: echo "directory=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ${{ steps.composer_cache.outputs.directory }}
+          key: composer-${{ runner.os }}-php85-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-${{ runner.os }}-php85-
+      - name: Locked PHP dependencies and security
+        run: |
+          composer validate --strict
+          composer install --prefer-dist --no-interaction --no-progress
+          composer check-platform-reqs
+          composer audit --locked
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: frontend-assets
+          path: public/build
+      - name: Syntax, formatting and whitespace
+        run: |
+          find app bootstrap config database routes tests -name '*.php' -print0 | xargs -0 -n1 php -l > /dev/null
+          php -l artisan
+          vendor/bin/pint --test
+          git diff --check
+      - name: Complete default backend suite
+        run: |
+          cp .env.example .env
+          php artisan key:generate --no-interaction
+          php artisan test --compact --log-junit "$RUNNER_TEMP/sqlite-results.xml"
+      - name: Smoke safety regressions without daemon access
+        run: python3 -B -m unittest discover -s tests -p 'test_*.py' -v
+      - name: Preserve backend timing evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: sqlite-test-results
+          path: ${{ runner.temp }}/sqlite-results.xml
+          if-no-files-found: warn
+          retention-days: 3
+
+  fast:
+    name: Fast CI
+    needs: [frontend, php]
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    steps:
+      - name: Require every developer check
+        env:
+          FRONTEND: ${{ needs.frontend.result }}
+          PHP: ${{ needs.php.result }}
+        run: test "$FRONTEND" = success && test "$PHP" = success
+
+  mysql:
+    name: MySQL 8.4 (shard ${{ matrix.shard }}/4)
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
+    needs: frontend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.source_commit || github.sha }}
+          persist-credentials: false
+      - uses: shivammathur/setup-php@bf6b4fbd49ca58e4608c9c89fba0b8d90bd2a39f # 2.35.5
+        with:
+          php-version: '8.5'
+          extensions: pdo_mysql, pdo_sqlite, gd, mbstring, zip, dom, xml, xmlreader, xmlwriter
+          coverage: none
+          tools: composer:v2
+      - name: Locate Composer download cache
+        id: composer_cache
+        run: echo "directory=$(composer config cache-files-dir)" >> "$GITHUB_OUTPUT"
+      - uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+        with:
+          path: ${{ steps.composer_cache.outputs.directory }}
+          key: composer-${{ runner.os }}-php85-${{ hashFiles('composer.lock') }}
+          restore-keys: composer-${{ runner.os }}-php85-
+      - name: Locked PHP dependencies
+        run: composer install --prefer-dist --no-interaction --no-progress
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: frontend-assets
+          path: public/build
+      - name: Prepare the fresh runner's isolated MySQL
+        run: |
+          cp .env.example .env
+          php tests/prepare-mysql.php
+          docker compose -f compose.mysql-testing.yaml up -d --wait --wait-timeout 180
+          sh tests/capture-mysql-identity.sh
+      - name: Run isolated MySQL shard
+        run: |
+          python3 tests/mysql-shard.py --shard ${{ matrix.shard }} --total 4 --output "$RUNNER_TEMP/mysql-shard.xml"
+          DCMS_MYSQL_TESTING=1 vendor/bin/phpunit --configuration "$RUNNER_TEMP/mysql-shard.xml" --log-junit "$RUNNER_TEMP/mysql-results.xml"
+      - name: Dispose runner-only MySQL resources
+        if: always()
+        run: docker compose -f compose.mysql-testing.yaml down --volumes
+      - name: Preserve MySQL timing evidence for shard evaluation
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: mysql-test-results-shard-${{ matrix.shard }}
+          path: ${{ runner.temp }}/mysql-results.xml
+          if-no-files-found: warn
+          retention-days: 3
+
+  image:
+    name: Image / smoke
+    if: github.event_name != 'pull_request' || inputs.source_commit != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      DOCKER_BUILD_RECORD_UPLOAD: "false"
+    outputs:
+      image_artifact: ${{ steps.archive.outputs.artifact_name }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.source_commit || github.sha }}
+          persist-credentials: false
+      - name: Verify exact source identity
+        env:
+          SOURCE: ${{ inputs.source_commit || github.sha }}
+        run: |
+          [[ "$SOURCE" =~ ^[a-f0-9]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$SOURCE"
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+      - name: Build production image without publication
+        id: build
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          pull: true
+          provenance: false
+          tags: dcms-ci:validation
+          labels: org.opencontainers.image.source=https://github.com/pintybhatt/psg-document-control
+          build-args: SOURCE_COMMIT=${{ inputs.source_commit || github.sha }}
+          cache-from: type=gha,scope=dcms-release-linux-amd64
+          cache-to: type=gha,scope=dcms-release-linux-amd64,mode=max,ignore-error=true
+      - name: Test that exact image in a disposable stack
+        id: docker_smoke
+        env:
+          IMAGE_ID: ${{ steps.build.outputs.imageid }}
+        run: DCMS_DISPOSABLE_SMOKE=1 DCMS_SMOKE_CLEANUP=1 sh docker/smoke.sh "$IMAGE_ID"
+      - name: Preserve redacted smoke failure evidence
+        if: failure() && steps.docker_smoke.outcome == 'failure'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: smoke-failure-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            /tmp/dcms-smoke-*/summary.json
+            /tmp/dcms-smoke-*/runtime.log
+          if-no-files-found: warn
+          retention-days: 3
+      - name: Retain the tested image only when explicitly requested
+        id: archive
+        if: inputs.retain_image == true
+        env:
+          IMAGE_ID: ${{ steps.build.outputs.imageid }}
+          SOURCE: ${{ inputs.source_commit || github.sha }}
+        run: |
+          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$IMAGE_ID")" = "$SOURCE"
+          mkdir -p "$RUNNER_TEMP/validated-image"
+          docker image save --output "$RUNNER_TEMP/validated-image/image.tar" "$IMAGE_ID"
+          (cd "$RUNNER_TEMP/validated-image" && sha256sum image.tar > image.tar.sha256)
+          printf '%s\n' "$IMAGE_ID" > "$RUNNER_TEMP/validated-image/image-id.txt"
+          printf '%s\n' "$SOURCE" > "$RUNNER_TEMP/validated-image/source-commit.txt"
+          echo "artifact_name=validated-image-$SOURCE" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: inputs.retain_image == true
+        with:
+          name: ${{ steps.archive.outputs.artifact_name }}
+          path: ${{ runner.temp }}/validated-image
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
+
+  full_release:
+    name: Full release validation
+    if: always() && (github.event_name != 'pull_request' || inputs.source_commit != '')
+    needs: [fast, mysql, image]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    outputs:
+      image_artifact: ${{ needs.image.outputs.image_artifact }}
+    steps:
+      - name: Require all release checks on the same source
+        env:
+          FAST: ${{ needs.fast.result }}
+          MYSQL: ${{ needs.mysql.result }}
+          IMAGE: ${{ needs.image.result }}
+        run: test "$FAST" = success && test "$MYSQL" = success && test "$IMAGE" = success

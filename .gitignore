@@ -35,3 +35,8 @@ Thumbs.db
 # Local credentials and secrets
 *.pem
 *.key
+
+# Deployment secrets and evidence remain outside Git.
+/docker/local/
+/release-manifest.json
+/image-reference.txt

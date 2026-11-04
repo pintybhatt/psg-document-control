@@ -1,0 +1,134 @@
+# Publication remains off until separately approved ENABLE_IMAGE_PUBLISHING=true.
+name: Authorized release image
+run-name: DCMS release ${{ inputs.version }} ${{ inputs.source_commit }}
+on:
+  workflow_dispatch:
+    inputs:
+      source_commit:
+        description: Full reviewed source commit on main
+        required: true
+      baseline_commit:
+        description: Full source commit of previously approved release (initial release may use source_commit; inventory remains complete)
+        required: true
+      version:
+        description: Version such as v1.0.0-rc.1
+        required: true
+      approval_reference:
+        description: Owner-approved publication change reference (not deployment authorization)
+        required: true
+      allow_initial_private_package:
+        description: Owner confirmed package does not exist; GHCR creates new packages private
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: release-image
+  cancel-in-progress: false
+jobs:
+  identity:
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'pintybhatt/psg-document-control'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate identity and protected-main ancestry
+        env:
+          SOURCE: ${{ inputs.source_commit }}
+          BASELINE: ${{ inputs.baseline_commit }}
+          VERSION: ${{ inputs.version }}
+          APPROVAL: ${{ inputs.approval_reference }}
+        run: |
+          [[ "$APPROVAL" =~ ^[a-zA-Z0-9][a-zA-Z0-9._/-]{2,127}$ ]]
+          [[ "$SOURCE" =~ ^[a-f0-9]{40}$ && "$BASELINE" =~ ^[a-f0-9]{40}$ ]]
+          [[ "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-rc\.[0-9]+)?$ ]]
+          git merge-base --is-ancestor "$SOURCE" origin/main
+          git merge-base --is-ancestor "$BASELINE" "$SOURCE"
+  ci:
+    needs: identity
+    uses: ./.github/workflows/ci.yml
+    with:
+      source_commit: ${{ inputs.source_commit }}
+      retain_image: true
+  publish:
+    needs: ci
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && github.repository == 'pintybhatt/psg-document-control'
+    environment: release-image
+    permissions:
+      contents: read
+      packages: write
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Require explicit publication authorization
+        env:
+          ENABLED: ${{ vars.ENABLE_IMAGE_PUBLISHING }}
+        run: |
+          if [[ "$ENABLED" != true ]]; then
+            echo '::error::Image publication is disabled: ENABLE_IMAGE_PUBLISHING must be true.'
+            exit 1
+          fi
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.source_commit }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: ${{ needs.ci.outputs.image_artifact }}
+          path: validated-image
+      - name: Publish the exact image already built and smoke tested
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SOURCE: ${{ inputs.source_commit }}
+          VERSION: ${{ inputs.version }}
+          ALLOW_INITIAL: ${{ inputs.allow_initial_private_package }}
+        run: |
+          repository=ghcr.io/pintybhatt/psg-document-control
+          image="$repository:$VERSION-$SOURCE"
+          bootstrap=()
+          if [[ "$ALLOW_INITIAL" == true ]]; then bootstrap+=(--allow-initial-private); fi
+          python3 docker/ghcr-policy.py --new-tag "$VERSION-$SOURCE" "${bootstrap[@]}"
+          (cd validated-image && sha256sum --check image.tar.sha256)
+          docker buildx version > /dev/null
+          test "$(cat validated-image/source-commit.txt)" = "$SOURCE"
+          image_id="$(cat validated-image/image-id.txt)"
+          [[ "$image_id" =~ ^sha256:[a-f0-9]{64}$ ]]
+          docker image load --input validated-image/image.tar
+          test "$(docker image inspect --format '{{.Id}}' "$image_id")" = "$image_id"
+          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.revision"}}' "$image_id")" = "$SOURCE"
+          test "$(docker image inspect --format '{{index .Config.Labels "org.opencontainers.image.source"}}' "$image_id")" = https://github.com/pintybhatt/psg-document-control
+          printf '%s' "$GH_TOKEN" | docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          trap 'docker logout ghcr.io' EXIT
+          docker tag "$image_id" "$image"
+          docker push "$image"
+          python3 docker/ghcr-policy.py
+          # Read this tag's registry manifest, never an arbitrary RepoDigests entry.
+          docker buildx imagetools inspect "$image" --format '{{json .Manifest}}' > registry-manifest.json
+          python3 - <<'PY'
+          import json, re
+          from pathlib import Path
+          digest = json.loads(Path('registry-manifest.json').read_text())['digest']
+          if not re.fullmatch(r'sha256:[a-f0-9]{64}', digest):
+              raise SystemExit('STOP: Invalid registry manifest digest.')
+          Path('image-reference.txt').write_text('ghcr.io/pintybhatt/psg-document-control@'+digest+'\n')
+          PY
+          reference="$(cat image-reference.txt)"
+          docker pull "$reference"
+          test "$(docker image inspect --format '{{.Id}}' "$reference")" = "$image_id"
+      - name: Record digest, source, migration inventory and build identity
+        env:
+          SOURCE: ${{ inputs.source_commit }}
+          BASELINE: ${{ inputs.baseline_commit }}
+          VERSION: ${{ inputs.version }}
+          APPROVAL_REFERENCE: ${{ inputs.approval_reference }}
+        run: |
+          python3 docker/release-manifest.py --image "$(cat image-reference.txt)" --source "$SOURCE" --baseline "$BASELINE" --version "$VERSION" \
+            --tested-image-id "$(cat validated-image/image-id.txt)" > release-manifest.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: release-manifest-${{ inputs.version }}-${{ inputs.source_commit }}
+          path: release-manifest.json
+          if-no-files-found: error
