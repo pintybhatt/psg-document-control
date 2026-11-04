@@ -225,7 +225,7 @@ class Deployment:
             with (destination/filename).open('rb') as source:
                 sums.append(hashlib.file_digest(source, 'sha256').hexdigest()+'  '+filename)
         (destination/'SHA256SUMS').write_text('\n'.join(sums)+'\n')
-        # Existing recovery policy requires encryption/off-host verification before migration.
+        # UAT recovery policy requires verified paired off-host backups before migration.
         # The enrolled root-owned hook must fail unless that policy has been satisfied.
         self.run([str(protected(ROOT/'config/verify-backup')), str(destination)], timeout=600)
         write_json(self.history/'backup.json', {'directory': str(destination), 'verified': True})

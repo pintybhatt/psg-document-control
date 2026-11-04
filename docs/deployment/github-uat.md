@@ -133,7 +133,7 @@ Automated UAT deployment always verifies candidate migration file hashes against
 
 The existing paired recovery policy is now part of each dispatch. Enroll `backups/` (0700), `config/backup.cnf` and `config/migration.env` (root-owned 0600) as described in [uat.md](uat.md). Migration credentials must contain exactly `DB_USERNAME=dcms_uat_migrate` and `DB_PASSWORD`; no connection override or runtime DDL privilege is added. Provision the backup role and trigger/definer privileges independently. After maintenance, the engine stops only `app`, waits for its workers to exit and streams database SQL (including triggers/routines/events), both private file volumes and protected recovery configuration/APP_KEY to a new private backup directory. The enrolled synchronous-queue profile must have no external writers; scheduler/queue/service additions require a new quiescence review. Database container/volumes are never restarted or replaced.
 
-Install a reviewed **root-owned, non-symlink, executable** `/srv/dcms-uat/config/verify-backup` under the same protected parent custody. It receives one argument: the absolute new backup directory. The directory contains `database.sql`, `documents.tar`, `configuration.tar`, and `SHA256SUMS`. The hook must verify checksums/completeness, encrypt and verify the paired off-host copy and recoverable key/configuration, and confirm the approved restore-drill/recovery policy. It must return nonzero on failure; do not install a no-op verifier. All output stays in root-only deployment history. The host's approved encryption/off-host tooling and destination were not supplied, so implementing/enrolling this hook is an activation blocker; no new backup service is introduced. No dump, credential, receipt or secret is uploaded to GitHub artifacts. Backups are retained without automatic deletion; capacity and retention remain operator responsibilities.
+Install a reviewed **root-owned, non-symlink, executable** `/srv/dcms-uat/config/verify-backup` under the same protected parent custody. It receives one argument: the absolute new backup directory. The directory contains `database.sql`, `documents.tar`, `configuration.tar`, and `SHA256SUMS`. For UAT only, the hook may transfer an unencrypted paired off-server copy over pinned SSH, verify checksums/completeness and recoverable configuration, and enforce restore verification. Production encryption policy is unchanged. It must return nonzero on failure; do not install a no-op verifier. All output stays in root-only deployment history. The UAT Metabase receiver below supplies the off-server transport. Enrolling SSH and a real isolated restore verifier remains required; no new backup service is introduced. No dump, credential, receipt or secret is uploaded to GitHub artifacts. Local deployment backups are retained without automatic deletion. The Metabase receiver retains the latest three successfully verified sets in its dedicated managed directory; legacy and failed sets are not automatically deleted.
 
 Only a successful backup verification permits migrations or replacement. New migrations run once via the candidate image with the dedicated migration account, followed by exact schema verification. App recreation rebuilds configuration/routes/views through the existing entry point, retaining APP_KEY, data, uploads and numbering history. Any backup, migration or health error leaves maintenance and the recovery flag; inspect partial DDL and use an approved forward fix or paired recovery. Never automatically roll schema back. The one-time XPPL importer is **not** called and retains its independent source/plan approval and restore-test attestation requirements.
 
@@ -179,3 +179,62 @@ Offline tests verify real OpenSSL RS256 signatures using ephemeral synthetic tes
 Local verification: 149 offline infrastructure regressions and 46 focused PHP tests passed; Pint and whitespace checks passed. Full application/database suites were left to GitHub CI. Branch reconciliation preserves main’s `symfony/mime` 8.1.10 security fix; the merged locked dependency audit passes without weakening CI.
 
 No live server, GitHub setting/secret, runner or variable is changed. Required before separately authorized activation: enforceable protected main and trusted workflow changes; isolated/restricted runner and pinned numeric IDs; existing server policy/helpers installed under root custody; approved SSH pin/key/network access; server HTTPS egress/OpenSSL/Buildx and synchronized UTC clock; authentic current-state enrollment; capacity/NetBox thresholds; maintained tested recovery procedure; and a controlled identity/runtime rehearsal. If any of these controls cannot be established, keep deployment disabled and treat that as a blocker. Production promotion still needs separate implementation and authorization.
+
+
+## UAT unencrypted off-server backup enrollment on Metabase
+
+This is a **UAT-only** alternative to encryption at rest, approved for destination `192.168.0.227`. Database SQL, document/private archives and configuration (including APP_KEY/password files) remain confidential. Transport is encrypted by SSH; files on Metabase are unencrypted and protected by a dedicated account, private directories, host firewall and no web access. Do not reuse these credentials or hooks for Production. Existing GitHub OIDC and backup gates are unchanged. Nothing in this procedure was executed by the implementation task.
+
+Both hosts require Python 3.11+ and OpenSSH client/server support for the documented restrictions. The same reviewed `docker/uat-backup.py` is installed on both hosts. On UAT it is the existing fixed `verify-backup` hook, accepting only `/srv/dcms-uat/backups/gha-RUN-ATTEMPT`. On Metabase it accepts a four-file stream through a forced SSH command, verifies all checksums, the SQL completion marker, private archive readability and required configuration members, then invokes a **mandatory real restore verifier** before recording success. A matching checksum receipt is returned over the same SSH connection. Missing files, transfer errors, wrong receipts, restore errors or timeouts fail deployment closed. Failure leaves private partial evidence for administrator inspection.
+
+### Metabase administrator — initial setup
+
+Run only during an approved host maintenance window. Verify the destination IP and existing services first. Use a dedicated account; do not change Metabase's application/database accounts, web configuration or data. The following assumes a new account and a new managed directory; if either already exists, inspect ownership/content and reconcile manually instead of overwriting it.
+
+```sh
+sudo useradd --system --create-home --home-dir /var/lib/dcms-uat-backup --shell /bin/sh dcms-uat-backup
+sudo passwd -l dcms-uat-backup
+sudo chown root:root /var/lib/dcms-uat-backup
+sudo chmod 0755 /var/lib/dcms-uat-backup
+sudo install -d -o root -g dcms-uat-backup -m 0750 /srv/dcms-uat-backups
+sudo install -d -o dcms-uat-backup -g dcms-uat-backup -m 0700 /srv/dcms-uat-backups/managed-v1
+sudo install -o root -g root -m 0755 /path/to/reviewed/docker/uat-backup.py /usr/local/libexec/dcms-uat-backup
+sudo install -d -o root -g root -m 0755 /etc/ssh/authorized_keys
+```
+
+`/path/to/reviewed` means the approved source bundle with independently verified checksum. Do not create `managed-v1` over existing backups: it must start empty. Keep all legacy directories outside it, untouched. No cleanup runs at installation. After each successful new transfer and restore check, only receiver-created `success-<32 hex characters>` directories with success receipts are eligible for retention; the newest three by completion directory mtime remain. Partial `pending-*` directories and legacy sets remain untouched. Account for their disk growth separately. Keep this path outside all web roots, public file mounts and network shares. Apply a storage quota/capacity alert through existing host administration; disk exhaustion must fail rather than overwrite backups.
+
+Provision a reviewed root-owned executable `/usr/local/libexec/dcms-uat-restore-check` (0755, protected parents) that can run as `dcms-uat-backup`. Its single argument is the private pending backup directory. It must restore this SQL dump onto a **disposable, isolated MySQL 8.4 target**, check restored schema/migration state, triggers/constraints and representative row counts/numbering history; restore/check the paired documents/private archive against restored attachment metadata/hashes; and verify configuration/APP_KEY completeness without printing secrets. It must return zero only after successful restore verification, nonzero otherwise, and finish within 480 seconds. Preserve failed evidence. Never restore into UAT, Production or Metabase's operational database. The transport gives this account no sudo or Docker access. Any restore-target credentials must be dedicated to that isolated target and private to this account.
+
+**The isolated restore target and its existing tooling/credentials have not been supplied. An administrator must implement and review that site-specific verifier before activation. No no-op script, checksum-only replacement or unverified restore attestation is acceptable.** A missing/non-executable verifier fails closed. Encryption is no longer an enrollment blocker for UAT; actual restore verification still is.
+
+### UAT administrator — dedicated transfer identity
+
+Generate a dedicated unattended transfer key under root custody (not the GitHub deployment key):
+
+```sh
+sudo ssh-keygen -t ed25519 -N '' -f /srv/dcms-uat/config/backup-ssh-key
+sudo chmod 0600 /srv/dcms-uat/config/backup-ssh-key
+sudo install -o root -g root -m 0755 /path/to/reviewed/docker/uat-backup.py /srv/dcms-uat/config/verify-backup
+```
+
+Preserve existing root-owned configuration/parents, APP_KEY, backups and OIDC policy. Do not overwrite an existing key. Send **only the public key** to the Metabase administrator through an approved channel. Independently verify Metabase's SSH host-key fingerprint with its administrator and create `/srv/dcms-uat/config/backup-known-hosts` (root-owned 0600) with that verified host key for `192.168.0.227`. `ssh-keyscan` output alone does not establish trust. The hook uses port 22, a fixed destination/account, strict host checking and no agent/password/forwarding fallback.
+
+### Metabase administrator — restrict SSH
+
+Create `/etc/ssh/authorized_keys/dcms-uat-backup` as root-owned 0600 with only that public key, prefixed by `restrict,from="APPROVED_UAT_SOURCE_IP",command="/usr/local/libexec/dcms-uat-backup"`. Replace the source placeholder with the UAT host's actual observed address, not the GitHub runner. Append a dedicated Match block through the host's reviewed SSH configuration process:
+
+```sshconfig
+Match User dcms-uat-backup
+    AuthorizedKeysFile /etc/ssh/authorized_keys/dcms-uat-backup
+    AuthenticationMethods publickey
+    PasswordAuthentication no
+    KbdInteractiveAuthentication no
+    PermitTTY no
+    DisableForwarding yes
+    ForceCommand /usr/local/libexec/dcms-uat-backup
+```
+
+The account needs `/bin/sh` for SSH forced-command execution; password login is locked, and the fixed receiver rejects any original command except `receive-dcms-uat-backup`. No shell, SCP, SFTP or arbitrary command is exposed. Keep the home and SSH configuration root-managed. Validate using `sudo sshd -t` and reload the host's existing SSH service through the administrator's normal process, retaining a recovery session. Allow TCP 22 from the UAT source only using the existing firewall policy. Do not open backup storage to HTTP or alter Metabase listeners.
+
+Before activation, rehearse a paired synthetic backup transfer and real isolated restore, verify the receipt and 0700/0600 permissions, test denied shell/SCP/wrong-key/unpinned-host access, and simulate transfer/checksum/restore failures. Confirm no legacy backups were touched and retention leaves exactly the latest three successful rehearsal sets. Installation/rehearsal require separate authorization; do not trigger a live application deployment to test enrollment. Preserve the existing deployment lock and recovery flags. Production's encrypted backup and explicit approval requirements remain unchanged.
