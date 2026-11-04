@@ -80,6 +80,24 @@ class AccessControl
         abort_unless($this->allows($user, $permission, $scope), 403, 'rbacForbidden');
     }
 
+    /** @return Collection<int, AuthorizationScope> */
+    public function administrationContexts(User $user): Collection
+    {
+        $securitySites = app(ConfidentialityAdministration::class)->contexts($user)->map(fn (DocumentScope $scope): AuthorizationScope => $scope->authorizationScope())->keyBy('scope_key');
+
+        return $this->contexts($user)->keyBy('scope_key')->union($securitySites)->filter(function (AuthorizationScope $scope) use ($user, $securitySites): bool {
+            $permissions = $this->permissions($user, $scope);
+
+            return $securitySites->has($scope->scope_key) || array_intersect(['roles.view', 'assignments.view', 'memberships.view'], $permissions) !== []
+                || ($scope->scope_type !== 'global' && array_intersect(['master-data.view', 'numbering.view'], $permissions) !== []);
+        })->values();
+    }
+
+    public function canAccessAdministration(User $user): bool
+    {
+        return $this->administrationContexts($user)->isNotEmpty();
+    }
+
     /** @return Builder<Role> */
     public function visibleRoles(AuthorizationScope $scope): Builder
     {

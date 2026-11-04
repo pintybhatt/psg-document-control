@@ -187,6 +187,7 @@ class OutgoingCorrespondenceTest extends TestCase
         unset($body['classification']);
         $body['subject'] = 'Must not persist';
         $event = 'eloquent.creating: '.OutgoingRecipient::class;
+        $body['recipients'][0]['organization'] = 'Changed recipient';
         app('events')->listen($event, fn () => false);
         try {
             $this->patchJson($this->url($scope, '/'.$id), $body)->assertInternalServerError();
@@ -226,6 +227,18 @@ class OutgoingCorrespondenceTest extends TestCase
         $this->getJson($this->url($foreign, '/'.$id))->assertNotFound();
         $this->postJson($this->url($foreign), $this->payload($foreign, $type))->assertUnprocessable()->assertJsonValidationErrors('type_id');
         $this->getJson($this->url($foreign, '/lookups'))->assertOk()->assertJsonPath('data.0.id', $foreignType->id);
+    }
+
+    public function test_workflow_lookups_and_draft_validation_exclude_types_not_mapped_to_outgoing(): void
+    {
+        [, $scope, , $type] = $this->fixture();
+        $incoming = RegisterConfiguration::factory()->create(['scope_id' => $scope->id, 'register_key' => 'incoming']);
+        $otherType = DocumentType::factory()->create(['scope_id' => $scope->id, 'category_id' => $type->category_id]);
+        $otherType->registers()->attach($incoming->id, ['scope_id' => $scope->id]);
+
+        $this->getJson($this->url($scope, '/lookups'))->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $type->id);
+        $this->postJson($this->url($scope), $this->payload($scope, $otherType))->assertUnprocessable()->assertJsonPath('errors.type_id.0', 'outgoingInvalidType');
+        $this->assertDatabaseCount('outgoing_correspondences', 0);
     }
 
     public function test_highly_confidential_access_requires_clearance_and_allowlist_while_global_administrator_is_audited(): void

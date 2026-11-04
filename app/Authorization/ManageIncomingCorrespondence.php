@@ -110,12 +110,24 @@ class ManageIncomingCorrespondence
     public function register(User $actor, DocumentScope $scope, string $id): IncomingCorrespondence
     {
         return DB::transaction(function () use ($actor, $scope, $id): IncomingCorrespondence {
+            XpplNumbering::lockCompany($scope->companyId);
             // Acquire the allocator's SQLite writer boundary before any authorization reads.
             if (DB::getDriverName() === 'sqlite') {
                 DB::table('numbering_series')->whereIn('scope_id', AuthorizationScope::query()->where('scope_key', 'site:'.$scope->siteId)->select('id'))->update(['id' => DB::raw('id')]);
             }
             $this->authorizeContext($actor, $scope, 'incoming.register');
             $canonical = $scope->authorizationScope();
+            $engine = app(XpplNumbering::class);
+            $automatic = $engine->policyActive($scope->companyId, 'incoming');
+            if ($automatic) {
+                app(AccessControl::class)->authorize($actor, 'numbering.issue', $canonical);
+                $existing = $this->find($actor, $scope, $id);
+                if ($existing->isFormallyRegistered()) {
+                    return $existing;
+                }
+                $support = app(ManageNumbering::class)->forCorrespondencePolicy($actor, $scope, 'incoming');
+                $engine->initializeInternalPolicy($actor, $scope, $support);
+            }
             $series = NumberingSeries::query()->where('scope_id', $canonical->id)->where('purpose', NumberingPurpose::InternalRegister->value)
                 ->whereHas('register', fn (Builder $query): Builder => $query->where('register_key', 'incoming'))->first();
             if (! $series) {
@@ -144,7 +156,7 @@ class ManageIncomingCorrespondence
                 $this->audit($actor, $record, 'registered', ['status', 'internal_number', 'registered_by', 'registered_at']);
 
                 return $record;
-            });
+            }, $automatic ? ['format' => 'xppl_incoming'] : null);
             DB::table('incoming_registration_links')->insert(['correspondence_id' => $record->id, 'issuance_id' => $issued->id]);
 
             return $record->refresh();
@@ -157,6 +169,7 @@ class ManageIncomingCorrespondence
     private function validate(array $data, bool $creating): array
     {
         $rules = [
+            'document_revision' => ['nullable', 'string', 'max:30'],
             'type_id' => ['required', 'integer'], 'subject' => ['required', 'string', 'max:500'],
             'sender_organization' => ['required', 'string', 'max:255'], 'sender_contact' => ['nullable', 'string', 'max:255'],
             'sender_email' => ['nullable', 'email', 'max:255'], 'sender_phone' => ['nullable', 'string', 'max:64'],

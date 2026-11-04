@@ -7,7 +7,7 @@ import { createLocalization } from '../../resources/js/localization/index.js';
 import en from '../../resources/js/localization/en.js';
 import lo from '../../resources/js/localization/lo.js';
 
-const scope = { key: '7:site', company_id: 4, site_id: 7, department_id: null, permissions: ['incoming.drafts.manage', 'incoming.register', 'numbering.issue'] };
+const scope = { key: '7:12', company_id: 4, site_id: 7, department_id: 12, department: { id: 12, name_en: 'Administration', name_lo: 'ບໍລິຫານ' }, permissions: ['incoming.drafts.manage', 'incoming.register', 'numbering.issue'] };
 const type = { id: 9, name_en: 'Letter', name_lo: 'ຈົດໝາຍ', category: { id: 8, name_en: 'Correspondence', name_lo: 'ເອກະສານ' } };
 const draft = { id: 1, type_id: 9, type, category: type.category, subject: '<script>test</script>', sender_organization: 'Example sender', sender_contact: 'Example contact', external_reference: 'EXT/22', correspondence_date: '2026-10-25', received_date: '2026-10-26', priority: 'normal', classification: 'normal', status: 'draft', internal_number: null };
 const descriptors = Object.getOwnPropertyDescriptors(HTMLDialogElement.prototype);
@@ -25,15 +25,15 @@ afterAll(() => {
     }
 });
 function response(data, status = 200) { return { ok: status < 400, status, json: async () => structuredClone(data) }; }
-function server({ mutationError = null, detailError = null } = {}) {
+function server({ mutationError = null, detailError = null, contexts = [scope], relatedOutgoing = [] } = {}) {
     let record = structuredClone(draft);
     const fetch = vi.fn(async (url, options = {}) => {
         const path = new URL(url, 'http://localhost').pathname;
         const method = options.method ?? 'GET';
-        if (path.endsWith('/contexts')) { return response({ data: [{ ...scope, company: { name_en: 'Example company' }, site: { name_en: 'Example site' } }] }); }
+        if (path.endsWith('/contexts')) { return response({ data: contexts.map(item => ({ ...item, company: { name_en: 'Example company' }, site: { name_en: 'Example site' } })) }); }
         if (path.endsWith('/lookups')) { return response({ data: [type] }); }
         if (method === 'GET' && path === '/incoming') { return response({ data: [record], meta: { total: 1 } }); }
-        if (method === 'GET') { return detailError ? response(detailError.body, detailError.status) : response({ data: record, audits: [{ id: 1, action: 'created', created_at: '2026-10-26', actor_id: 5 }] }); }
+        if (method === 'GET') { return detailError ? response(detailError.body, detailError.status) : response({ data: record, related_outgoing: relatedOutgoing, audits: [{ id: 1, action: 'created', created_at: '2026-10-26', actor_id: 5 }] }); }
         if (mutationError) { return response(mutationError.body, mutationError.status); }
         const body = JSON.parse(options.body);
         if (path.endsWith('/register')) { record = { ...record, status: 'registered', internal_number: 'TEST/IN/2026/000001', registered_by: 5, registered_at: '2026-10-26T00:00:00Z' }; }
@@ -54,6 +54,36 @@ function button(wrapper, text) { const found = wrapper.findAll('button').find(it
 async function openDetail(wrapper) { await button(wrapper, 'Details').trigger('click'); await flushPromises(); }
 
 describe('incoming correspondence', () => {
+    it('shows the authorized outgoing document number and subject in details', async () => {
+        server({ relatedOutgoing: [{ id: 5, official_number: 'XPPL-ADM-LTR-26-0001', internal_number: 'OUT/1', subject: '<script>Reply subject</script>' }] });
+        const wrapper = await render(); await openDetail(wrapper);
+        expect(wrapper.text()).toContain('XPPL-ADM-LTR-26-0001');
+        expect(wrapper.text()).toContain('<script>Reply subject</script>');
+        expect(wrapper.find('script').exists()).toBe(false);
+        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        expect(wrapper.text()).toContain(lo.incomingRelatedOutgoing);
+    });
+
+    it('keeps manual revision optional under Additional Information and preserves it through draft editing', async () => {
+        const fetch = server(); const wrapper = await render();
+        await button(wrapper, en.incomingCreate).trigger('click');
+        const input = wrapper.get('#incoming-document_revision');
+        expect(input.element.value).toBe('');
+        expect(input.attributes('maxlength')).toBe('30');
+        expect(input.attributes('required')).toBeUndefined();
+        expect(input.element.closest('details')).not.toBeNull();
+        await button(wrapper, en.uiCancel).trigger('click');
+        await openDetail(wrapper);
+        await button(wrapper, en.incomingEdit).trigger('click');
+        await wrapper.get('#incoming-document_revision').setValue('Rev A');
+        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        expect(wrapper.text()).toContain(lo['incoming-document_revision']);
+        await wrapper.get('#incoming-draft-form').trigger('submit'); await flushPromises();
+        const mutation = fetch.mock.calls.find(([, options]) => options?.method === 'PATCH');
+        expect(JSON.parse(mutation[1].body).document_revision).toBe('Rev A');
+        expect(wrapper.text()).toContain('Rev A');
+    });
+
     it('filters the register and supplies native report downloads with the selected scope and filters', async () => {
         const fetch = server(); const wrapper = await render();
         await wrapper.get('#incoming-filter-search').setValue('Example');
@@ -73,12 +103,20 @@ describe('incoming correspondence', () => {
         expect(wrapper.text()).toContain(draft.subject); expect(wrapper.find('script').exists()).toBe(false);
         await openDetail(wrapper);
         expect(wrapper.text()).toContain('EXT/22'); expect(wrapper.text()).toContain('Draft created');
-        expect(wrapper.text()).toContain('Correspondence / Letter');
+        expect(wrapper.text()).toContain('Document typeLetter');
+        expect(wrapper.text()).toContain('Document categoryCorrespondence');
     });
     it('creates a draft with CSRF and without a generated number then shows the saved detail', async () => {
         const fetch = server(); const wrapper = await render();
         await button(wrapper, 'Create incoming draft').trigger('click');
+        expect(wrapper.get('#incoming-department').element.value).toBe(scope.key);
+        expect(wrapper.get('#incoming-department option').text()).toBe('Administration');
+        expect(wrapper.findAll('#incoming-department option')).toHaveLength(1);
+        expect(wrapper.get('#incoming-department').attributes('readonly')).toBeUndefined();
+        expect(wrapper.get('#incoming-type option[value="9"]').text()).toBe('Letter');
         await wrapper.get('#incoming-type').setValue('9');
+        expect(wrapper.get('#incoming-category').element.value).toBe('Correspondence');
+        expect(wrapper.get('#incoming-category').attributes('readonly')).toBeDefined();
         await wrapper.get('#incoming-channel').setValue('email');
         await wrapper.get('#incoming-sender_organization').setValue('Example sender');
         await wrapper.get('#incoming-subject').setValue('New subject');
@@ -87,7 +125,7 @@ describe('incoming correspondence', () => {
         await wrapper.get('#incoming-draft-form').trigger('submit'); await flushPromises();
         const call = fetch.mock.calls.find(([, options]) => options.method === 'POST');
         expect(call[1].headers['X-CSRF-TOKEN']).toBe('sample-csrf');
-        expect(JSON.parse(call[1].body)).toMatchObject({ subject: 'New subject', classification: 'normal', site_id: 7 });
+        expect(JSON.parse(call[1].body)).toMatchObject({ subject: 'New subject', classification: 'normal', site_id: 7, department_id: 12 });
         expect(JSON.parse(call[1].body)).not.toHaveProperty('internal_number');
         expect(wrapper.find('#incoming-draft-form').exists()).toBe(false); expect(wrapper.text()).toContain('Draft saved.');
     });
@@ -127,6 +165,7 @@ describe('incoming correspondence', () => {
         server(); const wrapper = await render(); await openDetail(wrapper);
         await wrapper.get('select[aria-label="Language"]').setValue('lo');
         expect(wrapper.text()).toContain('ທະບຽນເອກະສານຂາເຂົ້າ'); expect(wrapper.text()).toContain('ຈົດໝາຍ');
+        expect(wrapper.text()).toContain(lo.incomingReceivingDepartment); expect(wrapper.text()).toContain(lo.documentCategory);
         expect(wrapper.text()).not.toContain('incomingStatus-');
         expect(wrapper.find('table').exists()).toBe(false);
     });
@@ -151,6 +190,56 @@ describe('incoming correspondence', () => {
         server(); const wrapper = mount(IncomingPage, { props: { endpoints: { endpoint: '/incoming', contexts: '/incoming/contexts' }, csrfToken: 'sample-csrf' }, global: { plugins: [createLocalization()] } });
         await flushPromises(); expect(wrapper.find('#incoming-context').exists()).toBe(false);
         expect(wrapper.text()).toContain('Example sender');
+    });
+    it('selects only authorized receiving departments inside a fresh form and clears stale fields on change', async () => {
+        const finance = { ...scope, key: '7:13', department_id: 13, department: { id: 13, name_en: 'Finance', name_lo: 'ການເງິນ' } };
+        const siteWide = { ...scope, key: '7:site', department_id: null, department: null };
+        localStorage.setItem('dcms.workspace.standalone', JSON.stringify({ site: '4:7', unit: scope.key }));
+        const fetch = server({ contexts: [scope, finance, siteWide] });
+        const wrapper = mount(IncomingPage, { props: { endpoints: { endpoint: '/incoming', contexts: '/incoming/contexts' }, csrfToken: 'sample-csrf' }, global: { plugins: [createLocalization()] } });
+        await flushPromises();
+
+        expect(wrapper.get('label[for="incoming-context"]').text()).toBe(en.incomingReceivingDepartment);
+        expect(wrapper.findAll('#incoming-context option').map(option => option.text())).toEqual(['Administration', 'Finance', en.siteWideDepartment]);
+        await button(wrapper, en.incomingCreate).trigger('click');
+        expect(wrapper.find('#incoming-context').exists()).toBe(false);
+        expect(wrapper.findAll('#incoming-department option').map(option => option.text())).toEqual(['Administration', 'Finance', en.siteWideDepartment]);
+        await wrapper.get('#incoming-subject').setValue('Safe entered value');
+        await wrapper.get('#incoming-type').setValue(9);
+        const formElement = wrapper.get('#incoming-draft-form').element;
+        let finishOldLookup;
+        fetch.mockImplementationOnce((url, options) => new Promise(resolve => {
+            finishOldLookup = () => resolve(response({ data: [{ ...type, id: 99 }], people: [] }));
+        }));
+        await wrapper.get('#incoming-department').setValue('7:13'); await flushPromises();
+
+        expect(wrapper.get('#incoming-department').element.value).toBe('7:13');
+        expect(wrapper.get('#incoming-subject').element.value).toBe('Safe entered value');
+        expect(wrapper.get('#incoming-draft-form').element).toBe(formElement);
+        expect(wrapper.get('#incoming-type').element.value).toBe('');
+        expect(wrapper.get('#incoming-draft-form > p[role="status"]').text()).toBe(en.documentDepartmentLoading);
+        expect(wrapper.get('#incoming-draft-form button[type="submit"]').element.disabled).toBe(true);
+        await wrapper.get('#incoming-draft-form').trigger('submit');
+        expect(fetch.mock.calls.some(([, options]) => options.method === 'POST')).toBe(false);
+        expect(fetch.mock.calls.some(([url]) => url.includes('/incoming/lookups?') && url.includes('department_id=13'))).toBe(true);
+
+        await wrapper.get('#incoming-department').setValue('7:site'); await flushPromises();
+        finishOldLookup(); await flushPromises();
+        expect(wrapper.find('#incoming-type option[value="99"]').exists()).toBe(false);
+        expect(wrapper.get('#incoming-draft-form').element).toBe(formElement);
+        expect(wrapper.get('#incoming-draft-form button[type="submit"]').element.disabled).toBe(false);
+        fetch.mockImplementationOnce(async () => response({}, 500));
+        await wrapper.get('#incoming-department').setValue('7:13'); await flushPromises();
+        expect(wrapper.get('#incoming-draft-form').element).toBe(formElement);
+        expect(wrapper.get('[role="alert"]').text()).toContain(en.rbacRequestFailed);
+        expect(wrapper.get('#incoming-draft-form button[type="submit"]').element.disabled).toBe(true);
+        await wrapper.get('#incoming-draft-form').trigger('submit');
+        expect(fetch.mock.calls.some(([, options]) => options.method === 'POST')).toBe(false);
+        expect(wrapper.get('#incoming-department').element.value).toBe('7:13');
+        expect(fetch.mock.calls.some(([url]) => {
+            const requestUrl = new URL(url, 'http://localhost');
+            return requestUrl.pathname === '/incoming/lookups' && requestUrl.searchParams.get('site_id') === '7' && !requestUrl.searchParams.has('department_id');
+        })).toBe(true);
     });
     it('shows request failure separately from a genuine empty register', async () => {
         const fetch = server();

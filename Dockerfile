@@ -34,6 +34,7 @@ COPY bootstrap ./bootstrap
 COPY config ./config
 COPY routes ./routes
 COPY database/migrations ./database/migrations
+COPY database/seeders/xppl-master-data.json ./database/seeders/xppl-master-data.json
 COPY artisan ./artisan
 RUN mkdir -p storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs \
     && composer dump-autoload --no-dev --classmap-authoritative --no-interaction \

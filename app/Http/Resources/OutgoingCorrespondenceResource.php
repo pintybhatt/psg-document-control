@@ -3,6 +3,7 @@
 namespace App\Http\Resources;
 
 use App\Authorization\ManageOutgoingOperations;
+use App\Authorization\XpplNumbering;
 use App\Models\OutgoingRecipient;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -14,12 +15,13 @@ class OutgoingCorrespondenceResource extends JsonResource
         $this->resource->loadMissing(['operation', 'recipients.delivery']);
 
         return [
+            'xppl_namespaces' => $this->registered_at === null ? XpplNumbering::options($this->scope_id, $this->profile->department_id, $this->type_id, 'xppl_letter') : [],
             'id' => $this->id, 'storage_url' => route('api.v1.storage.index', ['type' => 'outgoing', 'record' => $this->id], false), 'company_id' => $this->profile->company_id, 'site_id' => $this->profile->site_id,
             'department_id' => $this->profile->department_id, 'classification' => $this->profile->classification->value,
             'category' => $this->type->category->only(['id', 'name_en', 'name_lo']),
-            'type' => $this->type->only(['id', 'name_en', 'name_lo']), 'type_id' => $this->type_id,
+            'type' => $this->type->only(['id', 'code', 'name_en', 'name_lo']), 'type_id' => $this->type_id,
             'signatory_name' => $this->signatory_name, 'signatory_title' => $this->signatory_title,
-            'subject' => $this->subject, 'description_en' => $this->description_en, 'description_lo' => $this->description_lo,
+            'subject' => $this->subject, 'document_revision' => $this->document_revision, 'description_en' => $this->description_en, 'description_lo' => $this->description_lo,
             'document_date' => $this->document_date->format('Y-m-d'), 'priority' => $this->priority, 'status' => $this->status,
             'internal_number' => $this->internal_number, 'official_number' => $this->official_number,
             'registered_at' => $this->registered_at?->toISOString(), 'registered_by' => $this->registered_by,

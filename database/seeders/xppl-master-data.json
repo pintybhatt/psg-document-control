@@ -1,0 +1,589 @@
+{
+  "status": "PROPOSAL - not approved for insertion",
+  "source": "Product Owner supplied English lists in Phase 10C request; no SOP file required",
+  "proposals_requiring_approval": [
+    "CAT01-CAT39 are proposed application codes, not SOP codes; never renumber existing codes.",
+    "Each type has one proposed primary category and proposed register applicability. Categories may remain without types.",
+    "New name_lo fields contain explicitly marked English DEV text, not verified Lao translations.",
+    "New rows are proposed active. Existing rows must never be modified."
+  ],
+  "company_id": 2,
+  "company_code": "XPPL",
+  "site_id": 2,
+  "site_code": "XPPL",
+  "company": {
+    "code": "XPPL",
+    "name_en": "Xekong Power Plant Co., Ltd.",
+    "name_lo": "Xekong Power Plant Co., Ltd.",
+    "active": true
+  },
+  "site": {
+    "code": "XPPL",
+    "name_en": "Xekong Power Plant Co., Ltd.",
+    "name_lo": "Xekong Power Plant Co., Ltd.",
+    "active": true
+  },
+  "departments": [
+    {
+      "code": "ADM",
+      "name_en": "Administration",
+      "name_lo": "[DEV-UNTRANSLATED] Administration",
+      "active": true
+    },
+    {
+      "code": "HR",
+      "name_en": "Human Resources",
+      "name_lo": "[DEV-UNTRANSLATED] Human Resources",
+      "active": true
+    },
+    {
+      "code": "FIN",
+      "name_en": "Finance",
+      "name_lo": "[DEV-UNTRANSLATED] Finance",
+      "active": true
+    },
+    {
+      "code": "PRO",
+      "name_en": "Procurement",
+      "name_lo": "[DEV-UNTRANSLATED] Procurement",
+      "active": true
+    },
+    {
+      "code": "WH",
+      "name_en": "Warehouse",
+      "name_lo": "[DEV-UNTRANSLATED] Warehouse",
+      "active": true
+    },
+    {
+      "code": "HSE",
+      "name_en": "HSE",
+      "name_lo": "[DEV-UNTRANSLATED] HSE",
+      "active": true
+    },
+    {
+      "code": "MIN",
+      "name_en": "Mining Operation",
+      "name_lo": "[DEV-UNTRANSLATED] Mining Operation",
+      "active": true
+    },
+    {
+      "code": "GEO",
+      "name_en": "Geology",
+      "name_lo": "[DEV-UNTRANSLATED] Geology",
+      "active": true
+    },
+    {
+      "code": "ENG",
+      "name_en": "Engineering",
+      "name_lo": "[DEV-UNTRANSLATED] Engineering",
+      "active": true
+    },
+    {
+      "code": "MTN",
+      "name_en": "Maintenance",
+      "name_lo": "[DEV-UNTRANSLATED] Maintenance",
+      "active": true
+    },
+    {
+      "code": "PRD",
+      "name_en": "Production",
+      "name_lo": "[DEV-UNTRANSLATED] Production",
+      "active": true
+    },
+    {
+      "code": "QC",
+      "name_en": "Quality Control",
+      "name_lo": "[DEV-UNTRANSLATED] Quality Control",
+      "active": true
+    },
+    {
+      "code": "IT",
+      "name_en": "Information Technology",
+      "name_lo": "[DEV-UNTRANSLATED] Information Technology",
+      "active": true
+    },
+    {
+      "code": "MKT",
+      "name_en": "Marketing",
+      "name_lo": "[DEV-UNTRANSLATED] Marketing",
+      "active": true
+    },
+    {
+      "code": "LOG",
+      "name_en": "Logistics",
+      "name_lo": "[DEV-UNTRANSLATED] Logistics",
+      "active": true
+    },
+    {
+      "code": "COM",
+      "name_en": "Community Relations",
+      "name_lo": "[DEV-UNTRANSLATED] Community Relations",
+      "active": true
+    },
+    {
+      "code": "LEG",
+      "name_en": "Legal",
+      "name_lo": "[DEV-UNTRANSLATED] Legal",
+      "active": true
+    },
+    {
+      "code": "SEC",
+      "name_en": "Security",
+      "name_lo": "[DEV-UNTRANSLATED] Security",
+      "active": true
+    },
+    {
+      "code": "MGT",
+      "name_en": "Management",
+      "name_lo": "[DEV-UNTRANSLATED] Management",
+      "active": true
+    }
+  ],
+  "categories": [
+    {
+      "code": "CAT01",
+      "name_en": "Corporate Governance Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Corporate Governance Documents",
+      "active": true
+    },
+    {
+      "code": "CAT02",
+      "name_en": "Legal Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Legal Documents",
+      "active": true
+    },
+    {
+      "code": "CAT03",
+      "name_en": "Policies & Procedures",
+      "name_lo": "[DEV-UNTRANSLATED] Policies & Procedures",
+      "active": true
+    },
+    {
+      "code": "CAT04",
+      "name_en": "Management System Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Management System Documents",
+      "active": true
+    },
+    {
+      "code": "CAT05",
+      "name_en": "Human Resources Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Human Resources Documents",
+      "active": true
+    },
+    {
+      "code": "CAT06",
+      "name_en": "Recruitment Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Recruitment Documents",
+      "active": true
+    },
+    {
+      "code": "CAT07",
+      "name_en": "Performance Management Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Performance Management Documents",
+      "active": true
+    },
+    {
+      "code": "CAT08",
+      "name_en": "Training Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Training Documents",
+      "active": true
+    },
+    {
+      "code": "CAT09",
+      "name_en": "Finance Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Finance Documents",
+      "active": true
+    },
+    {
+      "code": "CAT10",
+      "name_en": "Accounting Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Accounting Documents",
+      "active": true
+    },
+    {
+      "code": "CAT11",
+      "name_en": "Procurement Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Procurement Documents",
+      "active": true
+    },
+    {
+      "code": "CAT12",
+      "name_en": "Contract Management Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Contract Management Documents",
+      "active": true
+    },
+    {
+      "code": "CAT13",
+      "name_en": "Asset Management Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Asset Management Documents",
+      "active": true
+    },
+    {
+      "code": "CAT14",
+      "name_en": "Equipment Management Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Equipment Management Documents",
+      "active": true
+    },
+    {
+      "code": "CAT15",
+      "name_en": "Inventory & Warehouse Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Inventory & Warehouse Documents",
+      "active": true
+    },
+    {
+      "code": "CAT16",
+      "name_en": "Administration Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Administration Documents",
+      "active": true
+    },
+    {
+      "code": "CAT17",
+      "name_en": "Facilities Maintenance Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Facilities Maintenance Documents",
+      "active": true
+    },
+    {
+      "code": "CAT18",
+      "name_en": "Document Control Records",
+      "name_lo": "[DEV-UNTRANSLATED] Document Control Records",
+      "active": true
+    },
+    {
+      "code": "CAT19",
+      "name_en": "Vehicle Management Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Vehicle Management Documents",
+      "active": true
+    },
+    {
+      "code": "CAT20",
+      "name_en": "Correspondence Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Correspondence Documents",
+      "active": true
+    },
+    {
+      "code": "CAT21",
+      "name_en": "Meeting Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Meeting Documents",
+      "active": true
+    },
+    {
+      "code": "CAT22",
+      "name_en": "Project Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Project Documents",
+      "active": true
+    },
+    {
+      "code": "CAT23",
+      "name_en": "Engineering Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Engineering Documents",
+      "active": true
+    },
+    {
+      "code": "CAT24",
+      "name_en": "Construction Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Construction Documents",
+      "active": true
+    },
+    {
+      "code": "CAT25",
+      "name_en": "Mining Operation Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Mining Operation Documents",
+      "active": true
+    },
+    {
+      "code": "CAT26",
+      "name_en": "Geological Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Geological Documents",
+      "active": true
+    },
+    {
+      "code": "CAT27",
+      "name_en": "Survey Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Survey Documents",
+      "active": true
+    },
+    {
+      "code": "CAT28",
+      "name_en": "HSE Documents",
+      "name_lo": "[DEV-UNTRANSLATED] HSE Documents",
+      "active": true
+    },
+    {
+      "code": "CAT29",
+      "name_en": "Emergency Response Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Emergency Response Documents",
+      "active": true
+    },
+    {
+      "code": "CAT30",
+      "name_en": "Environmental Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Environmental Documents",
+      "active": true
+    },
+    {
+      "code": "CAT31",
+      "name_en": "Security Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Security Documents",
+      "active": true
+    },
+    {
+      "code": "CAT32",
+      "name_en": "Medical & Occupational Health Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Medical & Occupational Health Documents",
+      "active": true
+    },
+    {
+      "code": "CAT33",
+      "name_en": "Information Technology Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Information Technology Documents",
+      "active": true
+    },
+    {
+      "code": "CAT34",
+      "name_en": "Communication & Public Relations Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Communication & Public Relations Documents",
+      "active": true
+    },
+    {
+      "code": "CAT35",
+      "name_en": "Compliance Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Compliance Documents",
+      "active": true
+    },
+    {
+      "code": "CAT36",
+      "name_en": "Marketing & Sales Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Marketing & Sales Documents",
+      "active": true
+    },
+    {
+      "code": "CAT37",
+      "name_en": "Logistics Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Logistics Documents",
+      "active": true
+    },
+    {
+      "code": "CAT38",
+      "name_en": "Customs & Export Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Customs & Export Documents",
+      "active": true
+    },
+    {
+      "code": "CAT39",
+      "name_en": "Insurance Documents",
+      "name_lo": "[DEV-UNTRANSLATED] Insurance Documents",
+      "active": true
+    }
+  ],
+  "registers": [
+    {
+      "register_key": "incoming",
+      "active": true
+    },
+    {
+      "register_key": "outgoing",
+      "active": true
+    },
+    {
+      "register_key": "controlled",
+      "active": true
+    }
+  ],
+  "types": [
+    {
+      "code": "POL",
+      "name_en": "Policy",
+      "name_lo": "[DEV-UNTRANSLATED] Policy",
+      "active": true,
+      "category_code": "CAT03",
+      "register_keys": [
+        "controlled"
+      ]
+    },
+    {
+      "code": "SOP",
+      "name_en": "Standard Operating Procedure",
+      "name_lo": "[DEV-UNTRANSLATED] Standard Operating Procedure",
+      "active": true,
+      "category_code": "CAT03",
+      "register_keys": [
+        "controlled"
+      ]
+    },
+    {
+      "code": "WI",
+      "name_en": "Work Instruction",
+      "name_lo": "[DEV-UNTRANSLATED] Work Instruction",
+      "active": true,
+      "category_code": "CAT03",
+      "register_keys": [
+        "controlled"
+      ]
+    },
+    {
+      "code": "SDF",
+      "name_en": "Standard Form",
+      "name_lo": "[DEV-UNTRANSLATED] Standard Form",
+      "active": true,
+      "category_code": "CAT18",
+      "register_keys": [
+        "controlled"
+      ]
+    },
+    {
+      "code": "GDL",
+      "name_en": "Guideline",
+      "name_lo": "[DEV-UNTRANSLATED] Guideline",
+      "active": true,
+      "category_code": "CAT03",
+      "register_keys": [
+        "controlled"
+      ]
+    },
+    {
+      "code": "MAN",
+      "name_en": "Manual",
+      "name_lo": "[DEV-UNTRANSLATED] Manual",
+      "active": true,
+      "category_code": "CAT04",
+      "register_keys": [
+        "controlled"
+      ]
+    },
+    {
+      "code": "SPC",
+      "name_en": "Specification",
+      "name_lo": "[DEV-UNTRANSLATED] Specification",
+      "active": true,
+      "category_code": "CAT23",
+      "register_keys": [
+        "controlled"
+      ]
+    },
+    {
+      "code": "RPT",
+      "name_en": "Report",
+      "name_lo": "[DEV-UNTRANSLATED] Report",
+      "active": true,
+      "category_code": "CAT04",
+      "register_keys": [
+        "incoming",
+        "outgoing",
+        "controlled"
+      ]
+    },
+    {
+      "code": "PLN",
+      "name_en": "Plan",
+      "name_lo": "[DEV-UNTRANSLATED] Plan",
+      "active": true,
+      "category_code": "CAT04",
+      "register_keys": [
+        "controlled"
+      ]
+    },
+    {
+      "code": "AGR",
+      "name_en": "Agreement",
+      "name_lo": "[DEV-UNTRANSLATED] Agreement",
+      "active": true,
+      "category_code": "CAT02",
+      "register_keys": [
+        "controlled"
+      ]
+    },
+    {
+      "code": "CNT",
+      "name_en": "Contract",
+      "name_lo": "[DEV-UNTRANSLATED] Contract",
+      "active": true,
+      "category_code": "CAT12",
+      "register_keys": [
+        "controlled"
+      ]
+    },
+    {
+      "code": "DRW",
+      "name_en": "Drawing",
+      "name_lo": "[DEV-UNTRANSLATED] Drawing",
+      "active": true,
+      "category_code": "CAT23",
+      "register_keys": [
+        "incoming",
+        "outgoing",
+        "controlled"
+      ]
+    },
+    {
+      "code": "LTR",
+      "name_en": "Letter",
+      "name_lo": "[DEV-UNTRANSLATED] Letter",
+      "active": true,
+      "category_code": "CAT20",
+      "register_keys": [
+        "outgoing"
+      ]
+    },
+    {
+      "code": "LIN",
+      "name_en": "Letter Incoming",
+      "name_lo": "[DEV-UNTRANSLATED] Letter Incoming",
+      "active": true,
+      "category_code": "CAT20",
+      "register_keys": [
+        "incoming"
+      ]
+    },
+    {
+      "code": "LOT",
+      "name_en": "Letter Outgoing",
+      "name_lo": "[DEV-UNTRANSLATED] Letter Outgoing",
+      "active": true,
+      "category_code": "CAT20",
+      "register_keys": [
+        "outgoing"
+      ]
+    },
+    {
+      "code": "MEM",
+      "name_en": "Memo",
+      "name_lo": "[DEV-UNTRANSLATED] Memo",
+      "active": true,
+      "category_code": "CAT20",
+      "register_keys": [
+        "incoming",
+        "outgoing"
+      ]
+    },
+    {
+      "code": "MOM",
+      "name_en": "Meeting Minutes",
+      "name_lo": "[DEV-UNTRANSLATED] Meeting Minutes",
+      "active": true,
+      "category_code": "CAT21",
+      "register_keys": [
+        "controlled"
+      ]
+    },
+    {
+      "code": "RSK",
+      "name_en": "Risk Assessment",
+      "name_lo": "[DEV-UNTRANSLATED] Risk Assessment",
+      "active": true,
+      "category_code": "CAT28",
+      "register_keys": [
+        "controlled"
+      ]
+    },
+    {
+      "code": "CHK",
+      "name_en": "Checklist",
+      "name_lo": "[DEV-UNTRANSLATED] Checklist",
+      "active": true,
+      "category_code": "CAT04",
+      "register_keys": [
+        "controlled"
+      ]
+    }
+  ]
+}

@@ -54,9 +54,19 @@ class ControlledDocumentController extends Controller
         $register = RegisterConfiguration::query()->where('scope_id', $scope->authorizationScope()->id)->where('register_key', 'controlled')->first();
         $types = DocumentType::query()->where('scope_id', $scope->authorizationScope()->id)->with('category')->get()
             ->filter(fn (DocumentType $type): bool => $register && $type->effectiveFor($register))
-            ->map(fn (DocumentType $type): array => $type->only(['id', 'name_en', 'name_lo']) + ['category' => $type->category->only(['id', 'name_en', 'name_lo'])])->values();
+            ->map(function (DocumentType $type) use ($manager, $scope): array {
+                $numbering = $manager->automaticNumbering($scope, $type->id);
+                if ($numbering !== null) {
+                    unset($numbering['namespace_id']);
+                }
 
-        return response()->json(['data' => $types, 'people' => $manager->people($scope)->orderBy('name')->orderBy('id')->get(['id', 'name'])]);
+                return $type->only(['id', 'name_en', 'name_lo']) + ['category' => $type->category->only(['id', 'name_en', 'name_lo']), 'automatic_numbering' => $numbering];
+            })->values();
+
+        $people = $manager->people($scope)->orderBy('name')->orderBy('id')->get(['id', 'name']);
+
+        return response()->json(['data' => $types, 'people' => $people, 'automatic_numbering' => $manager->automaticNumbering($scope, 0) !== null,
+            'default_custodian_id' => $people->contains('id', $request->user()->id) ? $request->user()->id : null]);
     }
 
     public function show(ControlledDocumentRequest $request, string $record, ManageControlledDocuments $manager): JsonResponse

@@ -18,8 +18,8 @@ import { useNotifications } from './ui/useNotifications.js';
 import { useLocalization } from '../localization/index.js';
 import { createJsonClient } from '../utilities/jsonClient.js';
 
-const props = defineProps({ scope: { type: Object, required: true }, endpoint: { type: String, required: true }, csrfToken: { type: String, required: true }, incomingEndpoint: { type: String, default: '' } });
-const emit = defineEmits(['unauthorized']);
+const props = defineProps({ scope: { type: Object, required: true }, endpoint: { type: String, required: true }, csrfToken: { type: String, required: true }, incomingEndpoint: { type: String, default: '' }, contextKey: { type: String, default: '' }, departmentOptions: { type: Array, default: () => [] } });
+const emit = defineEmits(['unauthorized', 'update:contextKey']);
 const { t, language } = useLocalization();
 const request = createJsonClient(props.csrfToken);
 const { items, notify, dismiss } = useNotifications();
@@ -36,6 +36,9 @@ const previewPath = ref('/export');
 const previewUrl = computed(() => reportUrl('pdf', previewPath.value));
 const previewFilename = computed(() => previewPath.value === '/export' ? 'outgoing-correspondence.pdf' : 'outgoing-correspondence-' + detail.value?.id + '.pdf');
 const listError = ref('');
+const namespaceId = ref('');
+const automaticOfficial = ref(false);
+const namespaceOptions = computed(() => [{ value: '', label: t('numberingLegacy') }, ...(detail.value?.xppl_namespaces ?? []).map(item => ({ value: item.id, label: item.prefix }))]);
 const detail = ref(null);
 const audits = ref([]);
 const handling = ref(null);
@@ -46,7 +49,10 @@ const editorElement = ref(null);
 const form = reactive({});
 let controller;
 let initialNavigation = true;
-const textFields = ['signatory_name', 'signatory_title', 'document_date', 'subject'];
+let reopenCreateAfterScopeChange = false;
+const contextLoading = ref(false);
+const contextValid = ref(true);
+const textFields = ['document_revision', 'signatory_name', 'signatory_title', 'document_date', 'subject'];
 const recipientFields = ['organization', 'contact_name', 'email', 'phone', 'address'];
 const recipientKinds = computed(() => ['primary', 'copy'].map(value => ({ value, label: t(`outgoingRecipient-${value}`) })));
 function emptyRecipient(kind = 'primary') { return { kind, organization: '', contact_name: '', email: '', phone: '', address: '' }; }
@@ -54,7 +60,27 @@ const descriptionFields = ['description_en', 'description_lo'];
 const canManage = computed(() => props.scope.permissions.includes('outgoing.drafts.manage'));
 const canRegister = computed(() => props.scope.permissions.includes('outgoing.register') && props.scope.permissions.includes('numbering.issue'));
 const label = item => item?.[language.value === 'lo' ? 'name_lo' : 'name_en'] ?? '';
-const typeOptions = computed(() => [{ value: '', label: t('uiChoose') }, ...types.value.map(item => ({ value: item.id, label: `${label(item.category)} / ${label(item)}` }))]);
+const typeLabel = item => automaticOfficial.value && item?.code === 'LTR' ? t('outgoingOfficialLetter') : label(item);
+const eligibleTypes = computed(() => automaticOfficial.value ? types.value.filter(item => item.code === 'LTR') : types.value);
+const needsTypeCorrection = computed(() => automaticOfficial.value && detail.value && !detail.value.registered_at && detail.value.type?.code !== 'LTR');
+const typeOptions = computed(() => [
+    { value: '', label: t('uiChoose') },
+    ...(needsTypeCorrection.value ? [{ value: detail.value.type_id, label: t('outgoingCurrentDraftType'), disabled: true }] : []),
+    ...eligibleTypes.value.map(item => ({ value: item.id, label: typeLabel(item) })),
+]);
+const selectedType = computed(() => types.value.find(item => String(item.id) === String(form.type_id)));
+const selectedCategoryLabel = computed(() => label(selectedType.value?.category ?? (String(form.type_id) === String(detail.value?.type_id) ? detail.value?.category : null)));
+const scopeDepartmentLabel = computed(() => label(props.scope.department) || t('siteWideDepartment'));
+const authorizedDepartmentOptions = computed(() => props.departmentOptions.length ? props.departmentOptions : [{ value: props.scope.key, label: scopeDepartmentLabel.value }]);
+const departmentContext = computed({
+    get: () => props.contextKey || props.scope.key,
+    set: value => {
+        if (value === (props.contextKey || props.scope.key)) { return; }
+        reopenCreateAfterScopeChange = editing.value && !detail.value;
+        if (reopenCreateAfterScopeChange) { contextLoading.value = true; contextValid.value = false; }
+        emit('update:contextKey', value);
+    },
+});
 const classificationOptions = computed(() => ['normal', 'confidential', 'highly_confidential'].map(value => ({ value, label: t(`confidentiality-${value}`) })));
 const priorityOptions = computed(() => ['normal', 'urgent'].map(value => ({ value, label: t(`outgoingPriority-${value}`) })));
 const columns = computed(() => [{ key: 'subject', label: t('outgoing-subject') }, { key: 'document_date', label: t('outgoing-document_date'), type: 'date' }, { key: 'status_label', label: t('uiStatus') }, { key: 'actions', label: t('rbacActions') }]);
@@ -83,12 +109,33 @@ async function load(signal = controller.signal) {
     catch (failure) { if (!signal.aborted) { fail(failure); listError.value = error.value; rows.value = []; total.value = 0; } }
     finally { if (!signal.aborted) { loading.value = false; } }
 }
+async function refreshCreateContext() {
+    controller?.abort(); controller = new AbortController(); const signal = controller.signal;
+    contextLoading.value = true; contextValid.value = false; saving.value = false; error.value = ''; fields.value = {};
+    rows.value = []; total.value = 0; types.value = [];
+    form.type_id = ''; form.classification = 'normal';
+
+    try {
+        const result = await request(url('/lookups'), { signal });
+        if (signal.aborted) { return; }
+        types.value = result.data;
+        automaticOfficial.value = result.automatic_numbering ?? false; namespaceId.value = '';
+        contextValid.value = canManage.value;
+
+    } catch (failure) { if (!signal.aborted) { fail(failure); } }
+    finally { if (!signal.aborted) { contextLoading.value = false; } }
+}
 async function reset() {
+    const reopenCreate = reopenCreateAfterScopeChange;
+    reopenCreateAfterScopeChange = false;
+    if (reopenCreate) { await refreshCreateContext(); return; }
+    contextLoading.value = false;
+    contextValid.value = true;
     controller?.abort(); controller = new AbortController(); const signal = controller.signal;
     previewOpen.value = false; rows.value = []; types.value = []; detail.value = null; audits.value = []; handling.value = null; editing.value = false; confirmation.value = false; error.value = ''; listError.value = ''; fields.value = {}; page.value = 1; total.value = 0; saving.value = false;
     await load(signal);
     if (signal.aborted) { return; }
-    try { const result = await request(url('/lookups'), { signal }); if (!signal.aborted) { types.value = result.data; } }
+    try { const result = await request(url('/lookups'), { signal }); if (!signal.aborted) { types.value = result.data; automaticOfficial.value = result.automatic_numbering ?? false; namespaceId.value = ''; } }
     catch (failure) { if (!signal.aborted) { fail(failure); } }
     if (initialNavigation && !signal.aborted && !error.value) {
         initialNavigation = false;
@@ -110,10 +157,12 @@ async function edit(create = false) {
     const record = detail.value;
     for (const field of [...textFields, ...descriptionFields]) { form[field] = record?.[field] ?? ''; }
     Object.assign(form, { type_id: record?.type_id ?? '', priority: record?.priority ?? 'normal', classification: record?.classification ?? 'normal', recipients: record?.recipients?.map(item => Object.fromEntries(['kind', ...recipientFields].map(field => [field, item[field] ?? '']))) ?? [emptyRecipient()] });
+    if (create && automaticOfficial.value && eligibleTypes.value.length === 1) { form.type_id = eligibleTypes.value[0].id; }
     fields.value = {}; error.value = ''; editing.value = true;
     await nextTick(); editorElement.value?.querySelector('h2')?.focus();
 }
 async function save() {
+    if (contextLoading.value || !contextValid.value) { return; }
     if (saving.value || !canManage.value) { return; }
     const signal = controller.signal;
     const body = { ...scopeData(), ...form };
@@ -126,22 +175,24 @@ async function save() {
     finally { if (!signal.aborted) { saving.value = false; } }
 }
 async function register() {
-    if (saving.value || !detail.value || !canRegister.value) { return; }
+    if (saving.value || !detail.value || !canRegister.value || needsTypeCorrection.value) { return; }
     const signal = controller.signal; const id = detail.value.id;
     saving.value = true; error.value = ''; fields.value = {};
     try {
-        const result = await request(url(`/${id}/register`), { method: 'POST', body: scopeData(), signal });
+        const result = await request(url(`/${id}/register`), { method: 'POST', body: { ...scopeData(), ...(!automaticOfficial.value && namespaceId.value ? { namespace_id: Number(namespaceId.value) } : {}) }, signal });
         if (!signal.aborted) { confirmation.value = false; await show(result.data); notify({ type: 'success', messageKey: 'outgoingRegistered' }); await load(signal); }
     } catch (failure) { if (!signal.aborted) { confirmation.value = false; fail(failure); } }
     finally { if (!signal.aborted) { saving.value = false; } }
 }
 async function operationSaved(record) { await show(record); await load(); }
 watch(() => props.scope.key, reset, { immediate: true });
+watch(() => detail.value?.id, () => { namespaceId.value = ''; });
 onBeforeUnmount(() => controller?.abort());
 </script>
 
 <template>
     <section class="flex flex-col gap-5">
+        <SelectInput v-if="!editing && !detail && authorizedDepartmentOptions.length > 1" id="outgoing-context" v-model="departmentContext" :label="t('outgoingIssuingDepartment')" :options="authorizedDepartmentOptions" :disabled="loading || saving" class="max-w-sm" />
         <div v-if="!editing && !detail" class="flex flex-wrap items-center justify-between gap-3"><h2 id="outgoing-list-title" tabindex="-1" class="text-lg font-semibold">{{ t('outgoingTitle') }}</h2><UiButton v-if="canManage" :disabled="saving || loading" @click="edit(true)">{{ t('outgoingCreate') }}</UiButton></div>
         <UiButton v-if="editing || detail" variant="secondary" class="self-start" :disabled="saving" @click="backToList">{{ t('backToRegister') }} · {{ t('outgoingTitle') }}</UiButton>
         <p v-if="error" role="alert" class="rounded-xl bg-red-50 p-4 text-red-800">{{ t(error) }}</p>
@@ -157,13 +208,17 @@ onBeforeUnmount(() => controller?.abort());
             <p class="text-sm text-slate-600">{{ t('outgoingDraftRules') }}</p>
             <p v-if="scope.permissions.includes('documents.attachments.manage')" class="text-sm text-slate-600">{{ t('storageDraftHelp') }}</p>
             <fieldset :disabled="saving" class="grid gap-4 md:grid-cols-2"><legend class="mb-3 font-semibold">{{ t('documentInformation') }}</legend>
-                <SelectInput id="outgoing-type" v-model="form.type_id" :label="t('outgoingType')" :options="typeOptions" :error-key="fields.type_id?.[0]" required />
+                <SelectInput id="outgoing-department" v-model="departmentContext" :label="t('outgoingIssuingDepartment')" :options="authorizedDepartmentOptions" :helper="t('documentDepartmentHelp')" :disabled="!!detail || saving" required />
+                <SelectInput id="outgoing-type" v-model="form.type_id" :label="t('documentType')" :options="typeOptions" :helper="automaticOfficial ? t('outgoingOfficialTypeHelp') : undefined" :error-key="fields.type_id?.[0]" required />
+                <p v-if="needsTypeCorrection" class="text-sm text-slate-600">{{ t('outgoingCorrectDraftType') }}</p>
+                <p v-if="automaticOfficial && !eligibleTypes.length" role="status" class="text-sm text-slate-600">{{ t('outgoingOfficialTypeMissing') }}</p>
+                <TextInput id="outgoing-category" :model-value="selectedCategoryLabel" :label="t('documentCategory')" :helper="t('documentCategoryHelp')" readonly />
                 <SelectInput v-if="!detail" id="outgoing-classification" v-model="form.classification" :label="t('outgoingClassification')" :options="classificationOptions" :helper="t(`confidentiality-${form.classification}-description`)" :error-key="fields.classification?.[0]" required />
                 <SelectInput id="outgoing-priority" v-model="form.priority" :label="t('outgoingPriority')" :options="priorityOptions" :error-key="fields.priority?.[0]" required />
-                <TextInput v-for="field in textFields.filter(field => !['sender_contact', 'sender_email', 'sender_phone', 'signatory_title'].includes(field))" :id="`outgoing-${field}`" :key="field" v-model="form[field]" :label="t(`outgoing-${field}`)" :class="field === 'subject' ? 'md:col-span-2' : ''" :type="field.endsWith('_date') ? 'date' : 'text'" :error-key="fields[field]?.[0]" :required="['signatory_name', 'subject', 'document_date'].includes(field)" :maxlength="field === 'subject' ? 500 : 255" />
+                <TextInput v-for="field in textFields.filter(field => !['document_revision', 'sender_contact', 'sender_email', 'sender_phone', 'signatory_title'].includes(field))" :id="`outgoing-${field}`" :key="field" v-model="form[field]" :label="t(`outgoing-${field}`)" :class="field === 'subject' ? 'md:col-span-2' : ''" :type="field.endsWith('_date') ? 'date' : 'text'" :helper="field === 'received_date' ? t('correspondenceReceivedDateHelp') : field.endsWith('_date') ? t('correspondenceDocumentDateHelp') : ''" :error-key="fields[field]?.[0]" :required="['signatory_name', 'subject', 'document_date'].includes(field)" :maxlength="field === 'subject' ? 500 : 255" />
             </fieldset>
-            <details :open="['sender_contact', 'sender_email', 'sender_phone', 'signatory_title', ...descriptionFields].some(field => fields[field])" class="rounded-xl border border-slate-200 p-4"><summary class="cursor-pointer text-sm font-semibold">{{ t('additionalInformation') }}</summary><div class="mt-4 grid gap-4 md:grid-cols-2">
-                <TextInput v-for="field in textFields.filter(field => ['sender_contact', 'sender_email', 'sender_phone', 'signatory_title'].includes(field))" :id="`outgoing-${field}`" :key="field" v-model="form[field]" :label="t(`outgoing-${field}`)" :type="field.endsWith('email') ? 'email' : 'text'" :error-key="fields[field]?.[0]" :maxlength="field.endsWith('phone') ? 64 : 255" />
+            <details :open="['document_revision', 'sender_contact', 'sender_email', 'sender_phone', 'signatory_title', ...descriptionFields].some(field => fields[field])" class="rounded-xl border border-slate-200 p-4"><summary class="cursor-pointer text-sm font-semibold">{{ t('additionalInformation') }}</summary><div class="mt-4 grid gap-4 md:grid-cols-2">
+                <TextInput v-for="field in textFields.filter(field => ['document_revision', 'sender_contact', 'sender_email', 'sender_phone', 'signatory_title'].includes(field))" :id="`outgoing-${field}`" :key="field" v-model="form[field]" :label="t(`outgoing-${field}`)" :type="field.endsWith('email') ? 'email' : 'text'" :error-key="fields[field]?.[0]" :maxlength="field === 'document_revision' ? 30 : field.endsWith('phone') ? 64 : 255" />
                 <TextareaInput v-for="field in descriptionFields" :id="`outgoing-${field}`" :key="field" v-model="form[field]" :label="t(`outgoing-${field}`)" :error-key="fields[field]?.[0]" maxlength="5000" />
             </div></details>
             <section class="flex flex-col gap-4" aria-labelledby="outgoing-recipients-title">
@@ -177,10 +232,13 @@ onBeforeUnmount(() => controller?.abort());
                 </fieldset>
                 <div class="flex flex-wrap gap-2"><UiButton variant="secondary" :disabled="saving || form.recipients.length >= 50" @click="form.recipients.push(emptyRecipient())">{{ t('outgoingAddPrimary') }}</UiButton><UiButton variant="secondary" :disabled="saving || form.recipients.length >= 50" @click="form.recipients.push(emptyRecipient('copy'))">{{ t('outgoingAddCopy') }}</UiButton></div>
             </section>
-            <div class="sticky bottom-0 flex flex-wrap gap-3 border-t border-slate-200 bg-white py-3"><UiButton type="submit" :loading="saving">{{ t('outgoingSave') }}</UiButton><UiButton variant="secondary" :disabled="saving" @click="editing = false">{{ t('uiCancel') }}</UiButton></div>
+            <p v-if="contextLoading" role="status" class="text-sm text-slate-600">{{ t('documentDepartmentLoading') }}</p>
+            <div class="sticky bottom-0 flex flex-wrap gap-3 border-t border-slate-200 bg-white py-3"><UiButton type="submit" :loading="saving" :disabled="contextLoading || !contextValid">{{ t('outgoingSave') }}</UiButton><UiButton variant="secondary" :disabled="saving" @click="editing = false">{{ t('uiCancel') }}</UiButton></div>
         </form>
         <section v-else-if="detail" class="flex flex-col gap-5 rounded-2xl border border-slate-200 bg-white p-5" aria-labelledby="outgoing-detail-title">
-            <div class="flex flex-wrap items-center justify-between gap-3"><h2 id="outgoing-detail-title" tabindex="-1" class="text-lg font-semibold">{{ detail.subject }}</h2><div v-if="detail.status === 'draft'" class="flex gap-3"><UiButton v-if="canManage" variant="secondary" :disabled="saving || loading" @click="edit()">{{ t('outgoingEdit') }}</UiButton><UiButton v-if="canRegister" :disabled="saving || loading" @click="confirmation = true">{{ t('outgoingRegister') }}</UiButton></div></div>
+                <SelectInput v-if="!automaticOfficial && !detail.registered_at && detail.xppl_namespaces?.length" v-model="namespaceId" :label="t('numberingSelection')" :options="namespaceOptions" :disabled="saving || loading" />
+            <div class="flex flex-wrap items-center justify-between gap-3"><h2 id="outgoing-detail-title" tabindex="-1" class="text-lg font-semibold">{{ detail.subject }}</h2><div v-if="detail.status === 'draft'" class="flex gap-3"><UiButton v-if="canManage" variant="secondary" :disabled="saving || loading" @click="edit()">{{ t('outgoingEdit') }}</UiButton><UiButton v-if="canRegister" :disabled="saving || loading || needsTypeCorrection" @click="confirmation = true">{{ t('outgoingRegister') }}</UiButton></div></div>
+            <p v-if="needsTypeCorrection" role="status" class="text-sm text-slate-600">{{ t('outgoingCorrectDraftType') }}</p>
             <DocumentApprovalPanel v-if="handling?.approval_execution" :execution="handling.approval_execution" :scope="scope" :csrf-token="csrfToken" kind="outgoing" @failure="fail" @saved="operationSaved(detail)" />
             <CorrespondenceCorrection :key="detail.id" kind="outgoing" :record="detail" :scope="scope" :endpoint="endpoint" :csrf-token="csrfToken" :history="handling?.history ?? []" @failure="fail" @saved="operationSaved" />
             <div><UiButton variant="secondary" :disabled="loading || saving" @click="preview(`/${detail.id}/pdf`)">{{ t('reportPreviewDetailPdf') }}</UiButton></div>
@@ -188,14 +246,16 @@ onBeforeUnmount(() => controller?.abort());
                 <div><dt class="text-sm text-slate-600">{{ t('outgoingNumber') }}</dt><dd class="font-mono">{{ detail.internal_number ?? '—' }}</dd></div>
                 <div><dt class="text-sm text-slate-600">{{ t('outgoingOfficialNumber') }}</dt><dd class="font-mono">{{ detail.official_number ?? '—' }}</dd></div>
                 <div><dt class="text-sm text-slate-600">{{ t('uiStatus') }}</dt><dd>{{ t(`outgoingStatus-${detail.operations?.status ?? detail.status}`) }}</dd></div>
-                <div><dt class="text-sm text-slate-600">{{ t('outgoingType') }}</dt><dd>{{ label(detail.category) }} / {{ label(detail.type) }}</dd></div>
+                <div><dt class="text-sm text-slate-600">{{ t('outgoingIssuingDepartment') }}</dt><dd>{{ scopeDepartmentLabel }}</dd></div>
+                <div><dt class="text-sm text-slate-600">{{ t('documentType') }}</dt><dd>{{ typeLabel(detail.type) }}</dd></div>
+                <div><dt class="text-sm text-slate-600">{{ t('documentCategory') }}</dt><dd>{{ label(detail.category) }}</dd></div>
                 <div><dt class="text-sm text-slate-600">{{ t('outgoingClassification') }}</dt><dd>{{ t(`confidentiality-${detail.classification}`) }}</dd></div>
                 <div><dt class="text-sm text-slate-600">{{ t('outgoingPriority') }}</dt><dd>{{ t(`outgoingPriority-${detail.priority}`) }}</dd></div>
                 <div v-for="field in ['signatory_name', 'document_date']" :key="field"><dt class="text-sm text-slate-600">{{ t(`outgoing-${field}`) }}</dt><dd class="whitespace-pre-wrap wrap-anywhere">{{ field.endsWith('_date') ? formatDate(detail[field]) : detail[field] || '—' }}</dd></div>
             </dl>
             <details class="rounded-xl border border-slate-200 p-4"><summary class="cursor-pointer text-sm font-semibold">{{ t('additionalInformation') }}</summary><dl class="mt-4 grid gap-4 md:grid-cols-2">
                 <div v-for="field in [...textFields.filter(field => !['subject', 'signatory_name', 'document_date'].includes(field)), ...descriptionFields]" :key="field"><dt class="text-sm text-slate-600">{{ t(`outgoing-${field}`) }}</dt><dd class="whitespace-pre-wrap wrap-anywhere">{{ detail[field] || '—' }}</dd></div>
-                <div v-if="detail.registered_at"><dt class="text-sm text-slate-600">{{ t('outgoingRegisteredAt') }}</dt><dd>{{ formatDateTime(detail.registered_at) }}</dd></div>
+                <div v-if="detail.registered_at"><dt class="text-sm text-slate-600">{{ t('outgoingRegisteredAt') }}</dt><dd>{{ formatDateTime(detail.registered_at) }}<p class="text-sm text-slate-600">{{ t('correspondenceRegistrationDateHelp') }}</p></dd></div>
                 <div v-if="detail.registered_by"><dt class="text-sm text-slate-600">{{ t('outgoingRegisteredBy') }}</dt><dd>{{ detail.registered_by }}</dd></div>
             </dl></details>
             <h3 class="font-semibold">{{ t('outgoingRecipients') }}</h3>

@@ -20,6 +20,7 @@ class CorrectCorrespondenceDetails
     public function rules(bool $outgoing): array
     {
         $fields = [
+            'document_revision' => ['sometimes', 'nullable', 'string', 'max:30'],
             'subject' => ['sometimes', 'required', 'string', 'max:500'],
             'description_en' => ['sometimes', 'nullable', 'string', 'max:5000'],
             'description_lo' => ['sometimes', 'nullable', 'string', 'max:5000'],

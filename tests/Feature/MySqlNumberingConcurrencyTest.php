@@ -277,6 +277,7 @@ class MySqlNumberingConcurrencyTest extends TestCase
         $this->assertSame($appliedMigrations, DB::table('migrations')->orderBy('migration')->pluck('migration')->all());
         $this->assertTrue(Schema::hasTable('numbering_series'));
         $this->assertTrue(Schema::hasTable('document_types'));
+        $this->assertModelExists($actor);
         $this->assertDatabaseCount('organization_memberships', 1);
         $this->assertSame($actorAttributes, $actor->refresh()->getAttributes());
         $this->assertSame($membershipAttributes, OrganizationMembership::query()->sole()->getAttributes());

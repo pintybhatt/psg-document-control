@@ -9,14 +9,19 @@ use App\Models\Department;
 use App\Models\DocumentCategory;
 use App\Models\DocumentSecurityAudit;
 use App\Models\DocumentType;
+use App\Models\IncomingOperationAudit;
+use App\Models\NumberingSeries;
 use App\Models\OrganizationMembership;
+use App\Models\OutgoingOperationAudit;
 use App\Models\OutgoingRecipient;
 use App\Models\RegisterConfiguration;
 use App\Models\Role;
 use App\Models\Site;
 use App\Models\User;
 use App\Models\UserRoleAssignment;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\View;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\IOFactory;
@@ -61,6 +66,19 @@ class CorrespondenceExportTest extends TestCase
             : ['signatory_name' => 'Example signatory', 'document_date' => '2026-04-03', 'recipients' => [['kind' => 'primary', 'organization' => 'Example recipient']]];
 
         return $this->postJson('/api/v1/'.$kind.'-correspondence', array_replace($body, $extra))->assertCreated()->json('data.id');
+    }
+
+    private function registerRecord(string $kind, Site $site, int $id): array
+    {
+        $scope = AuthorizationScope::context('site', $site->company_id, $site->id);
+        $register = RegisterConfiguration::query()->where('scope_id', $scope->id)->where('register_key', $kind)->sole();
+        foreach ($kind === 'incoming' ? ['internal_register'] : ['internal_register', 'official_outgoing'] as $purpose) {
+            if (! NumberingSeries::query()->where('register_id', $register->id)->where('purpose', $purpose)->exists()) {
+                app(ManageNumbering::class)->save(auth()->user(), $scope, ['register_id' => $register->id, 'purpose' => $purpose, 'reset_policy' => 'annual', 'prefix' => strtoupper($kind).'/'.strtoupper($purpose), 'padding' => 6, 'active' => true]);
+            }
+        }
+
+        return $this->postJson($this->url($kind, $site, '/'.$id.'/register'))->assertOk()->json('data');
     }
 
     private function reader(Site $site): User
@@ -140,7 +158,7 @@ class CorrespondenceExportTest extends TestCase
             $this->assertSame('C8', $sheet->getFreezePane());
             $this->assertTrue($sheet->getStyle($subjectCell)->getAlignment()->getWrapText());
             $this->assertSame([1, 7], $sheet->getPageSetup()->getRowsToRepeatAtTop());
-            $text = json_encode($sheet->toArray(), JSON_UNESCAPED_UNICODE);
+            $text = json_encode($sheet->toArray(), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
             $this->assertStringNotContainsString('SECRET', $text);
             $this->assertStringNotContainsString('OTHER DEPARTMENT', $text);
             $this->assertStringNotContainsString('Other search term', $text);
@@ -240,6 +258,169 @@ class CorrespondenceExportTest extends TestCase
         $this->assertGreaterThanOrEqual(1, $this->pdfPages($response->getContent()));
         $this->getJson($this->url($kind, $site, '/'.$secret.'/pdf'))->assertNotFound();
         $this->getJson($this->url($kind, Site::factory()->create(), '/'.$visible.'/pdf'))->assertForbidden();
+    }
+
+    #[TestWith(['incoming', null])]
+    #[TestWith(['outgoing', null])]
+    #[TestWith(['incoming', '01'])]
+    #[TestWith(['outgoing', 'Rev A'])]
+    public function test_manual_revision_drafts_are_optional_editable_and_limited(string $kind, ?string $revision): void
+    {
+        [, $site, $type] = $this->fixture($kind);
+        $id = $this->draft($kind, $site, $type, $revision === null ? [] : ['document_revision' => $revision]);
+        $record = $this->getJson($this->url($kind, $site, '/'.$id))->assertOk()->assertJsonPath('data.document_revision', $revision)->json('data');
+        $this->assertDatabaseHas($kind.'_correspondences', ['id' => $id, 'document_revision' => $revision]);
+        $body = array_intersect_key($record, array_flip(['type_id', 'subject', 'sender_organization', 'channel', 'correspondence_date', 'received_date', 'signatory_name', 'document_date', 'recipients', 'priority']));
+        if ($kind === 'outgoing') {
+            $body['recipients'] = [['kind' => 'primary', 'organization' => 'Example recipient']];
+        }
+        $this->patchJson($this->url($kind, $site, '/'.$id), $body + ['document_revision' => 'R00'])->assertOk()->assertJsonPath('data.document_revision', 'R00');
+        $this->patchJson($this->url($kind, $site, '/'.$id), $body + ['document_revision' => str_repeat('A', 31)])->assertUnprocessable()->assertJsonValidationErrors('document_revision');
+        $this->patchJson($this->url($kind, $site, '/'.$id), $body + ['document_revision' => null])->assertOk()->assertJsonPath('data.document_revision', null);
+        $this->assertDatabaseCount('attachment_versions', 0);
+    }
+
+    #[TestWith(['incoming'])]
+    #[TestWith(['outgoing'])]
+    public function test_registered_manual_revision_corrections_are_authorized_audited_and_exported(string $kind): void
+    {
+        [$actor, $site, $type] = $this->fixture($kind);
+        $id = $this->draft($kind, $site, $type);
+        $identity = $this->registerRecord($kind, $site, $id);
+        $url = $this->url($kind, $site, '/'.$id.'/operations');
+        $payload = ['action' => 'correct_details', 'revision' => 0, 'note' => 'Revision transcribed from original', 'details' => ['document_revision' => '01']];
+        $this->postJson($url, array_replace($payload, ['note' => null]))->assertUnprocessable();
+        $this->postJson($url, array_replace($payload, ['details' => ['document_revision' => str_repeat('A', 31)]]))->assertUnprocessable()->assertJsonValidationErrors('details.document_revision');
+        $this->reader($site);
+        $this->postJson($url, $payload)->assertForbidden();
+        $this->signIn($actor);
+        $this->postJson($url, $payload)->assertOk()->assertJsonPath('data.document_revision', '01')->assertJsonPath('data.operations.revision', 1)->assertJsonPath('data.internal_number', $identity['internal_number']);
+        $this->getJson($this->url($kind, $site, '/'.$id))->assertOk()->assertJsonPath('history.0.before.details.document_revision', null)->assertJsonPath('history.0.after.details.document_revision', '01');
+        $this->assertDatabaseHas($kind.'_correspondences', ['id' => $id, 'document_revision' => '01']);
+        $book = $this->workbook($this->getJson($this->url($kind, $site))->assertOk()->getContent());
+        try {
+            $sheet = $book->getActiveSheet();
+            $headers = $sheet->rangeToArray('A7:'.$sheet->getHighestDataColumn().'7')[0];
+            $column = array_search('Revision', $headers, true) + 1;
+            $this->assertSame('01', $sheet->getCell([$column, 8])->getValue());
+            $this->assertSame(DataType::TYPE_STRING, $sheet->getCell([$column, 8])->getDataType());
+            $this->assertContains('Document category', $headers);
+            $this->assertContains('Registration date', $headers);
+            $this->assertContains('Operational status', $headers);
+        } finally {
+            $book->disconnectWorksheets();
+        }
+        $rendered = [];
+        View::composer('correspondence-report', function (\Illuminate\View\View $view) use (&$rendered): void {
+            $rendered = $view->getData();
+        });
+        $this->getJson($this->url($kind, $site, parameters: ['format' => 'pdf']))->assertOk();
+        $this->assertSame('01', $rendered['rows'][0]['document_revision']);
+        $this->postJson($url, array_replace($payload, ['revision' => 1, 'details' => ['document_revision' => null]]))->assertOk()->assertJsonPath('data.document_revision', null);
+        $this->postJson($url, ['action' => 'close', 'revision' => 2, 'note' => 'Handling completed'])->assertOk();
+        $this->postJson($url, array_replace($payload, ['revision' => 3]))->assertUnprocessable();
+        $this->getJson($this->url($kind, $site, '/'.$id.'/pdf'))->assertOk();
+        $status = collect($rendered['sections'][0]['fields'])->firstWhere('label', 'Operational status');
+        $this->assertSame('Closed', $status['value']);
+        $this->assertDatabaseCount('attachment_versions', 0);
+    }
+
+    #[TestWith(['incoming'])]
+    #[TestWith(['outgoing'])]
+    public function test_revision_migration_preserves_existing_registered_records_with_null_revision(string $kind): void
+    {
+        [, $site, $type] = $this->fixture($kind);
+        $id = $this->draft($kind, $site, $type);
+        $this->registerRecord($kind, $site, $id);
+        $migration = require database_path('migrations/2026_11_03_085847_add_document_revision_to_correspondences.php');
+        $migration->down();
+        $before = (array) DB::table($kind.'_correspondences')->where('id', $id)->first();
+        $migration->up();
+        $after = (array) DB::table($kind.'_correspondences')->where('id', $id)->first();
+        $this->assertNull($after['document_revision']);
+        unset($after['document_revision']);
+        $this->assertSame($before, $after);
+        $this->getJson($this->url($kind, $site, '/'.$id))->assertOk()->assertJsonPath('data.document_revision', null);
+    }
+
+    #[TestWith(['incoming'])]
+    #[TestWith(['outgoing'])]
+    public function test_manual_revision_database_guard_rejects_a_correction_audit_for_other_fields(string $kind): void
+    {
+        [$actor, $site, $type] = $this->fixture($kind);
+        $id = $this->draft($kind, $site, $type);
+        $this->registerRecord($kind, $site, $id);
+        $auditClass = $kind === 'incoming' ? IncomingOperationAudit::class : OutgoingOperationAudit::class;
+        $audit = $auditClass::query()->create(['correspondence_id' => $id, 'actor_id' => $actor->id, 'revision' => 1, 'action' => $kind === 'incoming' ? 'updated' : 'note',
+            'note' => 'Correct subject transcription', 'before' => ['details' => ['subject' => 'Visible correspondence']], 'after' => ['details' => ['subject' => 'Changed subject']]]);
+        try {
+            DB::table($kind.'_correspondences')->where('id', $id)->update(['subject' => 'Changed subject', 'document_revision' => 'BYPASS', 'updated_by' => $actor->id, 'updated_at' => $audit->created_at]);
+            $this->fail('An unrelated correction audit allowed a revision change.');
+        } catch (QueryException $exception) {
+            $this->assertStringContainsString('Protected correspondence revision', $exception->getMessage());
+        }
+        $this->assertDatabaseHas($kind.'_correspondences', ['id' => $id, 'document_revision' => null, 'subject' => 'Visible correspondence']);
+    }
+
+    public function test_incoming_details_and_exports_include_only_authorized_outgoing_links_and_existing_physical_references(): void
+    {
+        [$actor, $site, $type] = $this->fixture('incoming');
+        $scope = AuthorizationScope::context('site', $site->company_id, $site->id);
+        $register = RegisterConfiguration::factory()->create(['scope_id' => $scope->id, 'register_key' => 'outgoing']);
+        $type->registers()->attach($register->id, ['scope_id' => $scope->id]);
+        $incoming = $this->draft('incoming', $site, $type);
+        $incomingRecord = $this->registerRecord('incoming', $site, $incoming);
+        $visible = $this->draft('outgoing', $site, $type, ['subject' => 'Visible reply']);
+        $secret = $this->draft('outgoing', $site, $type, ['subject' => 'Secret reply', 'classification' => 'confidential']);
+        $visibleRecord = $this->registerRecord('outgoing', $site, $visible);
+        $secretRecord = $this->registerRecord('outgoing', $site, $secret);
+        foreach ([$visible, $secret] as $outgoing) {
+            $this->postJson($this->url('outgoing', $site, '/'.$outgoing.'/operations'), ['action' => 'link', 'revision' => 0, 'incoming_id' => $incoming])->assertOk();
+        }
+        $storage = '/api/v1/document-storage/incoming/'.$incoming;
+        $parameters = '?'.http_build_query(['company_id' => $site->company_id, 'site_id' => $site->id]);
+        $location = $this->postJson($storage.'/locations'.$parameters, ['room' => 'Archive', 'cabinet' => 'A', 'shelf' => '2', 'box' => '001'])->assertCreated()->json('data.id');
+        $this->postJson($storage.'/copies'.$parameters, ['identifier' => 'ORIGINAL-001', 'kind' => 'original', 'location_id' => $location, 'reason' => 'Physical original retained'])->assertCreated();
+        $this->postJson('/api/v1/document-storage/outgoing/'.$visible.'/copies'.$parameters, ['identifier' => 'OUTGOING-ORIGINAL-001', 'kind' => 'original', 'location_id' => $location, 'reason' => 'Physical outgoing original retained'])->assertCreated();
+        $this->reader($site);
+        $this->getJson($this->url('incoming', $site, '/'.$incoming))->assertOk()->assertJsonCount(1, 'related_outgoing')->assertJsonPath('related_outgoing.0.subject', 'Visible reply')->assertJsonPath('related_outgoing.0.official_number', $visibleRecord['official_number']);
+        $book = $this->workbook($this->getJson($this->url('incoming', $site))->assertOk()->getContent());
+        try {
+            $text = json_encode($book->getActiveSheet()->toArray(), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $this->assertStringContainsString($visibleRecord['official_number'], $text);
+            $this->assertStringContainsString('ORIGINAL-001', $text);
+            $this->assertStringContainsString('Archive → A → 2 → 001', $text);
+            $this->assertStringNotContainsString('Secret reply', $text);
+            $this->assertStringNotContainsString($secretRecord['official_number'], $text);
+        } finally {
+            $book->disconnectWorksheets();
+        }
+        $rendered = [];
+        View::composer('correspondence-report', function (\Illuminate\View\View $view) use (&$rendered): void {
+            $rendered = $view->getData();
+        });
+        $this->getJson($this->url('incoming', $site, parameters: ['format' => 'pdf']))->assertOk();
+        $this->assertSame($visibleRecord['official_number'], $rendered['rows'][0]['related_references']);
+        $this->assertStringContainsString('ORIGINAL-001', $rendered['rows'][0]['physical_references']);
+        $this->getJson($this->url('incoming', $site, '/'.$incoming.'/pdf'))->assertOk();
+        $text = json_encode($rendered['sections'], JSON_UNESCAPED_SLASHES);
+        $this->assertStringContainsString('Visible reply', $text);
+        $this->assertStringNotContainsString('Secret reply', $text);
+        $this->assertStringNotContainsString($secretRecord['official_number'], $text);
+        $this->getJson($this->url('outgoing', $site, parameters: ['format' => 'pdf']))->assertOk();
+        $this->assertCount(1, $rendered['rows']);
+        $this->assertSame($incomingRecord['internal_number'], $rendered['rows'][0]['related_references']);
+        $this->assertStringContainsString('OUTGOING-ORIGINAL-001', $rendered['rows'][0]['physical_references']);
+        $book = $this->workbook($this->getJson($this->url('outgoing', $site))->assertOk()->getContent());
+        try {
+            $text = json_encode($book->getActiveSheet()->toArray(), JSON_UNESCAPED_SLASHES);
+            $this->assertStringContainsString($incomingRecord['internal_number'], $text);
+            $this->assertStringContainsString('OUTGOING-ORIGINAL-001', $text);
+            $this->assertStringNotContainsString($secretRecord['official_number'], $text);
+        } finally {
+            $book->disconnectWorksheets();
+        }
+        $this->assertDatabaseCount('attachment_versions', 0);
     }
 
     public function test_export_requires_session_validates_format_and_returns_a_valid_empty_workbook(): void

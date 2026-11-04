@@ -116,7 +116,7 @@ onBeforeUnmount(() => controller.abort());
             <h3 tabindex="-1" class="font-semibold">{{ t(`outgoingAction-${mode}`) }}</h3>
             <p v-if="mode === 'correct_dispatch'" class="text-sm text-slate-600">{{ t('outgoingUndoDispatchHelp') }}</p>
             <fieldset v-if="['dispatch', 'correct_dispatch'].includes(mode)" :disabled="saving" class="grid gap-4 md:grid-cols-2">
-                <TextInput id="outgoing-dispatch-date" v-model="form.dispatch_date" type="date" :label="t('outgoingField-dispatch_date')" :error-key="fields.dispatch_date?.[0]" :required="mode === 'dispatch'" />
+                <TextInput id="outgoing-dispatch-date" :helper="t('correspondenceDispatchDateHelp')" v-model="form.dispatch_date" type="date" :label="t('outgoingField-dispatch_date')" :error-key="fields.dispatch_date?.[0]" :required="mode === 'dispatch'" />
                 <SelectInput id="outgoing-dispatch-channel" v-model="form.dispatch_channel" :label="t('outgoingField-dispatch_channel')" :options="channels" :error-key="fields.dispatch_channel?.[0]" :required="mode === 'dispatch' || !!form.dispatch_date" />
                 <TextInput id="outgoing-dispatch-reference" v-model="form.dispatch_reference" :label="t('outgoingField-dispatch_reference')" :error-key="fields.dispatch_reference?.[0]" maxlength="255" />
                 <TextareaInput id="outgoing-dispatch-remarks" v-model="form.dispatch_remarks" :label="t('outgoingField-dispatch_remarks')" :error-key="fields.dispatch_remarks?.[0]" maxlength="2000" />

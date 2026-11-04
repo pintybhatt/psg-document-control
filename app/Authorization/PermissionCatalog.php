@@ -75,4 +75,30 @@ class PermissionCatalog
     {
         return self::definitions()[$key]['available'] ?? false;
     }
+
+    /** @return array<string, array{permission_keys: list<string>, scope_types: list<string>}> */
+    public static function recommendations(): array
+    {
+        $viewer = ['organization.access', 'documents.metadata.view', 'documents.content.preview', 'documents.attachments.download', 'reports.view'];
+        $operationalScopes = ['global', 'company', 'site'];
+
+        return [
+            'SECURITY_ADMINISTRATOR' => [
+                'permission_keys' => array_keys(array_filter(self::definitions(), fn (array $definition): bool => $definition['available'])),
+                'scope_types' => ['global'],
+            ],
+            'DOCUMENT_CONTROLLER' => [
+                'permission_keys' => [...$viewer, 'incoming.drafts.manage', 'incoming.register', 'incoming.operations.manage',
+                    'outgoing.drafts.manage', 'outgoing.register', 'outgoing.operations.manage',
+                    'controlled.drafts.manage', 'controlled.register', 'controlled.release', 'controlled.status.manage',
+                    'numbering.issue', 'documents.attachments.manage', 'documents.custody.manage', 'storage-locations.manage', 'documents.audit.view'],
+                'scope_types' => $operationalScopes,
+            ],
+            'DEPARTMENT_USER' => [
+                'permission_keys' => [...$viewer, 'incoming.drafts.manage', 'outgoing.drafts.manage', 'controlled.drafts.manage', 'documents.attachments.manage'],
+                'scope_types' => $operationalScopes,
+            ],
+            'VIEWER' => ['permission_keys' => $viewer, 'scope_types' => $operationalScopes],
+        ];
+    }
 }

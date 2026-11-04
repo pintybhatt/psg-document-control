@@ -119,6 +119,69 @@ describe('confirmation dialogs', () => {
 });
 
 describe('toast notifications', () => {
+    describe('automatic dismissal', () => {
+        beforeEach(() => vi.useFakeTimers());
+        afterEach(() => vi.useRealTimers());
+
+        function notifications() {
+            let controls;
+            const wrapper = render({
+                components: { ToastNotifications },
+                setup() { controls = useNotifications(); return controls; },
+                template: '<ToastNotifications :items="items" @dismiss="dismiss" />',
+            });
+            return { wrapper, ...controls };
+        }
+
+        it('expires success after four seconds and info after five while preserving warnings and errors', async () => {
+            const { wrapper, notify } = notifications();
+            for (const type of ['success', 'info', 'warning', 'error']) { notify({ type, message: type }); }
+            await vi.advanceTimersByTimeAsync(3999);
+            expect(wrapper.findAll('article')).toHaveLength(4);
+            await vi.advanceTimersByTimeAsync(1);
+            expect(wrapper.findAll('article').map(item => item.get('p + p').text())).toEqual(['info', 'warning', 'error']);
+            await vi.advanceTimersByTimeAsync(999);
+            expect(wrapper.findAll('article')).toHaveLength(3);
+            await vi.advanceTimersByTimeAsync(1);
+            expect(wrapper.findAll('article').map(item => item.get('p + p').text())).toEqual(['warning', 'error']);
+            await vi.advanceTimersByTimeAsync(60000);
+            expect(wrapper.findAll('article')).toHaveLength(2);
+            await wrapper.get('article button').trigger('click');
+            expect(wrapper.findAll('article')).toHaveLength(1);
+        });
+
+        it('keeps consecutive notifications on independent deadlines and cancels manually dismissed timers', async () => {
+            const { wrapper, notify } = notifications();
+            notify({ type: 'success', message: 'First' });
+            await vi.advanceTimersByTimeAsync(3000);
+            notify({ type: 'success', message: 'Second' });
+            await vi.advanceTimersByTimeAsync(0);
+            expect(wrapper.findAll('article')).toHaveLength(2);
+            await wrapper.get('article button').trigger('click');
+            expect(vi.getTimerCount()).toBe(1);
+            await vi.advanceTimersByTimeAsync(1000);
+            expect(wrapper.text()).toContain('Second');
+            notify({ type: 'info', message: 'Third' });
+            await vi.advanceTimersByTimeAsync(3000);
+            expect(wrapper.text()).not.toContain('Second');
+            expect(wrapper.text()).toContain('Third');
+            await vi.advanceTimersByTimeAsync(2000);
+            expect(wrapper.findAll('article')).toHaveLength(0);
+            expect(vi.getTimerCount()).toBe(0);
+        });
+
+        it('clears pending timers when its component unmounts', async () => {
+            const { wrapper, notify, items } = notifications();
+            notify({ type: 'success', message: 'Success' });
+            notify({ type: 'info', message: 'Info' });
+            expect(vi.getTimerCount()).toBe(2);
+            wrapper.unmount();
+            expect(vi.getTimerCount()).toBe(0);
+            await vi.advanceTimersByTimeAsync(6000);
+            expect(items.value).toHaveLength(2);
+        });
+    });
+
     it('announces each severity with text and translates existing notifications live', async () => {
         const wrapper = render({
             components: { ToastNotifications, LanguageSwitcher },

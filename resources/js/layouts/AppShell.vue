@@ -1,6 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue';
-import { useWorkspace } from '../utilities/workspace.js';
+import { formatWorkspaceLabel, useWorkspace } from '../utilities/workspace.js';
 import SelectInput from '../components/ui/SelectInput.vue';
 import AppIcon from '../components/AppIcon.vue';
 import LanguageSwitcher from '../components/LanguageSwitcher.vue';
@@ -16,8 +16,7 @@ defineProps({
 
 const { t, language } = useLocalization();
 const workspace = useWorkspace();
-const name = item => item?.[language.value === 'lo' ? 'name_lo' : 'name_en'] ?? '';
-const siteOptions = computed(() => workspace?.sites.value.map(item => ({ value: `${item.company_id}:${item.site_id}`, label: `${name(item.company)} / ${name(item.site)}` })) ?? []);
+const siteOptions = computed(() => workspace?.sites.value.map(item => ({ value: `${item.company_id}:${item.site_id}`, label: formatWorkspaceLabel(item, language.value) })) ?? []);
 const currentSite = computed(() => workspace?.sites.value.find(item => `${item.company_id}:${item.site_id}` === workspace.siteKey.value));
 const navigationOpen = ref(false);
 const menuButton = ref(null);
@@ -54,13 +53,13 @@ function closeNavigation() {
         <div class="lg:pl-64">
             <header class="border-b border-slate-200 bg-white" @keydown.esc="closeNavigation">
                 <div class="flex min-h-20 items-center justify-between gap-3 px-4 sm:px-8">
-                    <div class="flex min-w-0 items-center gap-3">
+                    <div class="flex min-w-0 flex-1 items-center gap-3">
                         <button ref="menuButton" type="button" :aria-label="navigationOpen ? t('closeNavigation') : t('openNavigation')" :aria-expanded="navigationOpen" aria-controls="mobile-navigation" class="rounded-lg border border-slate-200 p-2 lg:hidden" @click="navigationOpen = !navigationOpen">
                             <AppIcon :name="navigationOpen ? 'close' : 'menu'" class="size-5" />
                         </button>
-                        <div class="min-w-0 max-w-sm">
+                        <div class="min-w-0 w-full max-w-sm">
                             <SelectInput v-if="workspace?.sites.value.length > 1" id="workspace-site" v-model="workspace.siteKey.value" :label="t('workspace')" :options="siteOptions" />
-                            <template v-else-if="currentSite"><p class="truncate text-sm font-semibold">{{ name(currentSite.company) }}</p><p class="truncate text-xs text-slate-500">{{ name(currentSite.site) }}</p></template>
+                            <template v-else-if="currentSite"><p class="text-xs font-medium text-slate-500">{{ t('workspace') }}</p><p class="truncate text-sm font-semibold" :title="formatWorkspaceLabel(currentSite, language)">{{ formatWorkspaceLabel(currentSite, language) }}</p></template>
                             <template v-else><p class="truncate text-sm font-semibold">{{ context.company.name }}</p>
                             <p class="truncate text-xs text-slate-500">{{ workspace?.loading.value ? t('uiLoading') : t('noSite') }}</p></template>
                         </div>

@@ -42,7 +42,8 @@ class OutgoingCorrespondenceRequest extends FormRequest
             'format' => ['sometimes', Rule::in(['xlsx', 'pdf'])],
             'search' => ['sometimes', 'nullable', 'string', 'max:200']];
         if ($this->route()->getActionMethod() === 'register') {
-            foreach (array_diff(array_keys($this->all()), ['company_id', 'site_id', 'department_id', 'page', 'per_page']) as $field) {
+            $rules['namespace_id'] = ['sometimes', 'integer', 'min:1'];
+            foreach (array_diff(array_keys($this->all()), ['company_id', 'site_id', 'department_id', 'page', 'per_page', 'namespace_id']) as $field) {
                 $rules[$field] = ['prohibited'];
             }
         }

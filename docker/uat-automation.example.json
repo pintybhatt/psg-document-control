@@ -1,5 +1,6 @@
 {
   "enabled": false,
+  "automatic_migrations": false,
   "target": "uat",
   "project": "dcms-uat-xppl",
   "authorization": "github-oidc",

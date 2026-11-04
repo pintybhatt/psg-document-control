@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fixed UAT app replacement authorized by GitHub OIDC; no bootstrap or migrations."""
+"""Fixed UAT app replacement authorized by GitHub OIDC; paired backup and guarded forward migrations."""
 import datetime
 import fcntl
 import hashlib
@@ -13,6 +13,7 @@ import signal
 import stat
 import subprocess
 import sys
+import tarfile
 import time
 
 
@@ -179,13 +180,65 @@ class Deployment:
                 and labels.get('org.opencontainers.image.source') == 'https://github.com/'+evidence.REPOSITORY,
                 'Running container image/source mismatch.')
 
-    def schema(self, manifest):
+    def schema(self, manifest, baseline=None):
         status = json.loads(self.dc('run', '--rm', '--no-deps', '--pull', 'never', '-T', '--entrypoint', 'php',
                                    'app', '-r', SCHEMA_PROBE))
         require(status['inventory'] == manifest['migration_inventory'], 'Image migration hashes differ from manifest.')
-        expected = [Path(row['path']).stem for row in manifest['migration_inventory']]
+        expected = [Path(row['path']).stem for row in (baseline or manifest)['migration_inventory']]
         if sorted(status['ran']) != sorted(expected):
             raise auth.SchemaReviewRequired('Live schema mismatch; separate controlled migration/recovery required.')
+
+    def stream(self, command, destination):
+        """Stream confidential backups to exclusive private files, never CI output or RAM."""
+        self.sequence += 1
+        with destination.open('xb') as output, (self.history/(str(self.sequence)+'.log')).open('xb') as errors:
+            result = subprocess.run(command, env=self.environment, cwd=ROOT/'release',
+                                    stdout=output, stderr=errors, timeout=600)
+            output.flush()
+            os.fsync(output.fileno())
+        require(result.returncode == 0 and destination.stat().st_size > 0,
+                'Backup failed; preserve partial evidence and maintenance.')
+
+    def backup(self, current, db):
+        destination = protected(ROOT/'backups')/self.history.name
+        destination.mkdir(mode=0o700)
+        client = protected(ROOT/'config/backup.cnf', True)
+        self.run(DOCKER+['cp', str(client), db['Id']+':/tmp/dcms-uat-backup.cnf'])
+        self.stream(self.compose+['exec', '-T', 'db', 'sh', '-eu', '-c',
+                    'chmod 600 /tmp/dcms-uat-backup.cnf; '
+                    'trap "rm -f /tmp/dcms-uat-backup.cnf" EXIT; '
+                    'mysqldump --defaults-extra-file=/tmp/dcms-uat-backup.cnf '
+                    '--host=localhost --single-transaction --no-tablespaces --triggers --routines --events '
+                    '--hex-blob --set-gtid-purged=OFF --databases dcms_uat'], destination/'database.sql')
+        self.stream(DOCKER+['run', '--rm', '--pull', 'never', '--network', 'none', '--read-only',
+                    '--user', '33:33', '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
+                    '--entrypoint', 'tar',
+                    '--mount', 'type=volume,src='+PROJECT+'_documents,dst=/documents,readonly',
+                    '--mount', 'type=volume,src='+PROJECT+'_private,dst=/private,readonly',
+                    current['image'], '-cpf', '-', '-C', '/', 'documents', 'private'], destination/'documents.tar')
+        with tarfile.open(destination/'configuration.tar', 'x') as archive:
+            for filename in ('app.env', 'compose.env', 'db-password', 'db-root-password',
+                             'migration.env', 'backup.cnf', 'current.json', 'automation.json'):
+                archive.add(protected(ROOT/'config'/filename, True), arcname=filename, recursive=False)
+        sums = []
+        for filename in ('database.sql', 'documents.tar', 'configuration.tar'):
+            with (destination/filename).open('rb') as source:
+                sums.append(hashlib.file_digest(source, 'sha256').hexdigest()+'  '+filename)
+        (destination/'SHA256SUMS').write_text('\n'.join(sums)+'\n')
+        # Existing recovery policy requires encryption/off-host verification before migration.
+        # The enrolled root-owned hook must fail unless that policy has been satisfied.
+        self.run([str(protected(ROOT/'config/verify-backup')), str(destination)], timeout=600)
+        write_json(self.history/'backup.json', {'directory': str(destination), 'verified': True})
+
+    def migrate(self):
+        credentials = protected(ROOT/'config/migration.env', True)
+        values = dict(line.split('=', 1) for line in credentials.read_text().splitlines()
+                      if line and not line.startswith('#'))
+        require(set(values) == {'DB_USERNAME', 'DB_PASSWORD'}
+                and values['DB_USERNAME'] == 'dcms_uat_migrate' and values['DB_PASSWORD'],
+                'Separate UAT migration credentials required.')
+        self.dc('run', '--rm', '--no-deps', '--pull', 'never', '-T', '--entrypoint', 'php',
+                '--env-from-file', str(credentials), 'app', 'artisan', 'migrate', '--force', '--no-interaction', timeout=600)
 
     def storage(self, app, db):
         expected = {'/var/www/html/storage/app/document-vault': 'documents',
@@ -334,13 +387,26 @@ def execute(envelope, progress=None):
             deployment.storage(old_app, before)
             deployment.run(DOCKER+['pull', manifest['image']], timeout=600)
             deployment.image(manifest)
-            deployment.schema(manifest)
+            deployment.schema(manifest, baseline=current)
             verify()
             write_json(recovery_flag, {'request_id': request_id, 'previous_image': current['image'], 'image': manifest['image']})
+            for filename in ('backup.cnf', 'migration.env'):
+                protected(ROOT/'config'/filename, True)
+            hook = protected(ROOT/'config/verify-backup')
+            require(hook.is_file() and os.access(hook, os.X_OK), 'Enrolled recovery verification hook required.')
+            protected(ROOT/'backups')
             maintenance = True
             deployment.dc('exec', '-T', 'app', 'php', 'artisan', 'down', '--no-interaction')
             deployment.maintenance_active()
             verify()
+            # The enrolled profile has synchronous queues and no external writers. Stop web
+            # workers before taking the paired database/file snapshot. Never stop the DB.
+            deployment.dc('stop', '--timeout', '30', 'app')
+            deployment.backup(current, before)
+            verify()
+            if manifest['migration_inventory'] != current['migration_inventory']:
+                deployment.migrate()
+                deployment.schema(manifest)
             deployment.replace()
             new_app = deployment.container('app')
             deployment.running_image(new_app, manifest)
@@ -375,11 +441,12 @@ def execute(envelope, progress=None):
             write_json(history/'result.json', {'status': 'deployed', 'image': manifest['image'],
                                               'time': datetime.datetime.now(datetime.timezone.utc).isoformat()})
             recovery_flag.unlink()
-            print('UAT app deployment completed. Formal XPPL acceptance remains separate.')
+            print('UAT deployment completed. Formal XPPL acceptance remains separate.')
         except (Exception, KeyboardInterrupt):
             signal.alarm(0)
             if maintenance and deployment:
                 try:
+                    # The shared marker was established before stopping the old app.
                     deployment.dc('exec', '-T', 'app', 'php', 'artisan', 'down', '--no-interaction')
                 except Exception:
                     pass
@@ -399,7 +466,7 @@ def main():
     try:
         signal.alarm(15)
         envelope = request_from(sys.stdin.buffer)
-        signal.alarm(900)
+        signal.alarm(2400)
         execute(envelope, progress=progress)
         signal.alarm(0)
     except auth.SchemaReviewRequired:

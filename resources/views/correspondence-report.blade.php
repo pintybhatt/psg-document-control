@@ -41,6 +41,22 @@
                 @endforeach
             </table>
         @endforeach
+    @elseif ($compact_register ?? false)
+        @php
+            $primary = array_values(array_intersect(['internal_number', 'official_number', 'subject', 'sender_organization', 'recipients', 'document_date', 'status'], $columns));
+            $additional = array_values(array_diff($columns, $primary));
+        @endphp
+        <table>
+            <thead><tr>@foreach ($primary as $column)<th>{{ $report->label($column, $language) }}</th>@endforeach</tr></thead>
+            <tbody>
+                @forelse ($rows as $row)
+                    <tr style="page-break-after: avoid" class="{{ $loop->even ? 'even' : '' }}">@foreach ($primary as $column)<td>{!! nl2br(e($report->display($row[$column] ?? null))) !!}</td>@endforeach</tr>
+                    <tr class="{{ $loop->even ? 'even' : '' }}"><td colspan="{{ count($primary) }}">@foreach ($additional as $column)@if (($row[$column] ?? null) !== null && ($row[$column] ?? '') !== '')<strong>{{ $report->label($column, $language) }}:</strong> {!! nl2br(e($report->display($row[$column]))) !!} @unless ($loop->last) · @endunless @endif @endforeach</td></tr>
+                @empty
+                    <tr><td colspan="{{ count($primary) }}" class="empty">{{ $report->label('empty', $language) }}</td></tr>
+                @endforelse
+            </tbody>
+        </table>
     @else
         <table>
             <thead><tr>@foreach ($columns as $column)<th width="{{ $widths[$loop->index] ?? ($columns[0] === 'internal_number' && in_array('official_number', $columns) ? [12, 12, 22, 15, 9, 9, 9, 6, 6] : [12, 23, 14, 9, 8, 9, 9, 8, 8])[$loop->index] }}%">{{ $report->label($column, $language) }}</th>@endforeach</tr></thead>

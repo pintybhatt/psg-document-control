@@ -4,6 +4,7 @@ use App\Http\Controllers\AdministrationHistoryController;
 use App\Http\Controllers\ApprovalWorkflowController;
 use App\Http\Controllers\AuthenticatedSessionController;
 use App\Http\Controllers\AuthorizationContextController;
+use App\Http\Controllers\ConfidentialityAdministrationController;
 use App\Http\Controllers\ControlledDocumentController;
 use App\Http\Controllers\CurrentUserController;
 use App\Http\Controllers\DashboardController;
@@ -26,6 +27,7 @@ use App\Http\Controllers\TemplateCatalogueController;
 use App\Http\Controllers\UserManagementController;
 use App\Http\Middleware\AuditDocumentStorageRequests;
 use App\Http\Middleware\EnsureActiveUserSession;
+use App\Http\Middleware\EnsureAdministrationAccess;
 use App\Http\Middleware\EnsureDevelopmentEnvironment;
 use Illuminate\Contracts\View\View;
 use Illuminate\Support\Facades\Route;
@@ -50,8 +52,12 @@ $pages = [
 ];
 
 foreach ($pages as $page => $path) {
+    $middleware = ['auth:web', EnsureActiveUserSession::class];
+    if ($page === 'administration') {
+        $middleware[] = EnsureAdministrationAccess::class;
+    }
     Route::view($path, 'app', ['page' => $page, 'pages' => $pages])
-        ->middleware(['auth:web', EnsureActiveUserSession::class])->name('dcms.'.$page);
+        ->middleware($middleware)->name('dcms.'.$page);
 }
 
 Route::get('/dev/ui-components', function () use ($pages): View {
@@ -62,6 +68,17 @@ Route::middleware(['auth:web', EnsureActiveUserSession::class])->group(function 
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
     Route::get('/api/v1/user', CurrentUserController::class)->name('api.v1.user');
     Route::prefix('api/v1')->name('api.v1.')->group(function (): void {
+        Route::prefix('confidentiality')->name('confidentiality.')->controller(ConfidentialityAdministrationController::class)->group(function (): void {
+            Route::get('contexts', 'contexts')->name('contexts');
+            Route::get('users', 'users')->name('users');
+            Route::get('clearances', 'clearances')->name('clearances.index');
+            Route::post('clearances', 'grantClearance')->name('clearances.store');
+            Route::delete('clearances/{clearance}', 'revokeClearance')->whereNumber('clearance')->name('clearances.revoke');
+            Route::get('documents', 'documents')->name('documents');
+            Route::get('documents/{type}/{document}/grants', 'grants')->whereIn('type', ['incoming', 'outgoing', 'controlled'])->whereNumber('document')->name('grants.index');
+            Route::post('documents/{type}/{document}/grants', 'grantDocument')->whereIn('type', ['incoming', 'outgoing', 'controlled'])->whereNumber('document')->name('grants.store');
+            Route::delete('documents/{type}/{document}/grants/{grant}', 'revokeDocument')->whereIn('type', ['incoming', 'outgoing', 'controlled'])->whereNumber('document')->whereNumber('grant')->name('grants.revoke');
+        });
         Route::get('document-approvals/{type}/{record}', [DocumentApprovalController::class, 'show'])->name('document-approvals.show');
         Route::post('document-approvals/{type}/{record}', [DocumentApprovalController::class, 'store'])->name('document-approvals.store');
         Route::get('approval-workflows', [ApprovalWorkflowController::class, 'index'])->name('approval-workflows.index');
@@ -115,6 +132,10 @@ Route::middleware(['auth:web', EnsureActiveUserSession::class])->group(function 
         Route::post('incoming-correspondence/{record}/register', [IncomingCorrespondenceController::class, 'register'])->name('incoming.register');
         Route::get('incoming-correspondence/{record}/operation-options', [IncomingOperationController::class, 'options'])->name('incoming.operation-options');
         Route::post('incoming-correspondence/{record}/operations', [IncomingOperationController::class, 'operate'])->name('incoming.operations');
+        Route::get('numbering-series/xppl/options', [NumberingController::class, 'xpplOptions'])->name('numbering.xppl-options');
+        Route::post('numbering-series/xppl/activate', [NumberingController::class, 'xpplActivate'])->name('numbering.xppl-activate');
+        Route::post('numbering-series/xppl/review', [NumberingController::class, 'xpplReview'])->name('numbering.xppl-review');
+        Route::post('numbering-series/xppl/confirm', [NumberingController::class, 'xpplConfirm'])->name('numbering.xppl-confirm');
         Route::get('numbering-series', [NumberingController::class, 'index'])->name('numbering.index');
         Route::get('numbering-series/registers', [NumberingController::class, 'registers'])->name('numbering.registers');
         Route::post('numbering-series/preview', [NumberingController::class, 'preview'])->name('numbering.preview');
@@ -130,6 +151,7 @@ Route::middleware(['auth:web', EnsureActiveUserSession::class])->group(function 
         Route::get('membership-users', [MembershipController::class, 'users'])->name('membership-users');
         Route::get('user-management', [UserManagementController::class, 'index'])->name('user-management.index');
         Route::post('user-management', [UserManagementController::class, 'store'])->name('user-management.store');
+        Route::get('user-management/{user}/access', [UserManagementController::class, 'access'])->name('user-management.access');
         Route::patch('user-management/{user}', [UserManagementController::class, 'update'])->name('user-management.update');
         Route::get('memberships', [MembershipController::class, 'index'])->name('memberships.index');
         Route::post('memberships', [MembershipController::class, 'store'])->name('memberships.store');

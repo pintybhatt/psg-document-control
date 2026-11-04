@@ -12,11 +12,22 @@ class NumberingRequest extends RbacScopeRequest
     public function rules(): array
     {
         $rules = parent::rules();
+        if (in_array($this->route()->getActionMethod(), ['xpplOptions', 'xpplReview', 'xpplConfirm', 'xpplActivate'], true)) {
+            return $rules + ['series_id' => ['sometimes', 'integer'], 'department_id' => ['sometimes', 'integer'], 'type_id' => ['sometimes', 'integer'],
+                'register_kind' => ['sometimes', Rule::in(['incoming', 'outgoing'])],
+                'format' => ['sometimes', Rule::in(['xppl_controlled', 'xppl_letter'])], 'token' => ['sometimes', 'string'],
+                'next_sequence' => ['sometimes', 'integer'], 'confirm' => ['sometimes', 'accepted']];
+        }
         foreach (['scope_id', 'created_by', 'issued_by', 'counter', 'value', 'sequence', 'version', 'effective_at', 'number', 'configuration_id', 'period', 'series_id', 'record_type', 'record_key'] as $field) {
             $rules[$field] = ['prohibited'];
         }
         if ($this->isMethod('GET')) {
             return $rules;
+        }
+        if ($this->route()->getName() === 'api.v1.numbering.preview' && $this->has('series_id')) {
+            $rules['series_id'] = ['required', 'integer', 'min:1'];
+
+            return $rules + ['prefix' => ['prohibited'], 'padding' => ['prohibited'], 'year' => ['prohibited']];
         }
         $rules += NumberingFormat::rules();
         if ($this->route()->getName() === 'api.v1.numbering.preview') {

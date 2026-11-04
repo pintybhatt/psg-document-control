@@ -101,7 +101,7 @@ jobs:
       id-token: write
     environment: uat
     runs-on: [self-hosted, Linux, X64, dcms-uat-runner]
-    timeout-minutes: 20
+    timeout-minutes: 45
     steps:
       - name: Recheck UAT deployment switch
         env:
@@ -176,7 +176,7 @@ jobs:
           if [[ "$RESOLVE" == success && ( "$PUBLISH" == success || "$PUBLISH" == skipped ) && "$DEPLOY" == success ]]; then
             echo 'DCMS UAT deployment succeeded.' >> "$GITHUB_STEP_SUMMARY"
           else
-            echo "::error::DCMS UAT deployment did not succeed (resolve=$RESOLVE publication=$PUBLISH deploy=$DEPLOY). See the failed job; schema changes require separate controlled migration/recovery."
+            echo "::error::DCMS UAT deployment did not succeed (resolve=$RESOLVE publication=$PUBLISH deploy=$DEPLOY). See the failed job; inspect backup, migration and recovery history before retrying."
             echo "DCMS UAT deployment failed or was refused. Resolve: $RESOLVE; publication: $PUBLISH; deploy: $DEPLOY. See job diagnostics." >> "$GITHUB_STEP_SUMMARY"
             exit 1
           fi

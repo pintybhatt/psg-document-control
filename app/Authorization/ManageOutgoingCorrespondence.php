@@ -75,6 +75,10 @@ class ManageOutgoingCorrespondence
             if (! $type || ! $type->effectiveFor($register)) {
                 throw ValidationException::withMessages(['type_id' => 'outgoingInvalidType']);
             }
+            if (app(XpplNumbering::class)->policyActive($scope->companyId, 'outgoing') && $type->code !== 'LTR'
+                && (! $record || $record->type_id !== $type->id)) {
+                throw ValidationException::withMessages(['type_id' => 'outgoingOfficialTypeRequired']);
+            }
             if (! $record) {
                 $profile = new DocumentSecurityProfile([
                     'resource_type' => DocumentResourceType::Outgoing, 'resource_key' => (string) Str::uuid(),
@@ -103,28 +107,54 @@ class ManageOutgoingCorrespondence
             if (! $record->save()) {
                 throw new LogicException('Outgoing persistence cancelled.');
             }
-            $record->recipients()->delete();
-            foreach ($recipients as $recipient) {
-                $recipient = new OutgoingRecipient($recipient);
-                $recipient->correspondence_id = $record->id;
-                if (! $recipient->save()) {
-                    throw new LogicException('Recipient persistence cancelled.');
+            $recipientFields = ['kind', 'organization', 'contact_name', 'email', 'phone', 'address'];
+            $currentRecipients = $record->recipients()->orderBy('id')->get()->map(fn (OutgoingRecipient $recipient): array => array_map(fn (string $field): mixed => $recipient->{$field}, $recipientFields))->all();
+            $nextRecipients = array_map(fn (array $recipient): array => array_map(fn (string $field): mixed => $recipient[$field] ?? null, $recipientFields), $recipients);
+            $recipientsChanged = $currentRecipients !== $nextRecipients;
+            if ($recipientsChanged) {
+                $record->recipients()->delete();
+                foreach ($recipients as $recipient) {
+                    $recipient = new OutgoingRecipient($recipient);
+                    $recipient->correspondence_id = $record->id;
+                    if (! $recipient->save()) {
+                        throw new LogicException('Recipient persistence cancelled.');
+                    }
                 }
             }
-            $this->audit($actor, $record, $creating ? 'created' : 'updated', [...$changed, 'recipients']);
+            $this->audit($actor, $record, $creating ? 'created' : 'updated', [...$changed, ...($recipientsChanged ? ['recipients'] : [])]);
 
             return $record->refresh();
         }, 1);
     }
 
-    public function register(User $actor, DocumentScope $scope, string $id): OutgoingCorrespondence
+    public function register(User $actor, DocumentScope $scope, string $id, ?int $namespaceId = null): OutgoingCorrespondence
     {
-        return DB::transaction(function () use ($actor, $scope, $id): OutgoingCorrespondence {
+        return DB::transaction(function () use ($actor, $scope, $id, $namespaceId): OutgoingCorrespondence {
+            XpplNumbering::lockCompany($scope->companyId);
             if (DB::getDriverName() === 'sqlite') {
                 DB::table('numbering_series')->whereIn('scope_id', AuthorizationScope::query()->where('scope_key', 'site:'.$scope->siteId)->select('id'))->update(['id' => DB::raw('id')]);
             }
             $this->authorizeContext($actor, $scope, 'outgoing.register');
             $canonical = $scope->authorizationScope();
+            $engine = app(XpplNumbering::class);
+            $automatic = $engine->policyActive($scope->companyId, 'outgoing');
+            if ($automatic) {
+                app(AccessControl::class)->authorize($actor, 'numbering.issue', $canonical);
+                if ($namespaceId !== null) {
+                    throw ValidationException::withMessages(['namespace_id' => 'numberingXpplConflict']);
+                }
+                $draft = $this->find($actor, $scope, $id);
+                if ($draft->isFormallyRegistered()) {
+                    return $draft;
+                }
+                if ($scope->departmentId === null || $draft->type->code !== 'LTR') {
+                    throw ValidationException::withMessages(['outgoing' => 'outgoingXpplOriginRequired']);
+                }
+                $support = app(ManageNumbering::class)->forCorrespondencePolicy($actor, $scope, 'outgoing');
+                $officialSupport = app(ManageNumbering::class)->forCorrespondencePolicy($actor, $scope, 'outgoing', NumberingPurpose::OfficialOutgoing);
+                $engine->initializeInternalPolicy($actor, $scope, $support);
+                $namespaceId = $engine->initializeLetterPolicy($actor, $scope, $draft->type_id, $officialSupport);
+            }
             $series = NumberingSeries::query()->where('scope_id', $canonical->id)
                 ->whereHas('register', fn (Builder $query): Builder => $query->where('register_key', 'outgoing'))->get()->keyBy(fn (NumberingSeries $series): string => $series->purpose->value);
             $internal = $series->get(NumberingPurpose::InternalRegister->value);
@@ -132,10 +162,15 @@ class ManageOutgoingCorrespondence
             if (! $internal || ! $official || $internal->register_id !== $official->register_id) {
                 throw ValidationException::withMessages(['outgoing' => 'outgoingNumberingUnavailable']);
             }
+            $xppl = null;
+            if ($namespaceId !== null) {
+                $draft = $this->find($actor, $scope, $id);
+                $xppl = ['namespace_id' => $namespaceId, 'department_id' => $draft->profile->department_id, 'type_id' => $draft->type_id];
+            }
             $record = null;
             $officialIssuance = null;
             // Both callbacks persist one complete formal identity; neither number survives an outer rollback.
-            $internalIssuance = $this->numbering->register($actor, $canonical, $internal->id, function (string $internalNumber) use ($actor, $scope, $canonical, $official, $id, &$record, &$officialIssuance): OutgoingCorrespondence {
+            $internalIssuance = $this->numbering->register($actor, $canonical, $internal->id, function (string $internalNumber) use ($actor, $scope, $canonical, $official, $id, &$record, &$officialIssuance, $xppl): OutgoingCorrespondence {
                 $officialIssuance = $this->numbering->register($actor, $canonical, $official->id, function (string $officialNumber) use ($actor, $scope, $id, $internalNumber, &$record): OutgoingCorrespondence {
                     // Preserve register -> series -> correspondence lock ordering on every registration request.
                     $record = $this->find($actor, $scope, $id, true);
@@ -159,10 +194,10 @@ class ManageOutgoingCorrespondence
                     $this->audit($actor, $record, 'registered', ['status', 'internal_number', 'official_number', 'registered_by', 'registered_at']);
 
                     return $record;
-                });
+                }, $xppl);
 
                 return $record;
-            });
+            }, $automatic ? ['format' => 'xppl_outgoing'] : null);
             DB::table('outgoing_registration_links')->insert([
                 ['correspondence_id' => $record->id, 'purpose' => NumberingPurpose::InternalRegister->value, 'issuance_id' => $internalIssuance->id],
                 ['correspondence_id' => $record->id, 'purpose' => NumberingPurpose::OfficialOutgoing->value, 'issuance_id' => $officialIssuance->id],
@@ -178,6 +213,7 @@ class ManageOutgoingCorrespondence
     private function validate(array $data, bool $creating): array
     {
         $rules = [
+            'document_revision' => ['nullable', 'string', 'max:30'],
             'type_id' => ['required', 'integer'], 'subject' => ['required', 'string', 'max:500'],
             'signatory_name' => ['required', 'string', 'max:255'], 'signatory_title' => ['nullable', 'string', 'max:255'],
             'document_date' => ['required', 'date_format:Y-m-d'],

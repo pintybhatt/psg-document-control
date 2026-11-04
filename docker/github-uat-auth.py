@@ -336,7 +336,16 @@ def validate_release(api, request, release, policy, current, previous, now=None)
         require(api.get('compare/'+commit+'...main').get('status') in ('ahead', 'identical'), 'Release must belong to main ancestry.')
     require(manifest['image'] != current['image'], 'Release is already current.')
     if manifest['migration_inventory'] != current['migration_inventory']:
-        raise SchemaReviewRequired('Schema inventory differs; separate controlled migration required.')
+        existing = current['migration_inventory']
+        candidate = manifest['migration_inventory']
+        if (request['operation'] != 'deploy' or policy.get('automatic_migrations') is not True
+                or not existing or candidate[:len(existing)] != existing
+                or len(candidate) <= len(existing)
+                or len({row['path'] for row in candidate}) != len(candidate)
+                or any(not re.fullmatch(r'database/migrations/[a-zA-Z0-9_]+\.php', row['path'])
+                       or not re.fullmatch(r'[a-f0-9]{64}', row['sha256']) for row in candidate)
+                or [row['path'] for row in candidate] != sorted(row['path'] for row in candidate)):
+            raise SchemaReviewRequired('Schema inventory differs; separate controlled migration required.')
     if request['operation'] == 'rollback':
         require(previous is not None and manifest == previous, 'Rollback limited to the recorded previous release.')
     else:

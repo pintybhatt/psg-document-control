@@ -3,6 +3,13 @@ import { createJsonClient } from './jsonClient.js';
 
 const workspaceKey = Symbol('workspace');
 
+export function formatWorkspaceLabel(context, language) {
+    const key = language === 'lo' ? 'name_lo' : 'name_en';
+    const company = context?.company?.[key]?.trim() ?? '';
+    const site = context?.site?.[key]?.trim() ?? '';
+    return site && company && site !== company ? `${site} · ${company}` : site || company;
+}
+
 export function createWorkspace(userId, endpoint, csrfToken) {
     const contexts = ref([]);
     const siteKey = ref('');

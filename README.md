@@ -1,3 +1,15 @@
+## Routine DEV → UAT → Production
+
+Develop on a local feature branch and commit locally. Run only tests covering the change, for example `php artisan test --compact tests/Feature/ImportUatXpplMasterDataTest.php` or `npm test -- tests/Frontend/UserManagement.test.js`. Do not rerun both full backend database suites during routine development. GitHub **DCMS CI** is the regression/build gate: frontend tests/build, SQLite and isolated MySQL shards; full release validation also checks the exact container image. Keep security audits and database/numbering tests enabled.
+
+After an approved PR merges to protected `main`, run **Deploy DCMS UAT** from `main`, leaving the default **deploy** operation. The existing pipeline selects verified release evidence or requests the existing publisher. Once enrolled, it automatically quiesces writers, backs up database/private uploads/configuration, verifies the recovery set, applies eligible forward migrations with a separate account, recreates only the app (refreshing caches), and checks database identity, mounts and HTTP health. Failure preserves maintenance and the recovery lock; there is no automatic schema rollback/reset or seeding.
+
+[UAT operation and enrollment](docs/deployment/github-uat.md) describes the required protected GitHub environments, host custody and backup verification hook. [The approved XPPL master-data import](docs/security/phase-10c13-uat-master-data-import.md) remains a separate one-time initialization with its own Product Owner approval and restore-tested backup; routine deployment never invokes it.
+
+Production preparation reuses the release image, `compose.release.yaml`, production preflight and the same backup → migration → cache/restart → health sequence. It remains **disabled** until a Production target/entry point, separate credentials, enforced explicit approval, accepted UAT digest and recovery policy are enrolled. See the Production checklist in the UAT operation guide. No Production deployment is authorized by a UAT dispatch.
+
+Current `origin/main` (`f66f671`) has been merged locally into Phase 10, including the existing deployment infrastructure, application changes and Symfony MIME 8.1.10 security fix. The locked dependency audit passes. Deployed migration files remain intact; new Phase 10 migrations still require the reviewed deployment and backup gates.
+
 <p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
 
 <p align="center">

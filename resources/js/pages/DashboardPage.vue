@@ -4,7 +4,7 @@ import AppIcon from '../components/AppIcon.vue';
 import DataTable from '../components/ui/DataTable.vue';
 import StatusBadge from '../components/ui/StatusBadge.vue';
 import { useLocalization } from '../localization/index.js';
-import { useWorkspace } from '../utilities/workspace.js';
+import { formatWorkspaceLabel, useWorkspace } from '../utilities/workspace.js';
 import { createJsonClient } from '../utilities/jsonClient.js';
 
 const props = defineProps({ navigation: { type: Array, required: true }, context: { type: Object, required: true }, endpoint: { type: String, default: '' }, csrfToken: { type: String, default: '' } });
@@ -15,7 +15,6 @@ const loading = ref(false);
 const error = ref('');
 let controller;
 const current = computed(() => workspace?.sites.value.find(item => `${item.company_id}:${item.site_id}` === workspace.siteKey.value));
-const name = item => item?.[language.value === 'lo' ? 'name_lo' : 'name_en'] ?? '';
 const columns = computed(() => [{ key: 'kind', label: t('register') }, { key: 'subject', label: t('documentSubject') }, { key: 'date', label: t('documentDate'), type: 'date' }, { key: 'status', label: t('uiStatus') }]);
 const operational = ['open_incoming', 'open_outgoing', 'pending_response', 'closed', 'due_soon', 'review_soon', 'review_overdue', 'checkout_overdue'];
 const dueColumns = computed(() => [{ key: 'subject', label: t('documentSubject') }, { key: 'due_date', label: t('incomingDueDate'), type: 'date' }, { key: 'status', label: t('uiStatus') }]);
@@ -36,7 +35,7 @@ onBeforeUnmount(() => controller?.abort());
 
 <template>
     <section class="flex flex-wrap items-center justify-between gap-4 rounded-xl bg-slate-900 p-5 text-white">
-        <div><h2 class="text-lg font-semibold">{{ t('documentOverview') }}</h2><p class="mt-1 text-sm text-slate-300">{{ current ? `${name(current.company)} / ${name(current.site)}` : t('noSite') }}</p></div>
+        <div class="min-w-0"><h2 class="text-lg font-semibold">{{ t('documentOverview') }}</h2><p class="mt-1 text-sm break-words text-slate-300">{{ current ? formatWorkspaceLabel(current, language) : t('noSite') }}</p></div>
         <div class="flex flex-wrap gap-2"><a v-for="action in data?.quick_actions ?? []" :key="action.kind" :href="action.href" class="inline-flex items-center gap-2 rounded-lg bg-teal-300 px-4 py-2 text-sm font-semibold text-slate-950"><AppIcon :name="action.kind" class="size-4" />{{ t(`${action.kind}Create`) }}</a></div>
     </section>
     <p v-if="error" role="alert" class="rounded-lg bg-red-50 p-4 text-red-800">{{ t(error) }}</p>

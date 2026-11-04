@@ -6,6 +6,7 @@ use App\Authorization\CorrespondenceContexts;
 use App\Authorization\DocumentApprovals;
 use App\Authorization\ManageOutgoingCorrespondence;
 use App\Authorization\ManageOutgoingOperations;
+use App\Authorization\XpplNumbering;
 use App\CorrespondenceReport;
 use App\Http\Requests\OutgoingCorrespondenceRequest;
 use App\Http\Resources\OutgoingCorrespondenceResource;
@@ -55,11 +56,12 @@ class OutgoingCorrespondenceController extends Controller
     {
         $scope = $request->documentScope()->authorizationScope();
         $register = RegisterConfiguration::query()->where('scope_id', $scope->id)->where('register_key', 'outgoing')->first();
+        $automatic = app(XpplNumbering::class)->policyActive($scope->company_id, 'outgoing');
         $types = DocumentType::query()->where('scope_id', $scope->id)->with('category')->get()
-            ->filter(fn (DocumentType $type): bool => $register && $type->effectiveFor($register))
-            ->map(fn (DocumentType $type): array => $type->only(['id', 'name_en', 'name_lo', 'category_id']) + ['category' => $type->category->only(['id', 'name_en', 'name_lo'])])->values();
+            ->filter(fn (DocumentType $type): bool => $register && $type->effectiveFor($register) && (! $automatic || $type->code === 'LTR'))
+            ->map(fn (DocumentType $type): array => $type->only(['id', 'code', 'name_en', 'name_lo', 'category_id']) + ['category' => $type->category->only(['id', 'name_en', 'name_lo'])])->values();
 
-        return response()->json(['data' => $types]);
+        return response()->json(['data' => $types, 'automatic_numbering' => $automatic]);
     }
 
     public function show(OutgoingCorrespondenceRequest $request, string $record, ManageOutgoingCorrespondence $outgoing, ManageOutgoingOperations $operations): JsonResponse
@@ -98,6 +100,6 @@ class OutgoingCorrespondenceController extends Controller
 
     public function register(OutgoingCorrespondenceRequest $request, string $record, ManageOutgoingCorrespondence $outgoing): OutgoingCorrespondenceResource
     {
-        return new OutgoingCorrespondenceResource($outgoing->register($request->user(), $request->documentScope(), $record));
+        return new OutgoingCorrespondenceResource($outgoing->register($request->user(), $request->documentScope(), $record, $request->filled('namespace_id') ? $request->integer('namespace_id') : null));
     }
 }

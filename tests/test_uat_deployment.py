@@ -98,7 +98,7 @@ class UatDeploymentTests(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory(prefix='dcms-uat-offline-')
         self.addCleanup(self.temporary.cleanup)
         self.root = Path(self.temporary.name)
-        for folder in ('history', 'release/docker', 'config', 'registry'):
+        for folder in ('history', 'backups', 'release/docker', 'config', 'registry'):
             (self.root/folder).mkdir(parents=True, exist_ok=True)
         self.fixture = release_fixture()
         self.current = dict(self.fixture.manifest, image=OLD)
@@ -120,6 +120,8 @@ class UatDeploymentTests(unittest.TestCase):
             'DCMS_IMAGE='+OLD, 'DCMS_APP_ENV_FILE='+str(self.root/'config/app.env'),
             'DCMS_DB_PASSWORD_FILE='+str(self.root/'config/db-password'),
             'DCMS_DB_ROOT_PASSWORD_FILE='+str(self.root/'config/db-root-password')])+'\n')
+        (self.root/'config/verify-backup').write_text('#!/bin/sh\nexit 0\n')
+        (self.root/'config/verify-backup').chmod(0o700)
         (self.root/'deployment.lock').touch()
         self.calls = []
         self.replaced = False
@@ -211,6 +213,7 @@ class UatDeploymentTests(unittest.TestCase):
     def execute(self):
         with patch.object(deploy.Deployment, 'run', side_effect=self.fake_run), \
                 patch.object(deploy.Deployment, 'storage'), \
+                patch.object(deploy.Deployment, 'backup', side_effect=lambda *args: self.calls.append(['paired-backup'])), \
                 patch.object(deploy.auth, 'verify_oidc', return_value=self.claims), \
                 patch.object(deploy.auth, 'GitHub', return_value=self.api):
             deploy.execute(self.envelope)
@@ -235,6 +238,86 @@ class UatDeploymentTests(unittest.TestCase):
         for file in (self.root/'history/gha-789-1').iterdir():
             self.assertNotIn(b'synthetic-read-token', file.read_bytes())
             self.assertNotIn(b'synthetic-oidc-token', file.read_bytes())
+
+    def test_backup_occurs_after_writers_stop_and_before_app_replacement(self):
+        self.execute()
+        stopped = next(i for i, call in enumerate(self.calls) if 'stop' in call)
+        backup = self.calls.index(['paired-backup'])
+        replaced = next(i for i, call in enumerate(self.calls) if '--force-recreate' in call)
+        self.assertLess(stopped, backup)
+        self.assertLess(backup, replaced)
+
+    def test_missing_backup_verifier_prevents_stopping_writers_and_replacement(self):
+        (self.root/'config/verify-backup').unlink()
+        with self.assertRaises(ValueError):
+            self.execute()
+        self.assertFalse(any('stop' in call or '--force-recreate' in call for call in self.calls))
+        self.assertEqual(json.loads((self.root/'config/current.json').read_text())['image'], OLD)
+
+    def prepare_forward_migration(self):
+        self.policy['automatic_migrations'] = True
+        (self.root/'config/automation.json').write_text(json.dumps(self.policy))
+        # Keep deployed hashes immutable and append one reviewed migration.
+        self.current['migration_inventory'] = [{'path': 'database/migrations/initial.php', 'sha256': 'a'*64}]
+        candidate = self.current['migration_inventory'] + self.fixture.manifest['migration_inventory']
+        self.fixture.manifest['migration_inventory'] = candidate
+        self.release['manifest'] = json.dumps(self.fixture.manifest).encode()
+        self.request['manifest_sha256'] = hashlib.sha256(self.release['manifest']).hexdigest()
+        (self.root/'config/current.json').write_text(json.dumps(self.current))
+        (self.root/'config/migration.env').write_text('DB_USERNAME=dcms_uat_migrate\nDB_PASSWORD=synthetic\n')
+
+    def test_verified_forward_migrations_run_before_replacement_and_schema_is_rechecked(self):
+        self.prepare_forward_migration()
+        status = [None, None, None]
+        with patch.object(deploy.Deployment, 'schema', side_effect=status) as schema:
+            self.execute()
+        migration = next(i for i, call in enumerate(self.calls) if 'migrate' in call)
+        replacement = next(i for i, call in enumerate(self.calls) if '--force-recreate' in call)
+        self.assertLess(self.calls.index(['paired-backup']), migration)
+        self.assertLess(migration, replacement)
+        self.assertEqual(schema.call_count, 3)
+        self.assertEqual(schema.call_args_list[0].kwargs['baseline'], self.current)
+
+    def test_backup_failure_prevents_migration_replacement_and_manifest_update(self):
+        self.prepare_forward_migration()
+        # execute() replaces backup with an offline boundary; force that boundary to fail.
+        self.calls = []
+        with patch.object(deploy.Deployment, 'schema'), \
+                patch.object(deploy.Deployment, 'run', side_effect=self.fake_run), \
+                patch.object(deploy.Deployment, 'storage'), \
+                patch.object(deploy.Deployment, 'backup', side_effect=ValueError('synthetic backup failure')), \
+                patch.object(deploy.auth, 'verify_oidc', return_value=self.claims), \
+                patch.object(deploy.auth, 'GitHub', return_value=self.api):
+            with self.assertRaises(ValueError):
+                deploy.execute(self.envelope)
+        self.assertFalse(any('migrate' in call or '--force-recreate' in call for call in self.calls))
+        self.assertEqual(json.loads((self.root/'config/current.json').read_text())['image'], OLD)
+        self.assertTrue((self.root/'config/recovery-required.json').exists())
+
+    def test_migration_opt_in_never_allows_changed_removed_or_reordered_history(self):
+        self.prepare_forward_migration()
+        baseline = self.current['migration_inventory']
+        candidates = [[], [dict(baseline[0], sha256='b'*64)],
+                      self.fixture.manifest['migration_inventory'][::-1],
+                      baseline + baseline]
+        for inventory in candidates:
+            with self.subTest(inventory=inventory):
+                self.fixture.manifest['migration_inventory'] = inventory
+                self.release['manifest'] = json.dumps(self.fixture.manifest).encode()
+                self.request['manifest_sha256'] = hashlib.sha256(self.release['manifest']).hexdigest()
+                with self.assertRaises(ValueError):
+                    self.execute()
+                self.assertEqual(self.calls, [])
+
+    def test_migration_failure_preserves_current_manifest_and_blocks_another_dispatch(self):
+        self.prepare_forward_migration()
+        with patch.object(deploy.Deployment, 'schema'), patch.object(deploy.Deployment, 'migrate', side_effect=ValueError('synthetic failure')):
+            with self.assertRaises(ValueError):
+                self.execute()
+        self.assertEqual(json.loads((self.root/'config/current.json').read_text())['image'], OLD)
+        self.assertTrue((self.root/'config/recovery-required.json').exists())
+        with self.assertRaisesRegex(ValueError, 'recovery inspection'):
+            self.execute()
 
     def test_containerd_store_validates_previous_candidate_and_replacement_images(self):
         self.image_store = 'containerd'
@@ -404,6 +487,65 @@ class UatDeploymentTests(unittest.TestCase):
                                                                'ran': ['synthetic', 'added']})), self.assertRaises(ValueError):
             runner.schema(self.fixture.manifest)
 
+
+
+class BackupTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        for directory in ('backups', 'history/gha-123-1', 'config', 'release'):
+            (self.root/directory).mkdir(parents=True)
+        self.history = self.root/'history/gha-123-1'
+        self.runner = deploy.Deployment(self.history, self.root/'config/compose.env')
+        self.files = ('app.env', 'compose.env', 'db-password', 'db-root-password', 'migration.env',
+                      'backup.cnf', 'current.json', 'automation.json')
+        for name in self.files:
+            (self.root/'config'/name).write_text('synthetic confidential recovery material')
+        for item in (patch.object(deploy, 'ROOT', self.root),
+                     patch.object(deploy, 'protected', side_effect=lambda path, private=False: Path(path))):
+            item.start()
+            self.addCleanup(item.stop)
+
+    def fake_stream(self, command, destination):
+        destination.write_bytes(b'synthetic paired backup')
+
+    def test_backup_contains_database_private_files_configuration_and_checksums_before_verification(self):
+        with patch.object(self.runner, 'stream', side_effect=self.fake_stream) as stream, \
+                patch.object(self.runner, 'run') as run:
+            self.runner.backup({'image': OLD}, {'Id': 'a'*64})
+        destination = self.root/'backups/gha-123-1'
+        import tarfile
+        with tarfile.open(destination/'configuration.tar') as archive:
+            self.assertEqual(set(archive.getnames()), set(self.files))
+        self.assertEqual(len((destination/'SHA256SUMS').read_text().splitlines()), 3)
+        self.assertIn('--triggers --routines --events', stream.call_args_list[0].args[0][-1])
+        self.assertIn('--network', stream.call_args_list[1].args[0])
+        self.assertEqual(run.call_args.args[0], [str(self.root/'config/verify-backup'), str(destination)])
+        self.assertTrue(json.loads((self.history/'backup.json').read_text())['verified'])
+
+    def test_failed_dump_or_offhost_verification_never_records_a_verified_backup(self):
+        for failure in ('dump', 'verify'):
+            with self.subTest(failure=failure):
+                import shutil
+                shutil.rmtree(self.root/'backups/gha-123-1', ignore_errors=True)
+                def run(command, **kwargs):
+                    if failure == 'verify' and command[0].endswith('verify-backup'):
+                        raise ValueError('synthetic verification failure')
+                with patch.object(self.runner, 'run', side_effect=run), \
+                        patch.object(self.runner, 'stream', side_effect=ValueError('synthetic dump failure') if failure == 'dump' else self.fake_stream):
+                    with self.assertRaises(ValueError):
+                        self.runner.backup({'image': OLD}, {'Id': 'a'*64})
+                self.assertFalse((self.history/'backup.json').exists())
+
+    def test_stream_rejects_empty_or_failed_output_and_preserves_partial_evidence(self):
+        from types import SimpleNamespace
+        for code in (0, 1):
+            with self.subTest(code=code), patch.object(deploy.subprocess, 'run', return_value=SimpleNamespace(returncode=code)):
+                destination = self.root/('partial-'+str(code))
+                with self.assertRaises(ValueError):
+                    self.runner.stream(['synthetic-backup'], destination)
+                self.assertTrue(destination.exists())
 
 
 class ImageIdentityTests(unittest.TestCase):

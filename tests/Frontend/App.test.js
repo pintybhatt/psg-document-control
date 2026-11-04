@@ -36,6 +36,21 @@ beforeEach(() => {
 });
 
 describe('application shell', () => {
+    it('omits Administration from desktop and mobile navigation when the server supplies only operational destinations', async () => {
+        const operationalNavigation = navigation.filter(item => item.key !== 'administration');
+        const wrapper = mount(App, {
+            props: { page: 'dashboard', navigation: operationalNavigation, context: { company: { name: 'Example Company' }, site: null } },
+            global: { plugins: [createLocalization()] },
+        });
+        const expected = ['/dashboard', '/incoming', '/outgoing', '/controlled-documents', '/document-search', '/reports'];
+        expect(wrapper.get('aside nav').findAll('a').map(link => link.attributes('href'))).toEqual(expected);
+        await wrapper.get('button[aria-controls="mobile-navigation"]').trigger('click');
+        expect(wrapper.get('#mobile-navigation').findAll('a').map(link => link.attributes('href'))).toEqual(expected);
+        await wrapper.get('select').setValue('lo');
+        expect(wrapper.get('aside nav').text()).toContain('ເອກະສານຂາເຂົ້າ');
+        expect(wrapper.find('a[href="/administration"]').exists()).toBe(false);
+    });
+
     it('renders the dashboard with seven navigation destinations and an active page', () => {
         const wrapper = mountWorkspace();
         const links = wrapper.get('aside nav').findAll('a');
