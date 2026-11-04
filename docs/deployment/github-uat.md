@@ -18,7 +18,7 @@ The release run title includes version and source so polling binds to one unique
 
 The job reads authenticated GitHub publication evidence, derives the immutable DCMS digest from that manifest, and requests a short-lived GitHub OIDC token. Its audience includes the SHA-256 of the complete canonical deployment request: deployment run/attempt, release run/attempt/artifact, manifest hash, image, operation and rollback review reference. Changing any field invalidates authorization. `id-token: write` permits minting this OIDC token; the job otherwise has only `contents: read` and `actions: read`.
 
-The server verifies RS256 with OpenSSL and the current keys from the fixed HTTPS GitHub OIDC JWKS endpoint. It accepts only the pinned repository ID/name, private repository, manual dispatch, main ref, exact deployment workflow path/revision, `uat` environment subject, allowed actor ID, self-hosted context and exact run/attempt. It rejects untrusted JWT algorithms/key URLs, invalid signatures, duplicate JSON keys, future/expired tokens and tokens issued more than five minutes ago. No user-supplied identity string, SSH key alone or GitHub read token alone authorizes a deployment. See [GitHub's OIDC identity claims](https://docs.github.com/en/actions/reference/security/oidc).
+The server verifies RS256 with OpenSSL and the current keys from the fixed HTTPS GitHub OIDC JWKS endpoint. It accepts only the pinned repository ID/name, private repository, manual dispatch, main ref, exact deployment workflow path/revision, `uat` environment subject, allowed actor ID, self-hosted context and exact run/attempt. It rejects untrusted JWT algorithms/key URLs, invalid signatures, duplicate JSON keys, expired tokens, time claims more than 30 seconds in the future, and tokens issued more than five minutes ago. No user-supplied identity string, SSH key alone or GitHub read token alone authorizes a deployment. See [GitHub's OIDC identity claims](https://docs.github.com/en/actions/reference/security/oidc).
 
 The job's transient read-only `GITHUB_TOKEN` is sent with the OIDC token on pinned SSH stdin so the server can independently retrieve GitHub evidence. Tokens are never command arguments or deployment history. The runner envelope is a private temporary file, removed on completion/failure; root holds credentials only in memory, with signature/public-key verification files in a private temporary directory. Docker/app subprocesses receive a cleared environment without either token. Root/runner administrators can access process memory and are trusted. No new persistent GitHub API credential is required on UAT; the existing root-managed GHCR reader remains separate.
 
@@ -43,6 +43,29 @@ SSH still accepts only the literal `deploy-dcms-uat`, with a bounded JSON envelo
 
 Keep the existing package reader limited to `read:packages` and package Read access, root-owned `/srv/dcms-uat/registry/config.json` mode 0600; follow [registry custody/rotation](releases.md#registry-retrieval-choose-a-dedicated-host-read-credential). Do not give the deployment account these credentials. The pinned SSH client uses one identity, strict host checking, no agent/password, no PTY or forwarding. Temporary credentials are cleaned in traps and an always-run final cleanup; isolate and sanitize a persistent runner after hard termination. Rotate/revoke any suspected key or runtime-token exposure and disable deployment while investigating.
 
+## OIDC timestamp failures and helper update
+
+The former `oidc_time / OIDC_TIME_INVALID` record covered all timestamp checks. It does not prove which check failed. A freshly issued token can be slightly ahead of the verifier's clock even when NTP reports synchronization: issuer and verifier need not have identical offsets, and clock corrections can occur around issuance. Alternatively, SSH/network/JWKS delays or reuse of an earlier envelope can exceed the strict five-minute admission age or token expiry. Missing/non-integer claims or a token lifetime outside this verifier's policy also fail. SSH success and reaching the root entry point establish neither OIDC freshness nor authorization. No raw incident token was collected or inspected, so these are plausible causes, not a confirmed diagnosis.
+
+The reviewed correction permits **at most 30 seconds** of future offset for signed integer `iat` and `nbf` only. This fixed local policy is deliberately small; [RFC 7519 section 4.1.5](https://www.rfc-editor.org/rfc/rfc7519.html#section-4.1.5) allows limited clock-skew leeway for not-before checks. It does not require this particular bound. There is **no expiry grace**: `now >= exp` always fails. Admission age remains at most 300 seconds, lifetime remains positive and at most 600 seconds (`exp - iat`), and `nbf` must precede expiry. Signature, issuer, audience/request binding, subject, workflow, operator, API/runner checks, replay protection and recovery gates remain mandatory. Time checks use epoch seconds; changing the display timezone is not a remedy.
+
+The root-only audit still stores only UTC audit time, stage and a fixed reason. Under `oidc_time`, reasons are now:
+
+| Reason | Meaning |
+| --- | --- |
+| `OIDC_TIME_INVALID` | Missing/non-integer time claim or malformed claims payload |
+| `OIDC_LIFETIME_INVALID` | Inconsistent claim ordering or lifetime exceeds policy |
+| `OIDC_EXPIRED` | Verifier time has reached/passed expiry |
+| `OIDC_ISSUED_IN_FUTURE` | Issued-at is more than 30 seconds ahead |
+| `OIDC_NOT_YET_VALID` | Not-before is more than 30 seconds ahead |
+| `OIDC_TOO_OLD` | Issued more than 300 seconds ago |
+
+The first failing check determines the reason; one token may violate multiple constraints. These codes disclose no token, claim values, timestamp offsets, credentials or exception bodies. Do not add raw token/claim logging to diagnose an incident. Investigate clock offsets and elapsed workflow timings using existing non-secret operational records; expired/stale envelopes require a fresh authorized dispatch, not a wider tolerance.
+
+**Administrator-controlled helper installation is required.** The server imports the protected file `/srv/dcms-uat/release/docker/github-uat-auth.py`; a GitHub merge, runner checkout or application image replacement does not update it. After separate installation approval, an administrator must verify the reviewed source/checksum, stage and atomically replace that file under existing root custody (root-owned 0644, protected parents, no symlinks or group/other writes), outside an active deployment. The audit allowlist is in the same helper and needs no policy/secret change. Preserve other helpers, enrollment, credentials and history; use the mapping below. This task neither installs the helper nor retries deployment, and a new dispatch must satisfy current-main workflow checks after publication/review.
+
+The missing `/srv/dcms-uat/config/verify-backup` hook remains a **separate deployment blocker**. Correct OIDC admission must still reach and enforce that requirement; do not install a no-op hook or bypass backup/recovery gates.
+
 ## Server enrollment — design only, do not execute during this task
 
 A host administrator must authorize and review enrollment separately. Follow the existing UAT inventory/capacity/NetBox baseline and initial bootstrap runbook first. This automation requires healthy existing UAT MySQL and an existing app; a missing stack stops. No `up db`, database image pull, volume creation/deletion, Docker cleanup, global Nginx change or NetBox command exists in the entry point.
@@ -62,6 +85,7 @@ Administrator installation mapping (review against an approved bundle/checksums;
 | `docker/uat-ssh-command.sh` | `/usr/local/libexec/dcms-uat-ssh` / 0755 |
 | `docker/uat-deploy-entrypoint.sh` | `/usr/local/sbin/dcms-uat-deploy` / 0755 |
 | `docker/deploy-uat.py` | `/srv/dcms-uat/release/docker/deploy-uat.py` / 0644 |
+| `docker/github-uat-auth.py` | `/srv/dcms-uat/release/docker/github-uat-auth.py` / 0644 |
 | `docker/uat-automation.example.json` | `/srv/dcms-uat/config/automation.json` / 0600, completed by owner |
 
 Provision `/srv/dcms-uat/deployment.lock` once as a root-owned regular 0600 file. Keep it permanently; deleting/replacing a live lock can defeat locking. `current.json` at `config/current.json` must be the actual last successfully deployed release manifest, validated against the running digest/tested ID, schema and volumes. Existing `compose.env` must reference that same digest and exactly `/srv/dcms-uat/config/app.env`, `db-password`, and `db-root-password`. Enrollment preserves the existing APP_KEY, DB users/accounts, documents/private/framework/database volumes and UAT settings. Do not copy example secrets over them.
