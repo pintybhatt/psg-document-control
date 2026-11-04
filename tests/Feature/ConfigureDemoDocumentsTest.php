@@ -9,7 +9,7 @@ use App\Models\NumberingSeries;
 use App\Models\Role;
 use App\Models\User;
 use App\Models\UserRoleAssignment;
-use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Foundation\Testing\DatabaseMigrations;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\TestWith;
 use Tests\Concerns\InteractsWithRbac;
@@ -17,7 +17,25 @@ use Tests\TestCase;
 
 class ConfigureDemoDocumentsTest extends TestCase
 {
-    use InteractsWithRbac, LazilyRefreshDatabase;
+    use DatabaseMigrations, InteractsWithRbac;
+
+    /** Isolate SQLite-only DEV commands from the runner's default database and shared migration state. */
+    protected function beforeRefreshingDatabase(): void
+    {
+        config([
+            'database.default' => 'sqlite',
+            'database.connections.sqlite.url' => null,
+            'database.connections.sqlite.database' => ':memory:',
+        ]);
+        DB::purge('sqlite');
+    }
+
+    protected function tearDown(): void
+    {
+        $this->app['env'] = 'testing';
+
+        parent::tearDown();
+    }
 
     private function fixture(): User
     {
@@ -87,13 +105,34 @@ class ConfigureDemoDocumentsTest extends TestCase
     }
 
     #[TestWith(['production'])]
+    #[TestWith(['uat'])]
     #[TestWith(['testing'])]
     public function test_nonlocal_environments_are_refused_without_writes(string $environment): void
     {
         $this->fixture();
         $this->app['env'] = $environment;
-        $this->artisan('dev:configure-demo-documents', ['--operator' => 'Test operator'])->assertFailed();
+        $this->artisan('dev:configure-demo-documents', ['--operator' => 'Test operator'])
+            ->expectsOutputToContain('Requires the local environment and SQLite.')
+            ->assertFailed();
         $this->assertDatabaseCount('document_categories', 0);
+    }
+
+    public function test_non_sqlite_connections_are_refused_without_writes(): void
+    {
+        $this->app['env'] = 'local';
+        DB::setDefaultConnection('mysql');
+
+        try {
+            $this->artisan('dev:configure-demo-documents', ['--operator' => 'Test operator'])
+                ->expectsOutputToContain('Requires the local environment and SQLite.')
+                ->assertFailed();
+        } finally {
+            DB::setDefaultConnection('sqlite');
+        }
+
+        $this->assertDatabaseCount('companies', 0);
+        $this->assertDatabaseCount('document_categories', 0);
+        $this->assertDatabaseCount('numbering_counters', 0);
     }
 
     public function test_missing_demo_is_not_created(): void
