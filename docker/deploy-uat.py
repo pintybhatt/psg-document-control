@@ -199,7 +199,7 @@ class Deployment:
         require(result.returncode == 0 and destination.stat().st_size > 0,
                 'Backup failed; preserve partial evidence and maintenance.')
 
-    def backup(self, current, db):
+    def backup(self, current, db, verifier=None):
         destination = protected(ROOT/'backups')/self.history.name
         destination.mkdir(mode=0o700)
         client = protected(ROOT/'config/backup.cnf', True)
@@ -227,7 +227,10 @@ class Deployment:
         (destination/'SHA256SUMS').write_text('\n'.join(sums)+'\n')
         # UAT recovery policy requires verified paired off-host backups before migration.
         # The enrolled root-owned hook must fail unless that policy has been satisfied.
-        self.run([str(protected(ROOT/'config/verify-backup')), str(destination)], timeout=600)
+        if verifier is None:
+            self.run([str(protected(ROOT/'config/verify-backup')), str(destination)], timeout=600)
+        else:
+            verifier(destination)
         write_json(self.history/'backup.json', {'directory': str(destination), 'verified': True})
 
     def migrate(self):

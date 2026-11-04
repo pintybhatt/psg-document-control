@@ -1,270 +1,60 @@
-# One-click GitHub Actions UAT deployment
+# Manual DCMS UAT deployment
 
-This procedure implements **Deploy DCMS UAT** for an already initialized XPPL UAT stack. These changes are local preparation, not authorization to enroll a host or execute deployment. No host, GitHub setting, credential or image was changed by this task. Production is disabled: there is no Production workflow, environment, credential or entry point in this change.
+This procedure supersedes the former OIDC/release-selection and off-server restore enrollment procedures for **UAT only**. It follows XPPL Toll's pattern: a manual GitHub Actions job invokes a fixed administrator-installed command. DCMS reuses its existing dedicated runner, pinned SSH access, Docker project, database and volumes. There is one active UAT workflow, `.github/workflows/deploy-uat.yml`; no changes to Production, NetBox or application authentication/authorization are included.
 
-This simplified OIDC flow supersedes the earlier per-release root-enrolled request/required-reviewer design and the older manual-only automation discussion in [uat.md](uat.md) and [releases.md](releases.md). Their initial bootstrap, DBA provisioning, backup/restore, ingress and shared-host isolation procedures remain applicable. Automation never initializes a database. Preserve the independently reviewed `docker/apache-uat.conf` worker configuration; this change does not alter it or either Compose file.
+## Routine operation
 
-## Trust and authorization
+1. Develop on feature branches, run focused tests, then use the existing CI/review process to merge into protected main.
+2. Use the existing **Authorized release image** workflow for the approved main commit. It performs full CI and publishes the tested image. Copy the immutable `ghcr.io/pintybhatt/psg-document-control@sha256:...` reference from its release manifest. No new publisher or mutable `latest` tag is introduced.
+3. Open **Deploy DCMS UAT**, select **main**, enter that digest and type `DEPLOY_UAT`. The digest's source label must equal the dispatch's main commit. If main has advanced, publish/approve its image before dispatching. No advanced rollback IDs, OIDC tokens or off-server restore configuration are required.
+4. Read the deployment job outcome. On failure, keep admission closed and inspect the root-only history/recovery flag; do not automatically roll back schema or erase the flag to retry.
 
-An authorized repository operator opens **Deploy DCMS UAT** on **main** and clicks **Run workflow**, leaving the default **deploy** operation and advanced rollback fields blank. No release run/artifact ID, image digest or runner ID is needed for normal deployment. A GitHub-hosted `resolve` job enters `uat`, checks its enable switch and current protected main, and selects the newest eligible publication for exactly the dispatch commit. A separate hosted `publish` job runs only when no eligible evidence exists. The dedicated `dcms-uat-runner` still runs only the `deploy` job, whose name, environment and workflow path preserve the existing server authorization policy.
+This is authenticated operator approval of the input digest, not an automated proof connecting that input to a successful release run. CI and main review remain the regression gate. Only trusted repository operators may dispatch this privileged workflow or edit main/workflows; keep PR approval and required CI checks. Existing GitHub environment controls remain effective; no additional approval stage is added.
 
-The selector searches the fixed authorized release workflow's successful main dispatches, newest run ID first, and retrieves authenticated jobs, artifacts and manifest. It requires exact current-main source, main ancestry, current successful attempt, unexpired manifest, full validation including all MySQL shards and exact-image smoke, and a release start within seven days. Searches are bounded to 1,000 runs; oversized history or API/authentication failures refuse rather than silently authorizing a release. Invalid historical evidence is ignored. The server independently revalidates evidence and its own enrolled age limit (which may be stricter).
+## What the server does
 
-If no eligible image exists, `publish` dispatches the existing **Authorized release image** workflow on main using its job-scoped `GITHUB_TOKEN`. Only this hosted orchestration job has `actions: write`; it has no package write permission, UAT SSH secret references or OIDC permission. The dedicated deployment job keeps `contents: read`, `actions: read`, and `id-token: write`. No personal access token is added. GitHub permits `workflow_dispatch` events from `GITHUB_TOKEN`; see [token-triggered workflow behavior](https://docs.github.com/en/actions/concepts/security/github_token) and [dispatch API permissions](https://docs.github.com/en/rest/actions/workflows#create-a-workflow-dispatch-event).
+The sole fixed SSH/sudo entry point invokes `docker/deploy-uat-manual.py`. It accepts only an immutable DCMS image, full source commit and numeric run/attempt. It pulls that image and verifies Linux/amd64 and repository/source labels, checks the existing DB container, persistent mounts, current digest and live migration baseline, and refuses edits/removal of deployed migration files.
 
-Automatic publication uses source and baseline equal to the dispatch commit, version `v0.0.<deployment-run-id>-rc.<attempt>`, and recorded publication reference `DCMS-UAT-<deployment-run-id>-<attempt>`. This reference records the operator's deployment request, rather than claiming an independent reviewer approved it. Enabling the existing publication switch and reviewing/merging this workflow authorizes this automatic use of the release pipeline. The full migration inventory remains mandatory; an empty baseline diff is never schema compatibility evidence. `allow_initial_private_package` is always false: an absent package requires the existing separate authorized bootstrap. Existing private-package, immutable-tag, exact tested image and authenticated digest checks remain in the publisher. It still runs full reusable CI, loads the same smoke-tested archive, verifies registry retrieval and uploads the release manifest. No direct build/push path is added to deployment.
+Under the existing lock, it enters maintenance and stops only the app to quiesce synchronous web writers. It reuses `Deployment` in `docker/deploy-uat.py` to create a new root-private local backup directory under `/srv/dcms-uat/backups/gha-RUN-ATTEMPT` containing:
 
-The release run title includes version and source so polling binds to one unique publication run rather than whichever run finishes next. The orchestrator logs that run's link, waits at most 80 minutes for completion and accepts only verified successful publication evidence. Failed, skipped, cancelled, ambiguous, expired or missing evidence and timeouts block deployment. `ENABLE_IMAGE_PUBLISHING` is checked inside the `release-image` environment before checkout/package writes; it must be exactly `true`. Existing environment restrictions/reviewers remain effective. Changing main during selection/publication or before OIDC preparation refuses the stale dispatch. A cancelled/timed-out deployment orchestration may leave its separately dispatched release workflow running; inspect that run before another dispatch. It cannot deploy by itself.
+- `database.sql`, including triggers/routines/events;
+- `documents.tar`, containing both document and private file volumes;
+- `configuration.tar`, including APP_KEY and recovery credentials;
+- `SHA256SUMS` for all three files.
 
-The job reads authenticated GitHub publication evidence, derives the immutable DCMS digest from that manifest, and requests a short-lived GitHub OIDC token. Its audience includes the SHA-256 of the complete canonical deployment request: deployment run/attempt, release run/attempt/artifact, manifest hash, image, operation and rollback review reference. Changing any field invalidates authorization. `id-token: write` permits minting this OIDC token; the job otherwise has only `contents: read` and `actions: read`.
+The existing validator reads and checks all SHA-256 values, nonempty files, SQL dump completion marker, archive safety/readability and required configuration members. Local backup verification must succeed before migration. **This is backup integrity verification, not an isolated restore rehearsal or proof of recoverability.** No encryption, Metabase transfer, retention deletion, `verify-backup` hook or isolated MySQL target is required by this UAT path. Local backups and failed-deployment history are retained; administrators monitor disk capacity and manage retention separately.
 
-The server verifies RS256 with OpenSSL and the current keys from the fixed HTTPS GitHub OIDC JWKS endpoint. It accepts only the pinned repository ID/name, private repository, manual dispatch, main ref, exact deployment workflow path/revision, `uat` environment subject, allowed actor ID, self-hosted context and exact run/attempt. It rejects untrusted JWT algorithms/key URLs, invalid signatures, duplicate JSON keys, expired tokens, time claims more than 30 seconds in the future, and tokens issued more than five minutes ago. No user-supplied identity string, SSH key alone or GitHub read token alone authorizes a deployment. See [GitHub's OIDC identity claims](https://docs.github.com/en/actions/reference/security/oidc).
+Migrations use existing dedicated `migration.env` credentials. Only app is recreated with existing Compose files, `--no-deps --no-build --pull never`; the normal image entry point rebuilds config/routes/views caches. DB container identity/start time/mounts/health must remain unchanged. Loopback and configured HTTPS `/up` must return 200, public storage must remain denied, and Docker app health must pass. Failure leaves maintenance/recovery state for administrator inspection; no automatic database rollback, reset, seeding or master-data import occurs.
 
-The job's transient read-only `GITHUB_TOKEN` is sent with the OIDC token on pinned SSH stdin so the server can independently retrieve GitHub evidence. Tokens are never command arguments or deployment history. The runner envelope is a private temporary file, removed on completion/failure; root holds credentials only in memory, with signature/public-key verification files in a private temporary directory. Docker/app subprocesses receive a cleared environment without either token. Root/runner administrators can access process memory and are trusted. No new persistent GitHub API credential is required on UAT; the existing root-managed GHCR reader remains separate.
+The approved XPPL UAT master-data import remains a separate one-time operation with its own approval and restore-tested backup requirements. Production's existing explicit authorization and backup requirements are unchanged.
 
-The server checks the repository's live main `protected` flag and requires the deployment workflow SHA to equal current main. It verifies the actual running job's signed check-run identity, current attempt, allowed runner ID and dedicated labels against authenticated GitHub API data. The original actor and rerun initiator must be authorized. It fetches the manifest and all job/artifact pages directly from GitHub, requires successful publication/full gates/exact-image smoke, rejects expired artifacts/reruns and enforces the root-configured release age. Sharded MySQL evidence must include all four successful jobs; valid historical single-job evidence remains understood. Candidate source and release-workflow revisions must belong to main ancestry. A normal deployment cannot downgrade source.
+## Activate once — administrator-controlled installation
 
-The existing root-only current manifest and running app must agree. Schema inventories must be identical and the live migration table must exactly match. A root-only lock serializes all mutations; `history/gha-RUN-ATTEMPT` is reserved once and cannot be replayed even with a newly minted token. GitHub concurrency also serializes dispatch. Policy/main/job/release/artifact freshness are rechecked during deployment. OIDC is checked at admission; that authorization covers one bounded 15-minute server operation, not an indefinitely renewable session. API failure, policy change, cancellation, removed evidence or stale main stops progress. No anonymous/public-package fallback exists.
+Nothing in this preparation changes the server. On **192.168.0.228**, stage the reviewed repository bundle at `/root/dcms-reviewed-bundle`. The existing `/srv/dcms-uat/release` must already contain the reviewed Compose/configuration/runtime helpers from this repository. Keep the existing database, containers, files, APP_KEY, TLS hostname and credentials. Do not run `compose down`, recreate the DB or delete volumes.
 
-SSH still accepts only the literal `deploy-dcms-uat`, with a bounded JSON envelope on stdin. It cannot select shell commands, paths, Compose projects, targets or migration commands. The account has no shell/scp/sftp/forwarding access and no Docker-group/socket privileges. The fixed sudo wrapper and all its helpers remain root-owned. Production is never an accepted target.
-
-## One-time GitHub and runner setup — future authorized administration
-
-1. Review/merge the tooling onto protected `main` only after separate Git approval. Enforce PR/workflow-change review, prohibit force pushes and tightly limit bypass actors. If protected-main enforcement is unavailable, **do not enable this design**; the server will refuse an unprotected branch. A protected flag alone does not prove that branch rules or administrator behavior are adequate; repository ownership and rules require administrative review.
-2. Keep the `uat` environment for scoped secrets and main-only deployment branch restrictions. Required environment reviewers are **not required or assumed available**. Dispatch by an allowed operator is the UAT authorization. Do not configure a separate approval workflow. No PR job may access UAT credentials or OIDC authority for this workflow.
-3. Keep the existing dedicated, restricted runner `[self-hosted, Linux, X64, dcms-uat-runner]`. Pin its numeric runner ID in the server policy. Restrict its runner group/repository access and workflows where supported, keep its OS/account patched, and ensure it never executes PRs, fork code, unrelated workflows or builds. Prefer an isolated disposable runner. A persistent runner compromise can steal a valid authorized job's credentials; neither OIDC nor labels make a compromised runner safe. Inability to isolate/trust this runner is an activation blocker.
-4. Environment secrets remain `UAT_SSH_KEY` (dedicated UAT key) and `UAT_KNOWN_HOSTS` (complete host-owner-verified known-hosts entry). Environment variables remain `UAT_HOST` and explicit `UAT_SSH_PORT`. There are no new persistent secrets. Verify host keys out of band; never automatically trust `ssh-keyscan`. The username is fixed to `dcms-deploy`.
-5. The server needs outbound verified HTTPS to `api.github.com`, `token.actions.githubusercontent.com`, GitHub's signed Azure/Actions artifact download hosts and GHCR. Metadata/OIDC redirects are refused. Artifact redirects are accepted only from the authenticated API to approved HTTPS artifact-host suffixes, without forwarding Authorization. Unknown download hosts fail closed pending a code review. Install root-trusted OpenSSL and Docker Buildx; no new Python package is required.
-6. The **`uat` environment variable `ENABLE_UAT_DEPLOYMENT`** must be exactly `true` for deployment; absent/false values produce a failed step and failed final result, before selection/publication/SSH. It is rechecked before publication and on the dedicated runner. The existing repository `ENABLE_IMAGE_PUBLISHING` switch (or a scoped value in `release-image`) must also be true for fallback publication. Keep the server `automation.json` authorization and enabled policy under administrator custody. This task reads the relevant GitHub switch values for diagnosis and changes none of them. Disabling an Actions variable does not guarantee stopping an already running server operation; server policy is independently rechecked.
-
-### Skipped run diagnosis (2026-11-02)
-
-[Run 41376095021](https://github.com/pintybhatt/psg-document-control/actions/runs/41376095021), attempt 1, was a `workflow_dispatch` on main at `5605997dc418b66ee04c8af32548afb8546aba76`. Its only job `deploy` concluded `skipped`, with no steps/logs. Read-only API inspection confirmed `ENABLE_UAT_DEPLOYMENT=true` in `uat` and no repository-level `ENABLE_UAT_DEPLOYMENT`. The old job-level `if` evaluated `vars.ENABLE_UAT_DEPLOYMENT == 'true'` before the job entered the environment; the unavailable variable evaluated empty, making the condition false. [GitHub documents environment variables as available after the job starts](https://docs.github.com/en/actions/reference/workflows-and-actions/variables). The fix checks it in a step after entering `uat`, exits nonzero with an explicit diagnostic when disabled, and always aggregates the job results. Identity/ref checks also fail visibly. No GitHub settings change is needed to fix this scope/timing error.
-
-Keep the existing package reader limited to `read:packages` and package Read access, root-owned `/srv/dcms-uat/registry/config.json` mode 0600; follow [registry custody/rotation](releases.md#registry-retrieval-choose-a-dedicated-host-read-credential). Do not give the deployment account these credentials. The pinned SSH client uses one identity, strict host checking, no agent/password, no PTY or forwarding. Temporary credentials are cleaned in traps and an always-run final cleanup; isolate and sanitize a persistent runner after hard termination. Rotate/revoke any suspected key or runtime-token exposure and disable deployment while investigating.
-
-## OIDC timestamp failures and helper update
-
-The former `oidc_time / OIDC_TIME_INVALID` record covered all timestamp checks. It does not prove which check failed. A freshly issued token can be slightly ahead of the verifier's clock even when NTP reports synchronization: issuer and verifier need not have identical offsets, and clock corrections can occur around issuance. Alternatively, SSH/network/JWKS delays or reuse of an earlier envelope can exceed the strict five-minute admission age or token expiry. Missing/non-integer claims or a token lifetime outside this verifier's policy also fail. SSH success and reaching the root entry point establish neither OIDC freshness nor authorization. No raw incident token was collected or inspected, so these are plausible causes, not a confirmed diagnosis.
-
-The reviewed correction permits **at most 30 seconds** of future offset for signed integer `iat` and `nbf` only. This fixed local policy is deliberately small; [RFC 7519 section 4.1.5](https://www.rfc-editor.org/rfc/rfc7519.html#section-4.1.5) allows limited clock-skew leeway for not-before checks. It does not require this particular bound. There is **no expiry grace**: `now >= exp` always fails. Admission age remains at most 300 seconds, lifetime remains positive and at most 600 seconds (`exp - iat`), and `nbf` must precede expiry. Signature, issuer, audience/request binding, subject, workflow, operator, API/runner checks, replay protection and recovery gates remain mandatory. Time checks use epoch seconds; changing the display timezone is not a remedy.
-
-The root-only audit still stores only UTC audit time, stage and a fixed reason. Under `oidc_time`, reasons are now:
-
-| Reason | Meaning |
-| --- | --- |
-| `OIDC_TIME_INVALID` | Missing/non-integer time claim or malformed claims payload |
-| `OIDC_LIFETIME_INVALID` | Inconsistent claim ordering or lifetime exceeds policy |
-| `OIDC_EXPIRED` | Verifier time has reached/passed expiry |
-| `OIDC_ISSUED_IN_FUTURE` | Issued-at is more than 30 seconds ahead |
-| `OIDC_NOT_YET_VALID` | Not-before is more than 30 seconds ahead |
-| `OIDC_TOO_OLD` | Issued more than 300 seconds ago |
-
-The first failing check determines the reason; one token may violate multiple constraints. These codes disclose no token, claim values, timestamp offsets, credentials or exception bodies. Do not add raw token/claim logging to diagnose an incident. Investigate clock offsets and elapsed workflow timings using existing non-secret operational records; expired/stale envelopes require a fresh authorized dispatch, not a wider tolerance.
-
-**Administrator-controlled helper installation is required.** The server imports the protected file `/srv/dcms-uat/release/docker/github-uat-auth.py`; a GitHub merge, runner checkout or application image replacement does not update it. After separate installation approval, an administrator must verify the reviewed source/checksum, stage and atomically replace that file under existing root custody (root-owned 0644, protected parents, no symlinks or group/other writes), outside an active deployment. The audit allowlist is in the same helper and needs no policy/secret change. Preserve other helpers, enrollment, credentials and history; use the mapping below. This task neither installs the helper nor retries deployment, and a new dispatch must satisfy current-main workflow checks after publication/review.
-
-The missing `/srv/dcms-uat/config/verify-backup` hook remains a **separate deployment blocker**. Correct OIDC admission must still reach and enforce that requirement; do not install a no-op hook or bypass backup/recovery gates.
-
-## Server enrollment — design only, do not execute during this task
-
-A host administrator must authorize and review enrollment separately. Follow the existing UAT inventory/capacity/NetBox baseline and initial bootstrap runbook first. This automation requires healthy existing UAT MySQL and an existing app; a missing stack stops. No `up db`, database image pull, volume creation/deletion, Docker cleanup, global Nginx change or NetBox command exists in the entry point.
-
-Install the reviewed bundle under root-owned `/srv/dcms-uat/release`:
-
-- `compose.release.yaml`, `compose.uat.yaml` unchanged;
-- `docker/apache-uat.conf` unchanged, readable/traversable by UID 33 as already documented;
-- `docker/preflight.py`, `docker/verify-uat-release.py`, `docker/github-uat-auth.py`, `docker/deploy-uat.py`.
-
-All parents and executable/config files must be root-owned, without symlinks or group/other write permission. Release paths may be 0755 directories / 0644 files for the Apache bind mount. Keep `config`, `registry`, `history`, `backups` at 0700 and their confidential files at 0600. Do not grant `dcms-deploy` traversal of private directories. No writable source checkout is used on the host.
-
-Administrator installation mapping (review against an approved bundle/checksums; no automatic installer is provided):
-
-| Repository source | Installed root-owned path / mode |
-| --- | --- |
-| `docker/uat-ssh-command.sh` | `/usr/local/libexec/dcms-uat-ssh` / 0755 |
-| `docker/uat-deploy-entrypoint.sh` | `/usr/local/sbin/dcms-uat-deploy` / 0755 |
-| `docker/deploy-uat.py` | `/srv/dcms-uat/release/docker/deploy-uat.py` / 0644 |
-| `docker/github-uat-auth.py` | `/srv/dcms-uat/release/docker/github-uat-auth.py` / 0644 |
-| `docker/uat-automation.example.json` | `/srv/dcms-uat/config/automation.json` / 0600, completed by owner |
-
-Provision `/srv/dcms-uat/deployment.lock` once as a root-owned regular 0600 file. Keep it permanently; deleting/replacing a live lock can defeat locking. `current.json` at `config/current.json` must be the actual last successfully deployed release manifest, validated against the running digest/tested ID, schema and volumes. Existing `compose.env` must reference that same digest and exactly `/srv/dcms-uat/config/app.env`, `db-password`, and `db-root-password`. Enrollment preserves the existing APP_KEY, DB users/accounts, documents/private/framework/database volumes and UAT settings. Do not copy example secrets over them.
-
-Complete `automation.json` **once**, under separately authorized administration: retain `enabled=false`, target `uat`, project `dcms-uat-xppl` and authorization `github-oidc`. Pin the immutable numeric `repository_id`, allowed numeric GitHub user `operator_ids`, and approved numeric `runner_ids` (obtain through authenticated GitHub administration, not names supplied by dispatch). Set `maximum_release_age_hours` to the approved positive limit, at most 8,760 hours; the example uses 168 hours. Record `recovery_reference` for the maintained, tested paired backup/restoration procedure. Set the real `https://APPROVED_HOST:8444/up` URL and positive `minimum_free_memory_mib` / `minimum_free_disk_bytes` thresholds, covering Docker and `/srv/dcms-uat` storage, image pull/retention and NetBox headroom. Empty IDs, null placeholders and old `owners`-only policies block authorization. Policy changes are one-time/access-policy administration, not per-release enrollment. No script fills these values or enables the server automatically.
-
-An upgrade must install the new helper and static policy together; there is no legacy approval-bundle fallback. Existing root request directories may remain archived but are not read. `config/previous.json`, when present, is the exact manifest for the last successful release replaced by automation; initialize it only from authenticated, observed history under administrator control. It is maintained automatically afterward. Leave it absent rather than inventing a rollback target. Existing APP_KEY, database accounts/credentials, storage and Apache settings are preserved. The automation uses only the local Unix Docker socket and a cleared environment.
-
-Create `dcms-deploy` as a dedicated unprivileged account with a locked password, no other authorized keys, no interactive login mechanism, no membership in docker/sudo/admin groups and no sudo grants except the exact wrapper below. A valid `/bin/sh` account shell is needed for OpenSSH forced commands; setting `nologin` can prevent them from running. Root manages the authorized keys outside the account home.
-
-Proposed OpenSSH account restriction, to merge carefully with host policy and test with `sshd -t` / `sshd -T -C ...` **before** an administrator reloads SSH (do not overwrite host configuration):
-
-```text
-Match User dcms-deploy
-    AuthorizedKeysFile /etc/ssh/authorized_keys/dcms-deploy
-    ForceCommand /usr/local/libexec/dcms-uat-ssh
-    AuthenticationMethods publickey
-    PasswordAuthentication no
-    KbdInteractiveAuthentication no
-    DisableForwarding yes
-    PermitTTY no
-    PermitUserRC no
-    PermitUserEnvironment no
-```
-
-The root-owned authorized-keys file must contain only the approved key, prefixed with `restrict,command="/usr/local/libexec/dcms-uat-ssh"`. Add a reviewed `from="..."` source allowlist when stable runner egress exists. Keep the file and all parent directories root-owned and non-writable by the account. `ForceCommand` covers the account even if a key option is accidentally omitted. Do not grant access via another SSH identity, certificate principal or password.
-
-Proposed root-owned `/etc/sudoers.d/dcms-uat-deploy` (0440), validated with `visudo -cf` before activation:
-
-```sudoers
-Defaults:dcms-deploy env_reset
-# Empty quoted argument string means NO arguments, not arbitrary arguments.
-dcms-deploy ALL=(root) NOPASSWD: /usr/local/sbin/dcms-uat-deploy ""
-```
-
-Do not use wildcards, `SETENV`, sudo access to Python/shell/Docker/Compose/install/systemctl, or writable wrapper/helper paths. The wrapper rejects all arguments, clears the environment and invokes isolated Python at one fixed path. The Python entry point also rejects arguments and bounds stdin size/time. Test denied shell/scp/sftp/forwarding/extra arguments and denied sudo Docker/shell commands under administrator supervision; do not test arbitrary host commands through the deployment identity. The SSH and sudoers designs are **not installed or activated** by adding these files to Git. See [OpenSSH forced commands and key restrictions](https://man.openbsd.org/sshd.8).
-
-## Release and schema eligibility
-
-No per-release server files, approval.json, request directory, handwritten digest or owner enrollment are needed. Normal deployment automatically obtains IDs from an eligible **Authorized release image** run: it must be completed/successful on main, with an unexpired manifest artifact for its current attempt. A push that succeeded inside an otherwise failed workflow is ineligible. Artifacts are retrieved by exact ID and must contain only `release-manifest.json`; manifests are not extracted into arbitrary filesystem paths. The server authenticates GitHub API evidence itself and saves the originals in deployment history.
-
-Reusing eligible evidence does not rebuild. If evidence is missing, the existing authorized publisher runs fresh full CI and publishes that exact tested image. There is no mutable-tag resolution or arbitrary GHCR image input. The release's immutable digest, tested configuration digest, source labels, platform, migration file hashes and exact-image smoke remain mandatory. Replaced/tagged packages or a supplied digest alone cannot authorize deployment. Stale workflow revisions require a new dispatch from current main. Old/expired releases require a fresh authorized publication with retained evidence; never loosen checks to reuse unavailable evidence.
-
-Automated UAT deployment always verifies candidate migration file hashes against the authenticated manifest and live migration names against the **current** deployed inventory before maintenance. Existing file edits/removal/reordering, live drift and rollback across schema changes remain refused. With root-owned policy `automatic_migrations: true`, a forward deployment may append new migration files after the unchanged deployed inventory. Review SQL/data compatibility in the approved PR; an append-only file list does not prove SQL is non-destructive. With this policy absent/false, schema changes still require the separate DBA process. First initialization remains manual.
-
-The existing paired recovery policy is now part of each dispatch. Enroll `backups/` (0700), `config/backup.cnf` and `config/migration.env` (root-owned 0600) as described in [uat.md](uat.md). Migration credentials must contain exactly `DB_USERNAME=dcms_uat_migrate` and `DB_PASSWORD`; no connection override or runtime DDL privilege is added. Provision the backup role and trigger/definer privileges independently. After maintenance, the engine stops only `app`, waits for its workers to exit and streams database SQL (including triggers/routines/events), both private file volumes and protected recovery configuration/APP_KEY to a new private backup directory. The enrolled synchronous-queue profile must have no external writers; scheduler/queue/service additions require a new quiescence review. Database container/volumes are never restarted or replaced.
-
-Install a reviewed **root-owned, non-symlink, executable** `/srv/dcms-uat/config/verify-backup` under the same protected parent custody. It receives one argument: the absolute new backup directory. The directory contains `database.sql`, `documents.tar`, `configuration.tar`, and `SHA256SUMS`. For UAT only, the hook may transfer an unencrypted paired off-server copy over pinned SSH, verify checksums/completeness and recoverable configuration, and enforce restore verification. Production encryption policy is unchanged. It must return nonzero on failure; do not install a no-op verifier. All output stays in root-only deployment history. The UAT Metabase receiver below supplies the off-server transport. Enrolling SSH and a real isolated restore verifier remains required; no new backup service is introduced. No dump, credential, receipt or secret is uploaded to GitHub artifacts. Local deployment backups are retained without automatic deletion. The Metabase receiver retains the latest three successfully verified sets in its dedicated managed directory; legacy and failed sets are not automatically deleted.
-
-Only a successful backup verification permits migrations or replacement. New migrations run once via the candidate image with the dedicated migration account, followed by exact schema verification. App recreation rebuilds configuration/routes/views through the existing entry point, retaining APP_KEY, data, uploads and numbering history. Any backup, migration or health error leaves maintenance and the recovery flag; inspect partial DDL and use an approved forward fix or paired recovery. Never automatically roll schema back. The one-time XPPL importer is **not** called and retains its independent source/plan approval and restore-test attestation requirements.
-
-## Run workflow
-
-1. In GitHub Actions open **Deploy DCMS UAT** → **Run workflow**, selecting **main**.
-2. Leave operation **deploy** and all advanced rollback fields blank. No IDs or digest are required.
-3. Click **Run workflow**. It automatically selects eligible current-main evidence or invokes the existing authorized publisher and waits for CI/publication. Existing GitHub environment controls still apply. Your numeric GitHub user ID must already be allowed by the server policy; no runner ID is entered. The dedicated job derives the digest and requests OIDC; the server verifies identity and independently authenticates the release before any Docker operation.
-4. Read the Actions result and the final **result** job summary. A refused prerequisite, failed/skipped/cancelled publication, schema mismatch, SSH failure or failed deployment cannot produce a successful final result. Inspect the failed step and linked publication run. There is no automatic retry or rollback. Forward migration requires the enrolled policy and verified backup. Technical success still requires representative HTTPS login/secure-cookie, English/Lao, permitted/denied synthetic attachment, numbering/export/audit checks and formal XPPL acceptance. A green deployment is not formal UAT acceptance. Submit one dispatch at a time and check run status; GitHub can replace an older pending run when another is queued.
-
-The fixed engine validates configuration/isolation, approved capacity, current healthy DB, previous app identity, persistent volume names/labels and Apache bind mount. It pulls **only** the selected app digest, verifies its tested image ID/OCI source/platform, and verifies migration hashes/live baseline. It enters maintenance, stops app writers, creates/verifies paired backups, applies eligible forward migrations, and replaces only `app` with `compose up -d --no-deps --no-build --pull never --force-recreate app`, verifies unchanged app mounts and DB container ID/start time/mounts/health, Apache config, writable private paths, DB status and schema again. It exits maintenance only after those checks, requires loopback and approved HTTPS `/up` HTTP 200 without redirects/insecure TLS, public `/storage/...` HTTP 403, and Docker app health. See [Compose app-only dependency behavior](https://docs.docker.com/reference/cli/docker/compose/up/).
-
-Image identity checks require the Docker Buildx plugin in the root execution environment. Using the existing protected `/srv/dcms-uat/registry` authentication, `buildx imagetools inspect --raw` retrieves only the approved immutable digest; the raw manifest SHA-256 must match that digest and its configuration descriptor must match the authenticated release's `tested_image_id`. Only single-platform OCI/Docker schema-2 image manifests are accepted; indexes, unavailable registry evidence or missing Buildx stop deployment without a fallback. Local platform/source-label and repository-digest checks remain mandatory. Docker's local image ID may be the configuration digest (classic store) or manifest digest (containerd store); previous and replacement containers must reference the exact approved digest, match that verified local ID and carry the approved source labels. The authenticated release manifest is never rewritten to accommodate either image store. See [Buildx raw manifest inspection](https://docs.docker.com/reference/cli/docker/buildx/imagetools/inspect/).
-
-Public request metadata, verified OIDC claims (without signature/token), authenticated release evidence, static policy/recovery reference, previous manifest, timestamps, root-only command logs and outcomes are retained at `history/gha-RUN-ATTEMPT`; no cleanup/prune/retention deletion is automated. Current manifest and the image line in `compose.env` are updated only after checks. App env/secrets are preserved. Logs may contain sensitive operational details: redact before sharing and apply the approved retention/encryption policy.
-
-## Incidents and safe rollback
-
-A failed health/replacement check requests maintenance again and records failure. There is **no automatic rollback**. Before requesting maintenance, the server writes root-owned `config/recovery-required.json`; only a completely successful deployment clears it. A failed/interrupted maintenance/replacement or partially updated state leaves that flag, blocking further dispatches until an administrator inspects and reconciles the incident. This is incident recovery, not a per-release approval gate.
-
-A hard kill, host crash, lost SSH connection or Docker timeout can leave uncertain state; maintenance is best effort if the app is unavailable. Do not assume cancellation means Docker stopped. Close UAT admission through the separately authorized ingress procedure, inspect only UAT, and check NetBox's existing baseline with its host owner. Preserve the lock/history and incident flag. Never delete history to retry a used run/attempt.
-
-Administrator checks the failed run's root-only logs/result, actual running image, DB identity/start time/health/mounts, maintenance marker, schema, volumes and current/previous manifests/Compose digest. State updates use separate file replacements; interruption can leave a mismatch, intentionally stopping another deployment. Reconcile these records with authentic observed state under incident authorization. Clear `recovery-required.json` only after documenting the resolution and safe next action. A fresh dispatch/attempt gets a new history ID; it does not repair unknown state. No global Docker cleanup, schema reset, volume deletion or NetBox/Nginx replacement is authorized.
-
-For an eligible app rollback, explicitly select the advanced **rollback** operation and the recorded previous publication's run/artifact IDs. Supply `rollback_compatibility_reference` identifying the operator's review confirming that the previous app supports the current data and unchanged schema. Automatic release selection/publication is disabled for this operation; missing IDs/reference fail immediately. This is an explicit authenticated operator attestation, not software proof of data compatibility. OIDC binds it to the exact request. The server requires the candidate manifest to equal protected `config/previous.json`, identical migration inventories and exact live schema, along with all normal publication/freshness/OCI/health checks. It does not permit an arbitrary old release, source downgrade through normal deploy, or rollback across schema changes. Restore/forward-repair authorization remains separate.
-
-An expired previous artifact, stale publication, missing compatibility review, schema/data incompatibility or unknown runtime blocks automated rollback. Keep maintenance/ingress closed and use a separately reviewed administrator recovery, compatible forward fix or paired restore with an explicit data-loss decision. Do not disable verification as a recovery shortcut.
-
-## Production promotion — prepared, disabled pending target enrollment
-
-Reuse the accepted immutable release image, `compose.release.yaml`, `docker/entrypoint.sh` and `docker/preflight.py --target production --project dcms-production-xppl` with distinct protected configuration. Do not rebuild an accepted image. The UAT overlay, fixed UAT paths/account/OIDC audience/SSH command and DB identity must never be repointed to Production.
-
-The controlled sequence is the same: authenticate explicit approval for the accepted digest/source/manifest, acquire the target lock, verify current DB/schema/volumes, quiesce writers, create and verify paired encrypted/off-host backups, run reviewed forward migrations with a separate account, recreate only the app to rebuild caches, verify storage/DB identity and HTTPS/private-path health, and record success before reopening admission. Failure retains maintenance and requires incident review; schema/data restore and incompatible rollback require separate explicit authorization.
-
-Before enabling a manual Production action, supply the independently verified Production host/project/database identity, health URL and runner identity; enroll its separate root-owned server entry point and deployment/recovery policy; provision target-specific migration/backup/runtime credentials and off-host verification; and establish a restore drill. Configure a protected `production` environment restricted to main with enforceable required approval (prevent self-approval), and protected main requiring PR approval and CI. Bind formal XPPL UAT acceptance to the exact deployed digest/source/manifest hash and previous Production state. The approval must cover migration/data compatibility and the recovery/data-loss decision. A typed confirmation alone does not replace those controls.
-
-These target and approval details are unavailable in this checkout. Consequently no pretend-success Production deploy action, shared UAT credential, or executable Production target is added. Implement its target authorization/enrollment using the existing engine's controls after those details are supplied; keep Production disabled until then. This is a remaining implementation/activation blocker, not a claim of a deployable Production system.
-
-## Local validation and remaining prerequisites
-
-Offline tests verify real OpenSSL RS256 signatures using ephemeral synthetic test keys and mocked HTTPS, identity/actor/runner/main/job rejection, automatic exact-main release selection, authorized-publication dispatch/polling, disabled-switch and aggregate failure behavior, stale evidence, request binding/replay, schema mismatch, rollback restrictions, OCI/containerd identity and failure recovery. They do not use live credentials or contact GitHub/UAT. Existing release-policy and Compose rendering tests remain applicable. Actionlint uses the existing custom runner label; syntax, credential-persistence and whitespace checks accompany the change.
-
-Local verification: 149 offline infrastructure regressions and 46 focused PHP tests passed; Pint and whitespace checks passed. Full application/database suites were left to GitHub CI. Branch reconciliation preserves main’s `symfony/mime` 8.1.10 security fix; the merged locked dependency audit passes without weakening CI.
-
-No live server, GitHub setting/secret, runner or variable is changed. Required before separately authorized activation: enforceable protected main and trusted workflow changes; isolated/restricted runner and pinned numeric IDs; existing server policy/helpers installed under root custody; approved SSH pin/key/network access; server HTTPS egress/OpenSSL/Buildx and synchronized UTC clock; authentic current-state enrollment; capacity/NetBox thresholds; maintained tested recovery procedure; and a controlled identity/runtime rehearsal. If any of these controls cannot be established, keep deployment disabled and treat that as a blocker. Production promotion still needs separate implementation and authorization.
-
-
-## UAT unencrypted off-server backup enrollment on Metabase
-
-This is a **UAT-only** alternative to encryption at rest, approved for destination `192.168.0.227`. Database SQL, document/private archives and configuration (including APP_KEY/password files) remain confidential. Transport is encrypted by SSH; files on Metabase are unencrypted and protected by a dedicated account, private directories, host firewall and no web access. Do not reuse these credentials or hooks for Production. Existing GitHub OIDC and backup gates are unchanged. Nothing in this procedure was executed by the implementation task.
-
-Both hosts require Python 3.11+ and OpenSSH client/server support for the documented restrictions. The same reviewed `docker/uat-backup.py` is installed on both hosts. On UAT it is the existing fixed `verify-backup` hook, accepting only `/srv/dcms-uat/backups/gha-RUN-ATTEMPT`. On Metabase it accepts a four-file stream through a forced SSH command, verifies all checksums, the SQL completion marker, private archive readability and required configuration members, then invokes a **mandatory real restore verifier** before recording success. A matching checksum receipt is returned over the same SSH connection. Missing files, transfer errors, wrong receipts, restore errors or timeouts fail deployment closed. Failure leaves private partial evidence for administrator inspection.
-
-### Metabase administrator — initial setup
-
-Run only during an approved host maintenance window. Verify the destination IP and existing services first. Use a dedicated account; do not change Metabase's application/database accounts, web configuration or data. The following assumes a new account and a new managed directory; if either already exists, inspect ownership/content and reconcile manually instead of overwriting it.
-
-```sh
-sudo useradd --system --create-home --home-dir /var/lib/dcms-uat-backup --shell /bin/sh dcms-uat-backup
-sudo passwd -l dcms-uat-backup
-sudo chown root:root /var/lib/dcms-uat-backup
-sudo chmod 0755 /var/lib/dcms-uat-backup
-sudo install -d -o root -g dcms-uat-backup -m 0750 /srv/dcms-uat-backups
-sudo install -d -o dcms-uat-backup -g dcms-uat-backup -m 0700 /srv/dcms-uat-backups/managed-v1
-sudo install -o root -g root -m 0755 /path/to/reviewed/docker/uat-backup.py /usr/local/libexec/dcms-uat-backup
-sudo install -d -o root -g root -m 0755 /etc/ssh/authorized_keys
-```
-
-`/path/to/reviewed` means the approved source bundle with independently verified checksum. Do not create `managed-v1` over existing backups: it must start empty. Keep all legacy directories outside it, untouched. No cleanup runs at installation. After each successful new transfer and restore check, only receiver-created `success-<32 hex characters>` directories with success receipts are eligible for retention; the newest three by completion directory mtime remain. Partial `pending-*` directories and legacy sets remain untouched. Account for their disk growth separately. Keep this path outside all web roots, public file mounts and network shares. Apply a storage quota/capacity alert through existing host administration; disk exhaustion must fail rather than overwrite backups.
-
-The installable verifier is `docker/uat-restore-check.py`. It runs as `dcms-uat-backup`, invokes the existing checksum/completeness validator and starts native MySQL 8.4 in a new private temporary data directory/socket for each backup. It reads no MySQL option files, uses no live credentials, publishes no TCP/X Protocol listener, disables events/local infile and uses a separate 64 MiB buffer pool. It has no access to Docker or the developer testing stack. MySQL is terminated and the disposable data directory removed on completion/failure; the original pending backup remains available on failure. A 450-second helper deadline fits the receiver's 480-second timeout. No persistent database service is installed by the helper.
-
-Verification restores the entire SQL dump without `--force`, checks restored migrations against `current.json`, checks every table, revalidates foreign-key relationships (dump imports temporarily disable foreign-key checks), requires numbering/history protection triggers, checks issued sequences and XPPL allocations against counters/baselines, and verifies every attachment version's size/SHA-256 against its archived object bytes. Private/configuration archives are fully read and checksummed without exposing secrets; APP_KEY must be present. Empty histories/physical-only documents are valid. This verifies restoration and internal consistency of this backup, not live source row counts or production grants/trigger-definer credentials. Full application recovery drills remain separate.
-
-After the existing receiver/account enrollment above, the **minimum additional Metabase administrator setup** is:
+Install only the changed entry point/runtime/validator files:
 
 ```sh
 sudo bash <<'SH'
 set -eu
 BUNDLE=/root/dcms-reviewed-bundle
-# Stage the reviewed repository files at BUNDLE first; do not use an unreviewed download.
-test -f "$BUNDLE/docker/uat-restore-check.py"
-test -f "$BUNDLE/docker/uat-backup.py"
-id dcms-uat-backup >/dev/null
-# Reuse installed native binaries only when mysqld reports 8.4.x.
-/usr/sbin/mysqld --no-defaults --version | grep -E 'Ver 8\.4\.'
-test -x /usr/bin/mysql
-install -o root -g root -m 0755 "$BUNDLE/docker/uat-backup.py" /usr/local/libexec/dcms-uat-backup
-install -o root -g root -m 0755 "$BUNDLE/docker/uat-restore-check.py" /usr/local/libexec/dcms-uat-restore-check
-install -d -o dcms-uat-backup -g dcms-uat-backup -m 0700 /srv/dcms-uat-backups/restore-work
+for name in deploy-uat-manual.py deploy-uat.py uat-backup.py; do
+  install -o root -g root -m 0644 "$BUNDLE/docker/$name" "/srv/dcms-uat/release/docker/$name"
+done
+install -o root -g root -m 0755 "$BUNDLE/docker/uat-deploy-entrypoint.sh" /usr/local/sbin/dcms-uat-deploy
 SH
 ```
 
-Prerequisites: Python 3.11+, compatible native MySQL **8.4** server/client binaries at the fixed paths above (including their runtime libraries), and capacity for a full temporary restored database in addition to retained backups. If the server has no suitable native binaries, an administrator must provision approved 8.4 binaries without replacing existing packages or starting/enabling a service. Do not run a generic MySQL server installer that changes existing applications. AppArmor/SELinux policy, if present, must permit only this dedicated work directory/socket through normal administrator review; do not disable confinement. Existing binaries/services for a different MySQL major must not be changed just to satisfy this verifier.
+`deploy-uat.py` remains a shared runtime library; its old OIDC `execute` function is not the privileged entry point. Legacy OIDC/selector/off-server helpers remain available for historical tests but are not called by this workflow or command. The existing forced SSH command `deploy-dcms-uat`, restricted `dcms-deploy` account and exact sudo permission for `/usr/local/sbin/dcms-uat-deploy` remain unchanged. Do not grant a shell, general sudo or Docker access. The account can invoke only this UAT deployment operation; protect its dedicated key accordingly.
 
-Once both SSH endpoints are enrolled and a complete approved paired backup exists on UAT, rehearse using the **existing sender**, which invokes the actual isolated verifier on Metabase:
+Confirm existing root custody and private configuration: `config/compose.env`, `app.env`, `migration.env`, `backup.cnf`, `current.json`, registry pull credentials and `deployment.lock`; keep secret files 0600 and history/backups 0700. Do not overwrite them with examples. `migration.env` must contain only `DB_USERNAME=dcms_uat_migrate` and its password. The existing backup account must have dump privileges. `config/automation.json` still supplies `enabled`, fixed `target=uat`, `project=dcms-uat-xppl` and the approved HTTPS health URL on port 8444. Numeric OIDC operator/runner pins and the old migration opt-in are no longer consulted. Stop if a previous deployment has an unresolved recovery flag; reconcile it through administrator inspection.
 
-```sh
-# UAT administrator: substitute an existing complete, approved backup set.
-sudo /srv/dcms-uat/config/verify-backup /srv/dcms-uat/backups/gha-RUN-ATTEMPT
-```
+In the existing GitHub `uat` environment, retain:
 
-The helper's zero exit is required before the receiver writes its success receipt and applies three-set retention. A missing binary, restore error, missing object, wrong hash, numbering inconsistency or timeout fails closed. No live UAT/Metabase/NetBox/Production database is ever used as a restore target. No server installation or real-backup rehearsal was performed while preparing this helper.
+- `ENABLE_UAT_DEPLOYMENT=true` once installation is complete;
+- `UAT_SSH_KEY` for the existing restricted deployment account;
+- `UAT_KNOWN_HOSTS` containing the independently verified host key for **192.168.0.228**, including its configured port notation;
+- `UAT_SSH_PORT` matching the existing SSH listener;
+- the existing dedicated runner labels `[self-hosted, Linux, X64, dcms-uat-runner]`, with network access to 192.168.0.228.
 
-### UAT administrator — dedicated transfer identity
-
-Generate a dedicated unattended transfer key under root custody (not the GitHub deployment key):
-
-```sh
-sudo ssh-keygen -t ed25519 -N '' -f /srv/dcms-uat/config/backup-ssh-key
-sudo chmod 0600 /srv/dcms-uat/config/backup-ssh-key
-sudo install -o root -g root -m 0755 /path/to/reviewed/docker/uat-backup.py /srv/dcms-uat/config/verify-backup
-```
-
-Preserve existing root-owned configuration/parents, APP_KEY, backups and OIDC policy. Do not overwrite an existing key. Send **only the public key** to the Metabase administrator through an approved channel. Independently verify Metabase's SSH host-key fingerprint with its administrator and create `/srv/dcms-uat/config/backup-known-hosts` (root-owned 0600) with that verified host key for `192.168.0.227`. `ssh-keyscan` output alone does not establish trust. The hook uses port 22, a fixed destination/account, strict host checking and no agent/password/forwarding fallback.
-
-### Metabase administrator — restrict SSH
-
-Create `/etc/ssh/authorized_keys/dcms-uat-backup` as root-owned 0600 with only that public key, prefixed by `restrict,from="APPROVED_UAT_SOURCE_IP",command="/usr/local/libexec/dcms-uat-backup"`. Replace the source placeholder with the UAT host's actual observed address, not the GitHub runner. Append a dedicated Match block through the host's reviewed SSH configuration process:
-
-```sshconfig
-Match User dcms-uat-backup
-    AuthorizedKeysFile /etc/ssh/authorized_keys/dcms-uat-backup
-    AuthenticationMethods publickey
-    PasswordAuthentication no
-    KbdInteractiveAuthentication no
-    PermitTTY no
-    DisableForwarding yes
-    ForceCommand /usr/local/libexec/dcms-uat-backup
-```
-
-The account needs `/bin/sh` for SSH forced-command execution; password login is locked, and the fixed receiver rejects any original command except `receive-dcms-uat-backup`. No shell, SCP, SFTP or arbitrary command is exposed. Keep the home and SSH configuration root-managed. Validate using `sudo sshd -t` and reload the host's existing SSH service through the administrator's normal process, retaining a recovery session. Allow TCP 22 from the UAT source only using the existing firewall policy. Do not open backup storage to HTTP or alter Metabase listeners.
-
-Before activation, rehearse a paired synthetic backup transfer and real isolated restore, verify the receipt and 0700/0600 permissions, test denied shell/SCP/wrong-key/unpinned-host access, and simulate transfer/checksum/restore failures. Confirm no legacy backups were touched and retention leaves exactly the latest three successful rehearsal sets. Installation/rehearsal require separate authorization; do not trigger a live application deployment to test enrollment. Preserve the existing deployment lock and recovery flags. Production's encrypted backup and explicit approval requirements remain unchanged.
+The host address is fixed in the workflow; `UAT_HOST` is no longer an input. No new secrets, OIDC setup, Metabase configuration, restore server or approval files are needed. After separately approved publication/installation, run the action as described above. No deployment was performed while implementing or testing this simplification.
