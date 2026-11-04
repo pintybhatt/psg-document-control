@@ -2,6 +2,8 @@
 
 Use native Windows PowerShell (5.1 or 7), Git and PHP with Visual Studio **Open Folder** or VS Code. This is a Laravel 13 / Vue 3 / Tailwind 4 application, not a .NET solution. Developers familiar with XPPL Toll can use the same feature-branch habits. WSL, Docker and MySQL are not required for ordinary development.
 
+XPPL developers already develop and maintain the XPPL Toll Collection App on native Windows laptops using Visual Studio/VS Code and Codex or Claude Code, while Toll is deployed on Linux with MySQL. **XPPL DCMS must support the same developer working arrangement:** native Windows remains the standard developer environment; WSL and Docker are not required for routine local development. Local DCMS development may use SQLite, while UAT and Production will run on Linux/MySQL. GitHub CI handles the required MySQL compatibility checks. Developers use feature branches and PRs, just as they do for the Toll App. The setup instructions below retain this arrangement; the documented Windows verification limits still apply.
+
 These instructions were checked against the repository manifests, locked package engines, command implementations and Artisan help on Linux. **They have not been executed on native Windows.** Installation, hidden password prompts, file locking and SQLite backup behavior still need a Windows smoke check. Stop at any failed command; do not paste later steps over an error.
 
 ## 1. Install or check native tools
