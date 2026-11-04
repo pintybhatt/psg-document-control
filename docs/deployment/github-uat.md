@@ -204,9 +204,39 @@ sudo install -d -o root -g root -m 0755 /etc/ssh/authorized_keys
 
 `/path/to/reviewed` means the approved source bundle with independently verified checksum. Do not create `managed-v1` over existing backups: it must start empty. Keep all legacy directories outside it, untouched. No cleanup runs at installation. After each successful new transfer and restore check, only receiver-created `success-<32 hex characters>` directories with success receipts are eligible for retention; the newest three by completion directory mtime remain. Partial `pending-*` directories and legacy sets remain untouched. Account for their disk growth separately. Keep this path outside all web roots, public file mounts and network shares. Apply a storage quota/capacity alert through existing host administration; disk exhaustion must fail rather than overwrite backups.
 
-Provision a reviewed root-owned executable `/usr/local/libexec/dcms-uat-restore-check` (0755, protected parents) that can run as `dcms-uat-backup`. Its single argument is the private pending backup directory. It must restore this SQL dump onto a **disposable, isolated MySQL 8.4 target**, check restored schema/migration state, triggers/constraints and representative row counts/numbering history; restore/check the paired documents/private archive against restored attachment metadata/hashes; and verify configuration/APP_KEY completeness without printing secrets. It must return zero only after successful restore verification, nonzero otherwise, and finish within 480 seconds. Preserve failed evidence. Never restore into UAT, Production or Metabase's operational database. The transport gives this account no sudo or Docker access. Any restore-target credentials must be dedicated to that isolated target and private to this account.
+The installable verifier is `docker/uat-restore-check.py`. It runs as `dcms-uat-backup`, invokes the existing checksum/completeness validator and starts native MySQL 8.4 in a new private temporary data directory/socket for each backup. It reads no MySQL option files, uses no live credentials, publishes no TCP/X Protocol listener, disables events/local infile and uses a separate 64 MiB buffer pool. It has no access to Docker or the developer testing stack. MySQL is terminated and the disposable data directory removed on completion/failure; the original pending backup remains available on failure. A 450-second helper deadline fits the receiver's 480-second timeout. No persistent database service is installed by the helper.
 
-**The isolated restore target and its existing tooling/credentials have not been supplied. An administrator must implement and review that site-specific verifier before activation. No no-op script, checksum-only replacement or unverified restore attestation is acceptable.** A missing/non-executable verifier fails closed. Encryption is no longer an enrollment blocker for UAT; actual restore verification still is.
+Verification restores the entire SQL dump without `--force`, checks restored migrations against `current.json`, checks every table, revalidates foreign-key relationships (dump imports temporarily disable foreign-key checks), requires numbering/history protection triggers, checks issued sequences and XPPL allocations against counters/baselines, and verifies every attachment version's size/SHA-256 against its archived object bytes. Private/configuration archives are fully read and checksummed without exposing secrets; APP_KEY must be present. Empty histories/physical-only documents are valid. This verifies restoration and internal consistency of this backup, not live source row counts or production grants/trigger-definer credentials. Full application recovery drills remain separate.
+
+After the existing receiver/account enrollment above, the **minimum additional Metabase administrator setup** is:
+
+```sh
+sudo bash <<'SH'
+set -eu
+BUNDLE=/root/dcms-reviewed-bundle
+# Stage the reviewed repository files at BUNDLE first; do not use an unreviewed download.
+test -f "$BUNDLE/docker/uat-restore-check.py"
+test -f "$BUNDLE/docker/uat-backup.py"
+id dcms-uat-backup >/dev/null
+# Reuse installed native binaries only when mysqld reports 8.4.x.
+/usr/sbin/mysqld --no-defaults --version | grep -E 'Ver 8\.4\.'
+test -x /usr/bin/mysql
+install -o root -g root -m 0755 "$BUNDLE/docker/uat-backup.py" /usr/local/libexec/dcms-uat-backup
+install -o root -g root -m 0755 "$BUNDLE/docker/uat-restore-check.py" /usr/local/libexec/dcms-uat-restore-check
+install -d -o dcms-uat-backup -g dcms-uat-backup -m 0700 /srv/dcms-uat-backups/restore-work
+SH
+```
+
+Prerequisites: Python 3.11+, compatible native MySQL **8.4** server/client binaries at the fixed paths above (including their runtime libraries), and capacity for a full temporary restored database in addition to retained backups. If the server has no suitable native binaries, an administrator must provision approved 8.4 binaries without replacing existing packages or starting/enabling a service. Do not run a generic MySQL server installer that changes existing applications. AppArmor/SELinux policy, if present, must permit only this dedicated work directory/socket through normal administrator review; do not disable confinement. Existing binaries/services for a different MySQL major must not be changed just to satisfy this verifier.
+
+Once both SSH endpoints are enrolled and a complete approved paired backup exists on UAT, rehearse using the **existing sender**, which invokes the actual isolated verifier on Metabase:
+
+```sh
+# UAT administrator: substitute an existing complete, approved backup set.
+sudo /srv/dcms-uat/config/verify-backup /srv/dcms-uat/backups/gha-RUN-ATTEMPT
+```
+
+The helper's zero exit is required before the receiver writes its success receipt and applies three-set retention. A missing binary, restore error, missing object, wrong hash, numbering inconsistency or timeout fails closed. No live UAT/Metabase/NetBox/Production database is ever used as a restore target. No server installation or real-backup rehearsal was performed while preparing this helper.
 
 ### UAT administrator — dedicated transfer identity
 
