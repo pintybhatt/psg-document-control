@@ -36,15 +36,15 @@ async function validate(event) {
 
 <template>
     <main class="flex min-h-dvh flex-col bg-slate-50 text-slate-800 lg:flex-row">
-        <section class="flex flex-col justify-between gap-8 bg-slate-950 px-6 py-8 text-white lg:w-5/12 lg:p-12">
+        <section class="@container flex flex-col justify-between gap-8 bg-slate-950 px-6 py-8 text-white lg:w-5/12 lg:p-12">
             <div class="flex items-center gap-3">
                 <span class="flex size-11 items-center justify-center rounded-xl bg-teal-400 text-sm font-bold text-slate-950">PSG</span>
                 <span class="text-sm font-semibold">Phonesack Group</span>
             </div>
-            <div class="max-w-lg">
+            <div class="min-w-0">
                 <p class="mb-3 text-sm font-semibold text-teal-300">DCMS</p>
-                <h1 class="text-2xl leading-relaxed font-semibold sm:text-3xl">{{ t('appDescription') }}</h1>
-                <p class="mt-4 text-sm leading-7 text-slate-300">{{ t('authWelcome') }}</p>
+                <h1 class="text-[clamp(0.875rem,5cqi,1.875rem)] leading-relaxed font-semibold" :class="{ 'whitespace-nowrap': language === 'en' }">{{ t('appDescription') }}</h1>
+                <p class="mt-4 max-w-lg text-sm leading-7 text-slate-300">{{ t('authWelcome') }}</p>
             </div>
             <p class="hidden text-xs text-slate-400 lg:block">{{ t('footer') }}</p>
         </section>
