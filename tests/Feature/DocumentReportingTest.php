@@ -19,6 +19,7 @@ use App\Models\OutgoingRecipient;
 use App\Models\Site;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PHPUnit\Framework\Attributes\TestWith;
@@ -112,6 +113,33 @@ class DocumentReportingTest extends TestCase
     private function reportUrl(object $record, string $path = 'dashboard', array $filters = []): string
     {
         return '/api/v1/'.$path.'?'.http_build_query($filters + ['company_id' => $record->profile->company_id, 'site_id' => $record->profile->site_id]);
+    }
+
+    public function test_requested_breakdown_preserves_rows_summary_and_the_default_report_contract(): void
+    {
+        [$record, $actor] = $this->fixture();
+        $this->grant($actor, $record->profile->documentScope()->authorizationScope(), ['reports.view']);
+        $results = [];
+        $groupQueries = [];
+        foreach (['default' => [], 'selected' => ['trend_group' => 'category_en']] as $mode => $filters) {
+            DB::flushQueryLog();
+            DB::enableQueryLog();
+            try {
+                $results[$mode] = $this->getJson($this->reportUrl($record, 'reports', $filters))->assertOk()->json();
+                $groupQueries[$mode] = count(array_filter(DB::getQueryLog(), fn (array $query): bool => str_contains(strtolower($query['query']), 'group by')));
+            } finally {
+                DB::disableQueryLog();
+            }
+        }
+
+        $this->assertSame(['register', 'type_en', 'category_en', 'department_en', 'site_en', 'company_en', 'status', 'owner_name', 'monthly'], array_keys($results['default']['trends']));
+        $this->assertSame(['category_en'], array_keys($results['selected']['trends']));
+        foreach (['data', 'meta', 'summary', 'scope'] as $key) {
+            $this->assertSame($results['default'][$key], $results['selected'][$key]);
+        }
+        $this->assertSame($results['default']['trends']['category_en'], $results['selected']['trends']['category_en']);
+        $this->assertSame(['default' => 9, 'selected' => 1], $groupQueries);
+        $this->getJson($this->reportUrl($record, 'reports', ['trend_group' => 'untrusted_column']))->assertUnprocessable()->assertJsonValidationErrors('trend_group');
     }
 
     public function test_dashboard_lifecycle_totals_do_not_count_physical_copies_as_documents(): void

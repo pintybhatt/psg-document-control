@@ -26,7 +26,9 @@ const isAudit = computed(() => ['audit', 'security'].includes(filters.view));
 const allUnits = ref(String(filters.all_departments) === '1'), allSites = ref(String(filters.all_sites) === '1');
 const breakdown = ref('category_en'), trends = ref(null);
 const page = ref(1), rows = ref([]), total = ref(0), summary = ref(null), types = ref([]), applied = ref(null), loading = ref(false), error = ref(''), preview = ref(false);
-let controller;
+let controller, latestQuery, scheduledLoad;
+let stopped = false;
+let lookupPending = false;
 const label = item => item?.[language.value === 'lo' ? 'name_lo' : 'name_en'] || item?.name_en || '';
 const can = permission => selected.value?.permissions.includes(permission);
 const viewOptions = computed(() => [...(can('reports.view') ? ['documents', 'revisions', 'physical'] : []), ...(can('documents.audit.view') ? ['audit'] : []), ...(can('security.audit.view') ? ['security'] : [])].map(value => ({ value, label: t(`reportView-${value}`) })));
@@ -58,27 +60,43 @@ function fail(failure) {
     rows.value = []; total.value = 0; summary.value = null; trends.value = null; applied.value = null; preview.value = false;
     if ([401, 419].includes(failure.status)) { workspace.revoke(); }
 }
-async function load(reset = false, lookups = false) {
+function scheduleLoad(reset = false, lookups = false, useApplied = false) {
+    controller?.abort();
+    if (scheduledLoad) {
+        scheduledLoad.reset ||= reset; scheduledLoad.lookups ||= lookups; scheduledLoad.useApplied &&= useApplied;
+        return;
+    }
+    scheduledLoad = { reset, lookups, useApplied };
+    nextTick(() => {
+        const pending = scheduledLoad; scheduledLoad = null;
+        if (!stopped) { load(pending.reset, pending.lookups, pending.useApplied); }
+    });
+}
+async function load(reset = false, lookups = false, useApplied = false) {
     controller?.abort(); controller = new AbortController(); const signal = controller.signal;
     preview.value = false; rows.value = []; total.value = 0; summary.value = null; trends.value = null; applied.value = null; error.value = ''; loading.value = false;
     if (reset) { page.value = 1; }
     if (!selected.value || !viewOptions.value.length) { return; }
     loading.value = true;
+    lookupPending ||= lookups;
     const scope = selected.value;
-    const query = { ...filters, company_id: scope.company_id, site_id: scope.site_id, department_id: scope.department_id, all_departments: allUnits.value || allSites.value ? 1 : 0, all_sites: allSites.value ? 1 : 0, include_unattributed: includeUnattributed.value ? 1 : 0, language: language.value, page: page.value };
+    const query = { ...(useApplied && latestQuery ? latestQuery : { ...filters, company_id: scope.company_id, site_id: scope.site_id, department_id: scope.department_id, all_departments: allUnits.value || allSites.value ? 1 : 0, all_sites: allSites.value ? 1 : 0, include_unattributed: includeUnattributed.value ? 1 : 0 }), language: language.value, page: page.value, trend_group: breakdown.value };
+    latestQuery = query;
     try {
         const result = await request(`${props.endpoint}?${params(query)}`, { signal });
         if (signal.aborted) { return; }
         rows.value = result.data; total.value = result.meta.total; summary.value = result.summary; capabilities.value = result.capabilities ?? {}; trends.value = result.trends; applied.value = { ...query };
-        if (lookups) { const lookup = await request(`${props.endpoint}/lookups?${params(query)}`, { signal }); if (!signal.aborted) { types.value = lookup.data; eventChoices.value = lookup.events ?? []; } }
+        if (lookupPending) { const lookup = await request(`${props.endpoint}/lookups?${params(query)}`, { signal }); if (!signal.aborted) { types.value = lookup.data; eventChoices.value = lookup.events ?? []; lookupPending = false; } }
     } catch (failure) { if (!signal.aborted) { fail(failure); } }
     finally { if (!signal.aborted) { loading.value = false; } }
 }
-watch(() => selected.value?.key, async () => { types.value = []; filters.type_id = ''; filters.category_id = ''; includeUnattributed.value = false; if (viewOptions.value.length && !viewOptions.value.some(item => item.value === filters.view)) { filters.view = viewOptions.value[0].value; } await nextTick(); load(true, true); }, { immediate: true });
+watch(() => selected.value?.key, () => { types.value = []; latestQuery = null; filters.type_id = ''; filters.category_id = ''; includeUnattributed.value = false; if (viewOptions.value.length && !viewOptions.value.some(item => item.value === filters.view)) { filters.view = viewOptions.value[0].value; } scheduleLoad(true, true); }, { immediate: true });
 watch(() => filters.register, () => { filters.status = ''; filters.type_id = ''; filters.category_id = ''; filters.metric = ''; filters.owner = ''; filters.revision = ''; filters.revision_state = ''; });
-watch(() => filters.view, async view => { filters.metric = ''; filters.status = ''; filters.type_id = ''; filters.category_id = ''; filters.revision = ''; filters.revision_state = ''; filters.physical = ''; filters.custodian = ''; filters.custody_status = ''; filters.copy_kind = ''; filters.event = ''; filters.outcome = ''; filters.operation = ''; includeUnattributed.value = false; if (view === 'revisions') { filters.register = 'controlled'; } await nextTick(); load(true, true); });
-watch([allUnits, allSites, includeUnattributed], () => load(true, true));
-onBeforeUnmount(() => controller?.abort());
+watch(() => filters.view, view => { filters.metric = ''; filters.status = ''; filters.type_id = ''; filters.category_id = ''; filters.revision = ''; filters.revision_state = ''; filters.physical = ''; filters.custodian = ''; filters.custody_status = ''; filters.copy_kind = ''; filters.event = ''; filters.outcome = ''; filters.operation = ''; includeUnattributed.value = false; if (view === 'revisions') { filters.register = 'controlled'; } scheduleLoad(true, true); });
+watch([allUnits, allSites], () => scheduleLoad(true, true));
+watch(includeUnattributed, () => scheduleLoad(true));
+watch(breakdown, () => scheduleLoad(false, false, true));
+onBeforeUnmount(() => { stopped = true; controller?.abort(); });
 </script>
 
 <template>

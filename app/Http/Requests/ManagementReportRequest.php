@@ -15,6 +15,7 @@ class ManagementReportRequest extends DocumentSearchRequest
 
         return $rules + [
             'view' => ['nullable', Rule::in(['documents', 'revisions', 'physical', 'audit', 'security'])],
+            'trend_group' => ['nullable', Rule::in(['register', 'type_en', 'category_en', 'department_en', 'site_en', 'company_en', 'status', 'owner_name', 'monthly'])],
             'metric' => ['nullable', Rule::in(['registered', 'open', 'closed', 'in_progress', 'pending_response', 'due_soon', 'overdue', 'dispatched', 'delivered', 'acknowledged', 'review_soon', 'review_overdue', 'checkout_overdue', 'inventory_discrepancy'])],
             'all_departments' => ['sometimes', 'boolean'], 'all_sites' => ['sometimes', 'boolean'],
             'event' => ['nullable', 'string', 'max:100'], 'operation' => ['nullable', Rule::in(['metadata', 'preview', 'download'])], 'outcome' => ['nullable', Rule::in(['allowed', 'denied', 'activity'])], 'include_unattributed' => ['sometimes', 'boolean'],
