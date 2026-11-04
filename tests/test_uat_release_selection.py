@@ -187,17 +187,16 @@ class WorkflowGateTests(unittest.TestCase):
         return subprocess.run(['bash', '-euo', 'pipefail', '-c', script], env=dict(os.environ, **environment),
                               capture_output=True, text=True, timeout=10)
 
-    def test_enabled_dispatch_passes_and_disabled_missing_wrong_ref_or_repository_fail(self):
-        script = self.script('deploy-uat.yml', 'Require enabled UAT dispatch from main')
-        environment = dict(ENABLED='true', GITHUB_EVENT_NAME='workflow_dispatch', GITHUB_REF='refs/heads/main',
-                           GITHUB_REPOSITORY='pintybhatt/psg-document-control')
-        self.assertEqual(self.run_script(script, **environment).returncode, 0)
-        for key, value in [('ENABLED', 'false'), ('ENABLED', ''), ('GITHUB_REF', 'refs/heads/feature'),
-                           ('GITHUB_EVENT_NAME', 'push'), ('GITHUB_REPOSITORY', 'other/repo')]:
-            with self.subTest(key=key, value=value):
-                result = self.run_script(script, **dict(environment, **{key: value}))
-                self.assertNotEqual(result.returncode, 0)
-                self.assertIn('::error::', result.stdout)
+    def test_enabled_manual_main_dispatch_writes_only_validated_image_request(self):
+        script = self.script('deploy-uat.yml', 'Validate manual main deployment and prepare request')
+        with tempfile.TemporaryDirectory() as directory:
+            environment = dict(ENABLED='true', CONFIRM='DEPLOY_UAT', IMAGE='ghcr.io/pintybhatt/psg-document-control@sha256:'+'a'*64,
+                               GITHUB_EVENT_NAME='workflow_dispatch', GITHUB_REF='refs/heads/main', GITHUB_SHA='b'*40,
+                               GITHUB_REPOSITORY='pintybhatt/psg-document-control', GITHUB_RUN_ID='1', GITHUB_RUN_ATTEMPT='1', RUNNER_TEMP=directory)
+            self.assertEqual(self.run_script(script, **environment).returncode, 0)
+            for key, value in [('ENABLED','false'), ('CONFIRM',''), ('IMAGE','latest'), ('GITHUB_REF','refs/heads/other'), ('GITHUB_EVENT_NAME','push')]:
+                with self.subTest(key=key):
+                    self.assertNotEqual(self.run_script(script, **dict(environment, **{key:value})).returncode, 0)
 
     def test_publication_switch_is_checked_inside_environment_before_any_checkout(self):
         script = self.script('release-image.yml', 'Require explicit publication authorization')
@@ -207,47 +206,10 @@ class WorkflowGateTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('Image publication is disabled', result.stdout)
 
-    def test_workflow_wires_automatic_selection_publication_and_read_only_deployment(self):
+    def test_manual_workflow_has_one_job_and_no_publication_or_oidc_or_restore_dependency(self):
         workflow = (ROOT/'.github/workflows/deploy-uat.yml').read_text()
-        resolve = workflow.split('  resolve:\n', 1)[1].split('\n  publish:', 1)[0]
-        publish = workflow.split('  publish:\n', 1)[1].split('\n  deploy:', 1)[0]
-        deploy = workflow.split('  deploy:\n', 1)[1].split('\n  result:', 1)[0]
-        result = workflow.split('  result:\n', 1)[1]
-        for line in workflow.splitlines():
-            if line.startswith('    if:'):
-                self.assertNotIn('vars.ENABLE_UAT_DEPLOYMENT', line)
-        self.assertIn('environment: uat', resolve)
-        self.assertLess(resolve.index('Require enabled UAT dispatch from main'), resolve.index('actions/checkout@'))
-        self.assertIn("if: needs.resolve.outputs.needs_publication == 'true'", publish)
-        self.assertIn('actions: write', publish)
-        self.assertNotIn('id-token:', publish)
-        self.assertNotIn('UAT_SSH_KEY', publish)
-        self.assertIn('docker/select-uat-release.py publish', publish)
-        self.assertIn('needs: [resolve, publish]', deploy)
-        self.assertIn("needs.publish.result == 'skipped'", deploy)
-        self.assertIn('needs.resolve.outputs.release_run_id || needs.publish.outputs.release_run_id', deploy)
-        self.assertIn('actions: read', deploy)
-        self.assertNotIn('actions: write', deploy)
-        self.assertIn('id-token: write', deploy)
-        self.assertIn('if: always()', result)
-        self.assertIn('needs: [resolve, publish, deploy]', result)
-        inputs = workflow.split('    inputs:\n', 1)[1].split('\npermissions:', 1)[0]
-        for field in ('release_run_id', 'release_artifact_id', 'rollback_compatibility_reference'):
-            self.assertRegex(inputs, r'(?m)^      '+field+r':\n        description: [^\n]+\n        required: false$')
-
-    def test_final_result_fails_for_upstream_refusal_skip_failure_or_cancellation(self):
-        script = self.script('deploy-uat.yml', 'Report deployment result')
-        with tempfile.TemporaryDirectory() as directory:
-            environment = dict(GITHUB_STEP_SUMMARY=str(Path(directory)/'summary'), RESOLVE='success', PUBLISH='skipped', DEPLOY='success')
-            self.assertEqual(self.run_script(script, **environment).returncode, 0)
-            self.assertEqual(self.run_script(script, **dict(environment, PUBLISH='success')).returncode, 0)
-            for key, value in [('RESOLVE', 'failure'), ('PUBLISH', 'failure'), ('DEPLOY', 'failure'),
-                               ('DEPLOY', 'skipped'), ('DEPLOY', 'cancelled')]:
-                with self.subTest(key=key, value=value):
-                    result = self.run_script(script, **dict(environment, **{key: value}))
-                    self.assertNotEqual(result.returncode, 0)
-                    self.assertIn('::error::', result.stdout)
-
-
-if __name__ == '__main__':
-    unittest.main()
+        self.assertIn('UAT_HOST: 192.168.0.228', workflow)
+        self.assertNotIn('id-token:', workflow)
+        self.assertNotIn('  publish:', workflow)
+        self.assertNotIn('  resolve:', workflow)
+        self.assertNotIn('select-uat-release', workflow)

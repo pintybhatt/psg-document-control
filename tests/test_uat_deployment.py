@@ -764,17 +764,18 @@ class DeploymentBoundaryTests(unittest.TestCase):
         self.assertIn('separate controlled migration/recovery is required', str(result.exception))
         self.assertNotIn('synthetic-secret-never-log', str(result.exception))
 
-    def test_workflow_keeps_dispatch_main_runner_and_least_privilege_without_image_or_request_inputs(self):
+    def test_workflow_keeps_manual_main_runner_and_read_only_permissions(self):
         repository = Path(__file__).resolve().parent.parent
         workflow = (repository/'.github/workflows/deploy-uat.yml').read_text()
         self.assertIn('  workflow_dispatch:', workflow)
-        self.assertIn('"$GITHUB_REF" != refs/heads/main', workflow)
+        self.assertIn('test "$GITHUB_REF" = refs/heads/main', workflow)
         self.assertIn('ENABLED: ${{ vars.ENABLE_UAT_DEPLOYMENT }}', workflow)
         self.assertIn('runs-on: [self-hosted, Linux, X64, dcms-uat-runner]', workflow)
         self.assertIn('    environment: uat', workflow)
-        self.assertIn('      contents: read\n      actions: read\n      id-token: write', workflow)
+        self.assertIn('  contents: read', workflow)
+        self.assertNotIn('id-token:', workflow)
         self.assertNotIn('packages: write', workflow)
-        self.assertNotIn('      image:', workflow)
+        self.assertIn('      image:', workflow)
         self.assertNotIn('      request_id:', workflow)
         self.assertNotIn('pull_request', workflow)
         self.assertIs(json.loads((repository/'docker/uat-automation.example.json').read_text())['enabled'], False)
