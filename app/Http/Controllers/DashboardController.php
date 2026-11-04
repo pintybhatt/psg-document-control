@@ -43,6 +43,6 @@ class DashboardController extends Controller
         $reports->audit($request->user(), $contexts, $profileIds, 'dashboard.viewed');
 
         return response()->json(['totals' => $totals, 'recent' => $recent->map($format), 'due' => $due->map($format), 'reviews' => $reviews->map($format),
-            'links' => $links, 'trends' => $reports->trends(clone $documents), 'quick_actions' => array_values($quickActions)], headers: ['Cache-Control' => 'private, no-store']);
+            'links' => $links, 'trends' => $reports->trends(clone $documents, ['monthly', 'category_en', 'department_en']), 'quick_actions' => array_values($quickActions)], headers: ['Cache-Control' => 'private, no-store']);
     }
 }

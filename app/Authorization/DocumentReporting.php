@@ -20,7 +20,7 @@ class DocumentReporting
      */
     public function contexts(User $actor, array $filters, ?string $permission = null): array
     {
-        $contexts = array_values(array_filter($this->workspaces->forUser($actor), function (array $context) use ($filters, $permission): bool {
+        $contexts = array_values(array_filter($this->workspaces->forUser($actor, $filters), function (array $context) use ($filters, $permission): bool {
             return (! empty($filters['all_sites']) || ($context['company_id'] === (int) $filters['company_id'] && $context['site_id'] === (int) $filters['site_id']))
                 && (! empty($filters['all_departments']) || $context['department_id'] === (isset($filters['department_id']) ? (int) $filters['department_id'] : null))
                 && ($permission === null || in_array($permission, $context['permissions'], true));
@@ -36,24 +36,16 @@ class DocumentReporting
      */
     public function documents(User $actor, array $filters, array $contexts): Builder
     {
-        $union = null;
-        foreach ($contexts as $context) {
-            $scope = new DocumentScope($context['company_id'], $context['site_id'], $context['department_id']);
-            $searchFilters = array_diff_key($filters, ['owner' => true, 'revision' => true, 'revision_state' => true]);
-            $query = $this->search->query($actor, $scope, $searchFilters)->reorder();
-            $union = $union ? $union->unionAll($query) : $query;
-        }
+        $searchFilters = array_diff_key($filters, ['owner' => true, 'revision' => true, 'revision_state' => true]);
+        $union = $this->search->queryForContexts($actor, $contexts, $searchFilters)->reorder();
         $query = DB::query()->fromSub($union, 'd')->join('document_security_profiles as p', 'p.id', '=', 'd.profile_id')
             ->join('document_types as type', 'type.id', '=', 'd.type_id')->join('document_categories as category', 'category.id', '=', 'type.category_id')
             ->leftJoin('departments as department', 'department.id', '=', 'p.department_id')
             ->leftJoin('companies as company', 'company.id', '=', 'p.company_id')->leftJoin('sites as site', 'site.id', '=', 'p.site_id')
-            ->leftJoin('incoming_correspondences as inc', fn (JoinClause $join): JoinClause => $join->on('inc.id', '=', 'd.id')->where('d.register', 'incoming'))
-            ->leftJoin('incoming_correspondence_operations as io', 'io.correspondence_id', '=', 'inc.id')
-            ->leftJoin('outgoing_correspondences as outgoing', fn (JoinClause $join): JoinClause => $join->on('outgoing.id', '=', 'd.id')->where('d.register', 'outgoing'))
-            ->leftJoin('outgoing_operations as oo', 'oo.correspondence_id', '=', 'outgoing.id')
-            ->leftJoin('controlled_documents as cd', fn (JoinClause $join): JoinClause => $join->on('cd.id', '=', 'd.id')->where('d.register', 'controlled'))
-            ->leftJoin('controlled_revisions as released', fn (JoinClause $join): JoinClause => $join->on('released.id', '=', 'cd.current_revision_id')->whereNotNull('released.released_at'))
-            ->leftJoin('controlled_revisions as draft_focus', fn (JoinClause $join): JoinClause => $join->on('draft_focus.document_id', '=', 'cd.id')->where('draft_focus.draft_slot', 1))
+            ->leftJoin('incoming_correspondence_operations as io', fn (JoinClause $join): JoinClause => $join->on('io.correspondence_id', '=', 'd.id')->where('d.register', 'incoming'))
+            ->leftJoin('outgoing_operations as oo', fn (JoinClause $join): JoinClause => $join->on('oo.correspondence_id', '=', 'd.id')->where('d.register', 'outgoing'))
+            ->leftJoin('controlled_revisions as released', fn (JoinClause $join): JoinClause => $join->on('released.id', '=', 'd.current_revision_id')->whereNotNull('released.released_at'))
+            ->leftJoin('controlled_revisions as draft_focus', fn (JoinClause $join): JoinClause => $join->on('draft_focus.document_id', '=', 'd.id')->where('d.register', 'controlled')->where('draft_focus.draft_slot', 1))
             ->leftJoin('users as owner', fn (JoinClause $join): JoinClause => $join->whereRaw('owner.id = COALESCE(released.owner_id, draft_focus.owner_id)'))
             ->leftJoin('users as custodian', fn (JoinClause $join): JoinClause => $join->whereRaw('custodian.id = COALESCE(released.custodian_id, draft_focus.custodian_id)'))
             ->select(['d.*', 'p.company_id', 'p.site_id', 'p.department_id', 'p.classification', 'type.category_id', 'io.due_date'])
@@ -181,15 +173,22 @@ class DocumentReporting
         return $totals + array_map(intval(...), (array) $physical);
     }
 
-    /** @return array<string, mixed> */
-    public function trends(Builder $documents): array
+    /** @param list<string>|null $requestedGroups
+     * @return array<string, mixed>
+     */
+    public function trends(Builder $documents, ?array $requestedGroups = null): array
     {
         $groups = [];
         foreach (['register' => ['register'], 'type_en' => ['type_id', 'type_en', 'type_lo'], 'category_en' => ['category_id', 'category_en', 'category_lo'], 'department_en' => ['department_id', 'department_en', 'department_lo'], 'site_en' => ['site_id', 'site_en', 'site_lo'], 'company_en' => ['company_id', 'company_en', 'company_lo'], 'status' => ['register', 'status'], 'owner_name' => ['owner_id', 'owner_name']] as $key => $columns) {
+            if ($requestedGroups !== null && ! in_array($key, $requestedGroups, true)) {
+                continue;
+            }
             $groups[$key] = (clone $documents)->select($columns)->selectRaw('COUNT(*) as total')->groupBy(...$columns)->orderByDesc('total')->orderBy($columns[0])->limit(20)->get();
         }
-        $groups['monthly'] = (clone $documents)->selectRaw('SUBSTR(document_date, 1, 7) as month, register, COUNT(*) as total')->whereNotNull('document_date')
-            ->groupByRaw('SUBSTR(document_date, 1, 7), register')->orderByDesc('month')->orderBy('register')->limit(36)->get();
+        if ($requestedGroups === null || in_array('monthly', $requestedGroups, true)) {
+            $groups['monthly'] = (clone $documents)->selectRaw('SUBSTR(document_date, 1, 7) as month, register, COUNT(*) as total')->whereNotNull('document_date')
+                ->groupByRaw('SUBSTR(document_date, 1, 7), register')->orderByDesc('month')->orderBy('register')->limit(36)->get();
+        }
 
         return $groups;
     }
