@@ -185,6 +185,7 @@ class ManageOutgoingCorrespondence
                     if (! $record->recipients()->where('kind', 'primary')->exists()) {
                         throw ValidationException::withMessages(['recipients' => 'outgoingPrimaryRequired']);
                     }
+                    app(DocumentApprovals::class)->requireApproved($actor, $record);
                     $record->fill(['status' => 'registered', 'internal_number' => $internalNumber, 'official_number' => $officialNumber,
                         'registered_by' => $actor->id, 'registered_at' => now(), 'updated_by' => $actor->id]);
                     if (! $record->save()) {

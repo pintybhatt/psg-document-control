@@ -31,7 +31,7 @@ class NumberingRequest extends RbacScopeRequest
         }
         $rules += NumberingFormat::rules();
         if ($this->route()->getName() === 'api.v1.numbering.preview') {
-            return $rules + ['year' => ['required', 'integer', 'between:2000,9999']];
+            return $rules + ['year' => ['required', 'integer', 'between:2000,9999'], 'reset_policy' => ['sometimes', Rule::enum(NumberingResetPolicy::class)]];
         }
         $rules['year'] = ['prohibited'];
         $rules += ['active' => ['required', 'boolean'], 'change_reason' => ['nullable', 'string', 'max:500']];

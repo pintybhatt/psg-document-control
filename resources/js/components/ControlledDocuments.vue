@@ -1,4 +1,5 @@
 <script setup>
+import DocumentApprovalPanel from './DocumentApprovalPanel.vue';
 import DocumentStorage from './DocumentStorage.vue';
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import { formatDate, formatDateTime } from '../utilities/dates.js';
@@ -31,15 +32,16 @@ const search = ref(''), status = ref(''), typeFilter = ref('');
 const namespaceId = ref('');
 const namespaceOptions = computed(() => [{ value: '', label: t('numberingLegacy') }, ...(detail.value?.xppl_namespaces ?? []).map(item => ({ value: item.id, label: item.prefix }))]);
 const detail = ref(null), audits = ref([]), related = ref([]), editing = ref(false), action = ref('');
+const approvals = ref([]), reviews = ref([]), execution = ref(null);
 const loading = ref(false), saving = ref(false), error = ref(''), fields = ref({});
 const replacements = ref([]), replacementSearch = ref('');
-const actionForm = reactive({ reason: '', revision_reason: '', change_description: '', status: 'obsolete', replaced_by_id: '' });
+const actionForm = reactive({ reason: '', revision_reason: '', change_description: '', status: 'obsolete', replaced_by_id: '', decision: '', outcome: 'no_changes_required', comments: '' });
 const form = reactive({});
 const editor = ref(null);
 const selectedFile = ref(null), attachmentReason = ref(''), pendingUpload = ref(false), uploadError = ref('');
 const attachmentRevisionId = ref(null), attachmentBusy = ref(false);
 const attachmentRevision = computed(() => detail.value?.revisions.find(item => item.id === attachmentRevisionId.value) ?? draft.value ?? authoritative.value ?? detail.value?.revisions.at(-1));
-const revisionLabel = revision => `R${revision?.identifier ?? '00'}`;
+const revisionLabel = revision => revision?.identifier ?? 'R00';
 function clearSelectedFile() { selectedFile.value = null; attachmentReason.value = ''; pendingUpload.value = false; uploadError.value = ''; }
 function storageUrl(record, revisionId) {
     return `${record.storage_url.replace(/\/$/, '')}/attachments?${new URLSearchParams(Object.entries({ ...scopeData(), revision_id: revisionId }).filter(([, value]) => value != null))}`;
@@ -59,6 +61,12 @@ const canRegister = computed(() => can('controlled.register') && can('numbering.
 const draft = computed(() => detail.value?.revisions.find(item => item.status === 'draft'));
 const authoritative = computed(() => detail.value?.revisions.find(item => item.id === detail.value.authoritative_revision_id));
 const editable = computed(() => ['draft', 'current'].includes(detail.value?.status));
+const reviewOptions = computed(() => ['no_changes_required', 'revision_required'].map(value => ({ value, label: t(`controlledReview-${value}`) })));
+const nextReview = computed(() => reviews.value.findLast(item => item.revision_id === authoritative.value?.id)?.next_review_date?.slice(0, 10) ?? authoritative.value?.review_date);
+const approvalOptions = computed(() => [
+    ...(can('controlled.drafts.manage') ? ['submitted'] : []),
+    ...(can('controlled.approvals.record') ? ['approved', 'rejected'] : []),
+].map(value => ({ value, label: t(`controlledApproval-${value}`) })));
 const typeOptions = computed(() => [{ value: '', label: t('uiChoose') }, ...types.value.map(item => ({ value: item.id, label: label(item) }))]);
 const selectedType = computed(() => types.value.find(item => String(item.id) === String(form.type_id)));
 const automaticDraft = computed(() => (!detail.value || !detail.value.document_code)
@@ -90,9 +98,10 @@ function url(path = '', extra = {}) { return `${props.endpoint}${path}?${new URL
 function fail(failure) {
     if (failure.name === 'AbortError') { return; }
     fields.value = failure.fields ?? {};
-    error.value = Object.values(fields.value).flat().find(value => /^(controlled|rbac|numbering|storage)/.test(value)) ?? failure.message;
-    if (!/^(controlled|rbac|numbering|storage)/.test(error.value)) { error.value = 'rbacRequestFailed'; }
+    error.value = Object.values(fields.value).flat().find(value => /^(controlled|rbac|numbering|storage|approval)/.test(value)) ?? failure.message;
+    if (!/^(controlled|rbac|numbering|storage|approval)/.test(error.value)) { error.value = 'rbacRequestFailed'; }
     if ([401, 403, 404, 419].includes(failure.status)) {
+        approvals.value = []; reviews.value = []; execution.value = null;
         clearSelectedFile(); rows.value = []; detail.value = null; audits.value = []; related.value = []; types.value = []; people.value = []; replacements.value = []; total.value = 0; editing.value = false; action.value = '';
         if (failure.status !== 404) { controller?.abort(); emit('unauthorized', failure); }
     }
@@ -122,6 +131,7 @@ async function refreshCreateContext() {
     finally { if (!signal.aborted) { contextLoading.value = false; } }
 }
 async function reset() {
+    approvals.value = []; reviews.value = []; execution.value = null;
     const reopenCreate = reopenCreateAfterScopeChange;
     reopenCreateAfterScopeChange = false;
     if (reopenCreate) { await refreshCreateContext(); return; }
@@ -139,10 +149,11 @@ async function reset() {
     catch (failure) { if (!signal.aborted) { fail(failure); } }
 }
 async function show(row) {
+    approvals.value = []; reviews.value = []; execution.value = null;
     clearSelectedFile(); attachmentRevisionId.value = null;
     const signal = controller.signal;
     detail.value = null; audits.value = []; related.value = []; editing.value = false; action.value = ''; error.value = ''; fields.value = {}; loading.value = true;
-    try { const result = await request(url(`/${row.id}`), { signal }); if (!signal.aborted) { detail.value = result.data; audits.value = result.audits; related.value = result.related; await nextTick(); document.getElementById('controlled-detail-title')?.focus(); } }
+    try { const result = await request(url(`/${row.id}`), { signal }); if (!signal.aborted) { detail.value = result.data; audits.value = result.audits; related.value = result.related; execution.value = result.approval_execution ?? null; approvals.value = result.approvals ?? []; reviews.value = result.reviews ?? []; await nextTick(); document.getElementById('controlled-detail-title')?.focus(); } }
     catch (failure) { if (!signal.aborted) { fail(failure); } }
     finally { if (!signal.aborted) { loading.value = false; } }
 }
@@ -209,6 +220,8 @@ async function mutate(path, body, method = 'POST') {
 async function beginAction(value) {
     action.value = value; error.value = ''; fields.value = {};
     Object.assign(actionForm, { reason: '', revision_reason: '', change_description: '', status: detail.value.status === 'current' ? 'obsolete' : 'archived', replaced_by_id: '' });
+    actionForm.outcome = 'no_changes_required';
+    actionForm.decision = approvalOptions.value[0]?.value ?? ''; actionForm.comments = '';
     replacements.value = []; replacementSearch.value = '';
     await nextTick(); document.getElementById('controlled-action-title')?.focus();
 }
@@ -222,6 +235,14 @@ async function findReplacements() {
 async function submitAction() {
     if (saving.value || attachmentBusy.value || !detail.value) { return; }
     const body = { lock_version: detail.value.lock_version };
+    if (action.value === 'reviews') {
+        await mutate(`/${detail.value.id}/revisions/${authoritative.value.id}/reviews`, { ...body, outcome: actionForm.outcome, comments: actionForm.comments || null });
+        return;
+    }
+    if (action.value === 'approvals') {
+        await mutate(`/${detail.value.id}/revisions/${draft.value.id}/approvals`, { ...body, decision: actionForm.decision, comments: actionForm.comments || null });
+        return;
+    }
     if (action.value === 'register' && namespaceId.value) { body.namespace_id = Number(namespaceId.value); }
     if (action.value === 'revisions') { Object.assign(body, { revision_reason: actionForm.revision_reason, change_description: actionForm.change_description }); }
     if (action.value === 'release') { Object.assign(body, { revision_id: draft.value.id, reason: actionForm.reason }); }
@@ -287,7 +308,7 @@ onBeforeUnmount(() => controller?.abort());
             <template v-else-if="draft">
                 <p v-if="authoritative" class="text-sm text-slate-600">{{ t('controlledReleasedAttachment', { revision: revisionLabel(authoritative) }) }} · {{ t('controlledDraftFileHelp') }}</p>
                 <p class="text-sm font-semibold text-teal-900">{{ t('controlledDraftAttachment', { revision: revisionLabel(draft) }) }}</p>
-                <DocumentStorage mode="attachments" embedded :fixed-revision="draft.id" :endpoint="detail.storage_url" :scope="scope" :csrf-token="csrfToken" :disabled="saving" @failure="fail" @busy="attachmentBusy = $event" />
+                <DocumentStorage mode="attachments" embedded :fixed-revision="draft.id" :endpoint="detail.storage_url" :scope="scope" :csrf-token="csrfToken" :disabled="saving" @failure="fail" @busy="attachmentBusy = $event" @changed="execution && show(detail)" />
             </template>
             <p v-if="contextLoading" role="status" class="text-sm text-slate-600">{{ t('documentDepartmentLoading') }}</p>
             <div class="flex gap-3"><UiButton type="submit" :loading="saving" :disabled="contextLoading || !contextValid || attachmentBusy">{{ t(pendingUpload ? 'controlledRetryAttachment' : 'controlledSave') }}</UiButton><UiButton variant="secondary" :disabled="saving || attachmentBusy" @click="cancelEdit">{{ t(pendingUpload ? 'controlledContinueWithoutAttachment' : 'uiCancel') }}</UiButton></div>
@@ -299,7 +320,7 @@ onBeforeUnmount(() => controller?.abort());
                     <UiButton v-for="revision in detail.revisions.toReversed()" :key="revision.id" variant="secondary" :disabled="saving || loading || attachmentBusy" :aria-pressed="attachmentRevision.id === revision.id" @click="attachmentRevisionId = revision.id">{{ t(revision.status === 'draft' ? 'controlledDraftAttachment' : revision.id === detail.authoritative_revision_id ? 'controlledReleasedAttachment' : 'controlledHistoryAttachment', { revision: revisionLabel(revision) }) }}</UiButton>
                 </div>
                 <p class="text-sm font-semibold text-teal-900">{{ t(attachmentRevision.status === 'draft' ? 'controlledDraftAttachment' : attachmentRevision.id === detail.authoritative_revision_id ? 'controlledReleasedAttachment' : 'controlledHistoryAttachment', { revision: revisionLabel(attachmentRevision) }) }}</p>
-                <DocumentStorage mode="attachments" :fixed-revision="attachmentRevision.id" :endpoint="detail.storage_url" :scope="scope" :csrf-token="csrfToken" :disabled="saving" @failure="fail" @busy="attachmentBusy = $event" />
+                <DocumentStorage mode="attachments" :fixed-revision="attachmentRevision.id" :endpoint="detail.storage_url" :scope="scope" :csrf-token="csrfToken" :disabled="saving" @failure="fail" @busy="attachmentBusy = $event" @changed="execution && show(detail)" />
             </section>
             <dl class="grid gap-4 md:grid-cols-2">
                 <div><dt class="text-sm text-slate-600">{{ t('controlledNumber') }}</dt><dd class="font-mono">{{ detail.internal_number || '—' }}</dd></div>
@@ -309,7 +330,11 @@ onBeforeUnmount(() => controller?.abort());
                 <div><dt class="text-sm text-slate-600">{{ t('outgoingClassification') }}</dt><dd>{{ t(`confidentiality-${detail.classification}`) }}</dd></div>
                 <div><dt class="text-sm text-slate-600">{{ t('controlledAuthoritative') }}</dt><dd class="font-semibold">{{ authoritative ? `${authoritative.full_identifier || authoritative.identifier} · ${language === 'lo' ? authoritative.title_lo || authoritative.title_en : authoritative.title_en}` : t('controlledNoAuthority') }}</dd></div>
             </dl>
+            <DocumentApprovalPanel v-if="execution" :execution="execution" :scope="scope" :csrf-token="csrfToken" kind="controlled" @failure="fail" @saved="show(detail)" />
+            <p v-if="authoritative" class="text-sm">{{ t('controlledNextReview') }}: {{ formatDate(nextReview) }}</p>
             <div v-if="!action" class="flex flex-wrap gap-3">
+                <UiButton v-if="authoritative && can('controlled.reviews.record')" variant="secondary" :disabled="saving || loading || attachmentBusy" @click="beginAction('reviews')">{{ t('controlledAction-reviews') }}</UiButton>
+                <UiButton v-if="!execution && draft && editable && approvalOptions.length" variant="secondary" :disabled="saving || loading || attachmentBusy" @click="beginAction('approvals')">{{ t('controlledAction-approvals') }}</UiButton>
                 <UiButton v-if="draft && editable && can('controlled.drafts.manage')" variant="secondary" :disabled="saving || loading || attachmentBusy" @click="edit()">{{ t('controlledEdit') }}</UiButton>
                 <SelectInput v-if="!detail.registered_at && detail.document_code && detail.xppl_namespaces?.length" v-model="namespaceId" :label="t('numberingSelection')" :options="namespaceOptions" :disabled="saving || loading || attachmentBusy" />
                 <UiButton v-if="!detail.registered_at && canRegister" :disabled="saving || loading || attachmentBusy" @click="beginAction('register')">{{ t('controlledAction-register') }}</UiButton>
@@ -321,6 +346,8 @@ onBeforeUnmount(() => controller?.abort());
                 <h3 id="controlled-action-title" tabindex="-1" class="font-semibold">{{ t(`controlledAction-${action}`) }}</h3>
                 <p class="text-sm text-slate-700">{{ t(`controlledConfirm-${action}`) }}</p>
                 <fieldset :disabled="saving" class="grid gap-4 md:grid-cols-2">
+                    <template v-if="action === 'reviews'"><SelectInput id="controlled-review-outcome" v-model="actionForm.outcome" :label="t('controlledReviewOutcome')" :options="reviewOptions" :error-key="fields.outcome?.[0]" required /><TextareaInput id="controlled-review-comments" v-model="actionForm.comments" :label="t('controlledApprovalComments')" maxlength="5000" :error-key="fields.comments?.[0]" /></template>
+                    <template v-if="action === 'approvals'"><SelectInput id="controlled-approval-decision" v-model="actionForm.decision" :label="t('controlledApprovalDecision')" :options="approvalOptions" required /><TextareaInput id="controlled-approval-comments" v-model="actionForm.comments" :label="t('controlledApprovalComments')" maxlength="5000" :error-key="fields.comments?.[0]" /></template>
                     <template v-if="action === 'revisions'"><TextareaInput v-for="field in ['revision_reason', 'change_description']" :id="`controlled-action-${field}`" :key="field" v-model="actionForm[field]" :label="t(`controlled-${field}`)" :error-key="fields[field]?.[0]" maxlength="5000" required /></template>
                     <TextareaInput v-if="['release', 'status'].includes(action)" id="controlled-action-reason" v-model="actionForm.reason" :label="t('controlledReason')" :error-key="fields.reason?.[0]" maxlength="5000" required />
                     <SelectInput v-if="action === 'status'" id="controlled-next-status" v-model="actionForm.status" :label="t('uiStatus')" :options="terminalOptions" required />
@@ -329,12 +356,16 @@ onBeforeUnmount(() => controller?.abort());
                 <div class="flex gap-3"><UiButton type="submit" :loading="saving" :disabled="loading">{{ t('uiConfirm') }}</UiButton><UiButton variant="secondary" :disabled="saving" @click="action = ''">{{ t('uiCancel') }}</UiButton></div>
             </form>
             <DocumentStorage mode="physical" v-if="detail.storage_url" :key="detail.id" :endpoint="detail.storage_url" :scope="scope" :csrf-token="csrfToken" :revisions="detail.revisions" :fixed-revision="attachmentRevision?.id" @failure="fail" />
+            <p v-if="!execution" class="text-sm text-slate-600">{{ t('controlledConfirm-approvals') }}</p>
             <h3 class="font-semibold">{{ t('controlledHistory') }}</h3>
             <details v-for="revision in detail.revisions.toReversed()" :key="revision.id" :open="revision.id === detail.authoritative_revision_id || (!authoritative && revision.status === 'draft')" class="rounded-xl border border-slate-200 p-4">
                 <summary class="cursor-pointer font-semibold">{{ revision.full_identifier || `${t('controlledRevision')} ${revision.identifier}` }} · {{ t(`controlledStatus-${revision.status}`) }} · {{ language === 'lo' ? revision.title_lo || revision.title_en : revision.title_en }}</summary>
+                <p v-if="revision.display_identifier" class="mt-3 font-mono text-sm">{{ t('controlledRevisionIdentifier') }}: {{ revision.display_identifier }}</p>
                 <dl class="mt-4 grid gap-4 md:grid-cols-2"><div v-for="field in detailFields" :key="field"><dt class="text-sm text-slate-600">{{ t(`controlled-${field}`) }}</dt><dd class="whitespace-pre-wrap wrap-anywhere">{{ field.endsWith('_date') ? formatDate(revision[field]) : revision[field] || '—' }}</dd></div>
                     <template v-if="revision.released_at"><div><dt class="text-sm text-slate-600">{{ t('controlledReleased') }}</dt><dd>{{ formatDateTime(revision.released_at) }} · {{ t('controlledActor') }} {{ revision.released_by }}</dd></div><div><dt class="text-sm text-slate-600">{{ t('controlledReason') }}</dt><dd class="whitespace-pre-wrap wrap-anywhere">{{ revision.release_reason }}</dd></div></template>
                 </dl>
+                <section class="mt-4 flex flex-col gap-2"><h4 class="font-semibold">{{ t('controlledReviewHistory') }}</h4><p v-if="!reviews.some(item => item.revision_id === revision.id)" class="text-sm text-slate-600">{{ t('controlledReviewEmpty') }}</p><article v-for="entry in reviews.filter(item => item.revision_id === revision.id)" :key="entry.id" class="rounded-lg border border-slate-200 p-3 text-sm"><p>{{ t(`controlledReview-${entry.outcome}`) }} · {{ formatDateTime(entry.recorded_at) }} · {{ t('controlledActor') }} {{ entry.actor_id }}</p><p class="whitespace-pre-wrap wrap-anywhere">{{ entry.comments || '—' }}</p><p>{{ t('controlledNextReview') }}: {{ formatDate(entry.next_review_date?.slice(0, 10)) }}</p></article></section>
+                <section class="mt-4 flex flex-col gap-2"><h4 class="font-semibold">{{ t('controlledApprovalHistory') }}</h4><p v-if="!approvals.some(item => item.revision_id === revision.id)" class="text-sm text-slate-600">{{ t('controlledApprovalEmpty') }}</p><article v-for="entry in approvals.filter(item => item.revision_id === revision.id)" :key="entry.id" class="rounded-lg border border-slate-200 p-3 text-sm"><p>{{ t(`controlledApproval-${entry.decision}`) }} · {{ formatDateTime(entry.recorded_at) }} · {{ t('controlledActor') }} {{ entry.actor_id }}</p><p v-if="entry.snapshot?.workflow">{{ t('workflowVersion') }} {{ entry.snapshot.workflow.configuration_version }} · {{ t('workflowLevel') }} {{ entry.snapshot.workflow.level }}</p><p class="whitespace-pre-wrap wrap-anywhere">{{ entry.comments || '—' }}</p><p class="text-slate-600">{{ entry.snapshot?.revision?.title_en }}</p></article></section>
             </details>
             <section v-if="related.length" class="flex flex-col gap-2"><h3 class="font-semibold">{{ t('controlledRelationships') }}</h3><p v-for="item in related" :key="item.id">{{ t(`controlledRelation-${item.relationship}`) }}: <button class="font-semibold text-teal-800 hover:underline" :disabled="loading || saving" @click="show(item)">{{ item.document_code }}</button></p></section>
             <details class="rounded-xl border border-slate-200 p-4"><summary class="cursor-pointer font-semibold">{{ t('controlledAudit') }}</summary><ul class="mt-3 flex flex-col gap-3"><li v-for="audit in audits" :key="audit.id" class="text-sm"><p>{{ t(`controlledAudit-${audit.action}`) }} · {{ formatDateTime(audit.created_at) }} · {{ t('controlledActor') }} {{ audit.actor_id }}</p><p v-if="audit.reason" class="whitespace-pre-wrap wrap-anywhere text-slate-600">{{ audit.reason }}</p></li></ul></details>

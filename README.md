@@ -8,7 +8,7 @@ After an approved PR merges to protected `main`, run **Deploy DCMS UAT** from `m
 
 Production preparation reuses the release image, `compose.release.yaml`, production preflight and the same backup → migration → cache/restart → health sequence. It remains **disabled** until a Production target/entry point, separate credentials, enforced explicit approval, accepted UAT digest and recovery policy are enrolled. See the Production checklist in the UAT operation guide. No Production deployment is authorized by a UAT dispatch.
 
-This branch predates the deployment infrastructure already on local `main` (`f66f671`); its existing workflows/runtime/helpers and their offline tests were reused without merging unrelated application changes. No dependency update is included: `composer audit --locked` reports CVE-2026-45070 in locked `symfony/mime` 8.1.7; `main` already has the 8.1.10 fix. Reconcile that approved lockfile fix and the branch's application/migration differences before release; never remove deployed migrations or weaken the audit to make deployment pass.
+Current `origin/main` (`f66f671`) has been merged locally into Phase 10, including the existing deployment infrastructure, application changes and Symfony MIME 8.1.10 security fix. The locked dependency audit passes. Deployed migration files remain intact; new Phase 10 migrations still require the reviewed deployment and backup gates.
 
 <p align="center"><a href="https://laravel.com" target="_blank"><img src="https://raw.githubusercontent.com/laravel/art/master/logo-lockup/5%20SVG/2%20CMYK/1%20Full%20Color/laravel-logolockup-cmyk-red.svg" width="400" alt="Laravel Logo"></a></p>
 

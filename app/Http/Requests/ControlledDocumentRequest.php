@@ -16,6 +16,8 @@ class ControlledDocumentRequest extends FormRequest
             'company_id' => ['required', 'integer', 'min:1'], 'site_id' => ['required', 'integer', 'min:1'], 'department_id' => ['nullable', 'integer', 'min:1'],
         ], $this->messages())->validate();
         $permission = match ($this->route()->getActionMethod()) {
+            'recordReview' => 'controlled.reviews.record',
+            'recordApproval' => $this->input('decision') === 'submitted' ? 'controlled.drafts.manage' : 'controlled.approvals.record',
             'store', 'update', 'revise' => 'controlled.drafts.manage', 'register' => 'controlled.register', 'release' => 'controlled.release', 'changeStatus' => 'controlled.status.manage', default => null,
         };
         app(ManageControlledDocuments::class)->authorizeContext($this->user(), $this->documentScope(), $permission);

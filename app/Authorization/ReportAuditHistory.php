@@ -3,6 +3,7 @@
 namespace App\Authorization;
 
 use App\ManagementReport;
+use App\Models\ControlledRevision;
 use App\Models\User;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Database\Query\JoinClause;
@@ -140,7 +141,7 @@ class ReportAuditHistory
     public function row(object $row, string $language): array
     {
         $value = (array) $row;
-        $value['revision_identifier'] = $row->event_revision_number === null ? null : str_pad((string) $row->event_revision_number, 2, '0', STR_PAD_LEFT);
+        $value['revision_identifier'] = $row->event_revision_number === null ? null : ControlledRevision::formatIdentifier((int) $row->event_revision_number);
         $value['key'] = $row->source.':'.$row->event_id;
         $value['event_en'] = $this->labels->event($row->event_action, 'en');
         $value['event_lo'] = $this->labels->event($row->event_action, 'lo');

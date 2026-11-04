@@ -6,6 +6,8 @@ use App\Authorization\AdministrationHistory;
 use App\Authorization\ManageDocumentMasterData;
 use App\Authorization\ManageNumbering;
 use App\Models\AuthorizationScope;
+use App\Models\DocumentCategory;
+use App\Models\DocumentType;
 use App\Models\MasterDataAudit;
 use App\Models\MembershipAudit;
 use App\Models\OrganizationMembership;
@@ -58,6 +60,26 @@ class AdministrationHistoryTest extends TestCase
             ->assertJsonPath('sources', ['master-data']);
         $this->getJson($this->url($scope).'&per_page=1&page=2')->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.action', 'created');
         $this->assertDatabaseHas('document_categories', ['id' => $record->id, 'active' => false]);
+    }
+
+    public function test_review_policy_history_describes_changes_without_rewriting_evidence_or_other_metadata_events(): void
+    {
+        [$actor, $scope] = $this->administrator();
+        $this->freezeTime();
+        $category = DocumentCategory::factory()->create(['scope_id' => $scope->id]);
+        $register = RegisterConfiguration::factory()->create(['scope_id' => $scope->id, 'register_key' => 'controlled']);
+        $type = DocumentType::factory()->create(['scope_id' => $scope->id, 'category_id' => $category->id]);
+        $type->registers()->attach($register->id, ['scope_id' => $scope->id]);
+        $manager = app(ManageDocumentMasterData::class);
+        $manager->save($actor, $scope, 'types', ['review_enabled' => true, 'review_interval_months' => 36, 'review_baseline' => 'completion_date'], (string) $type->id);
+        $evidence = MasterDataAudit::query()->sole()->getAttributes();
+        $row = $this->getJson($this->url($scope))->assertOk()->assertJsonPath('data.0.event_en', 'Document review policy changed')
+            ->assertJsonPath('data.0.event_lo', 'ປ່ຽນນະໂຍບາຍທົບທວນເອກະສານ')->assertJsonPath('data.0.action', 'updated')->assertJsonPath('data.0.actor', $actor->name)->json('data.0');
+        $this->assertSame(['review_enabled', 'review_interval_months', 'review_baseline'], array_column($row['changes'], 'field'));
+        $this->assertSame(['field' => 'review_enabled', 'before' => false, 'after' => true], $row['changes'][0]);
+        $this->assertSame($evidence, MasterDataAudit::query()->sole()->getAttributes());
+        $manager->save($actor, $scope, 'types', ['name_en' => 'Renamed type', 'review_enabled' => '1', 'review_interval_months' => '36', 'review_baseline' => 'completion_date'], (string) $type->id);
+        $this->getJson($this->url($scope))->assertOk()->assertJsonPath('data.0.event_en', null)->assertJsonPath('data.0.event_lo', null)->assertJsonPath('data.0.action', 'updated');
     }
 
     public function test_history_requires_authentication_and_both_audit_and_source_permissions(): void

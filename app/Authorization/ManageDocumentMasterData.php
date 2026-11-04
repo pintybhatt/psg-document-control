@@ -11,6 +11,8 @@ use App\Models\ScopedDocumentMaster;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use LogicException;
 
@@ -39,11 +41,22 @@ class ManageDocumentMasterData
             abort_unless(in_array($scope->scope_type, ['company', 'site'], true), 403, 'rbacForbidden');
             $scope->persist();
             $query = $this->query($kind, $scope);
-            $record = $id === null ? $query->getModel()->newInstance(['scope_id' => $scope->id]) : $query->whereKey($id)->first();
+            $record = $id === null ? $query->getModel()->newInstance(['scope_id' => $scope->id]) : $query->whereKey($id)->lockForUpdate()->first();
             abort_if($record === null, 404);
             $before = $id === null ? null : $this->snapshot($record);
             $record->fill(collect($data)->only(['code', 'register_key', 'category_id', 'name_en', 'name_lo', 'description_en', 'description_lo', 'active'])->all());
             if ($record instanceof DocumentType) {
+                $policy = collect($data)->only(['review_enabled', 'review_interval_months', 'review_baseline'])->all();
+                $policy = Validator::make($policy, [
+                    'review_enabled' => ['sometimes', 'boolean'],
+                    'review_interval_months' => ['nullable', 'integer', 'min:1', 'max:1200'],
+                    'review_baseline' => ['nullable', Rule::in(['completion_date'])],
+                ])->validate();
+                $record->fill($policy);
+                if ($record->review_enabled && (! $record->review_interval_months || $record->review_baseline !== 'completion_date')) {
+                    throw ValidationException::withMessages(['review_enabled' => 'masterReviewPolicyInvalid']);
+                }
+
                 $category = DocumentCategory::query()->where('scope_id', $scope->id)->find($record->category_id);
                 $registerIds = $data['register_ids'] ?? ($record->exists ? $record->registers()->pluck('register_configurations.id')->all() : []);
                 $registers = RegisterConfiguration::query()->where('scope_id', $scope->id)->whereIn('id', $registerIds)->get();

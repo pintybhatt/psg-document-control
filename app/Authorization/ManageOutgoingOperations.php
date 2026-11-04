@@ -132,6 +132,9 @@ class ManageOutgoingOperations
                     throw ValidationException::withMessages(['operation' => 'outgoingClosed']);
                 }
                 if (in_array($action, ['dispatch', 'correct_dispatch'], true)) {
+                    if ($data['dispatch_date'] !== null) {
+                        app(DocumentApprovals::class)->requireApproved($actor, $record);
+                    }
                     $this->dispatch($record, $operation, $data);
                 } elseif ($action === 'delivery') {
                     [$extraBefore, $extraAfter] = $this->delivery($record, $operation, $data);

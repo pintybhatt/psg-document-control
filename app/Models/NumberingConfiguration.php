@@ -6,7 +6,7 @@ use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Validation\ValidationException;
 
-#[Fillable(['series_id', 'version', 'prefix', 'padding', 'active', 'change_reason'])]
+#[Fillable(['series_id', 'version', 'prefix', 'padding', 'format', 'active', 'change_reason'])]
 class NumberingConfiguration extends Model
 {
     protected static function booted(): void
@@ -20,6 +20,6 @@ class NumberingConfiguration extends Model
 
     protected function casts(): array
     {
-        return ['active' => 'boolean', 'padding' => 'integer', 'version' => 'integer', 'effective_at' => 'immutable_datetime'];
+        return ['active' => 'boolean', 'padding' => 'integer', 'format' => 'array', 'version' => 'integer', 'effective_at' => 'immutable_datetime'];
     }
 }

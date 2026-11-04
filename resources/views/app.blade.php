@@ -40,6 +40,8 @@
                 'history' => route('api.v1.administration.history', [], false),
                 'confidentiality' => preg_replace('~/contexts$~', '', route('api.v1.confidentiality.contexts', [], false)),
                 'numbering' => route('api.v1.numbering.index', [], false),
+                'templates' => route('api.v1.templates.index', [], false),
+                'approvalWorkflows' => route('api.v1.approval-workflows.index', [], false),
                 'contexts' => route('api.v1.authorization.contexts', ['administration' => 1], false),
                 'roles' => route('api.v1.roles.index', [], false),
                 'permissions' => route('api.v1.permissions', [], false),

@@ -242,3 +242,18 @@ describe('document master-data administration', () => {
         expect(fetch.mock.calls.some(([url]) => url.includes('site_id=8'))).toBe(true);
     });
 });
+
+it('keeps review policies disabled initially and submits only explicitly configured type settings', async () => {
+    const fetch = server(); const wrapper = await render();
+    await button(section(wrapper, 'types'), 'Edit').trigger('click'); await flushPromises();
+    expect(wrapper.get('#master-review-enabled').element.checked).toBe(false);
+    expect(wrapper.get('#master-review-months').element.value).toBe('');
+    expect(wrapper.get('#master-review-baseline').element.value).toBe('');
+    await wrapper.get('#master-review-enabled').setValue(true);
+    await wrapper.get('#master-review-months').setValue('36');
+    await wrapper.get('#master-review-baseline').setValue('completion_date');
+    await wrapper.get('form').trigger('submit'); await flushPromises();
+    const [, options] = fetch.mock.calls.find(([url, options]) => options.method === 'PATCH' && url.includes('/types/3'));
+    expect(JSON.parse(options.body)).toMatchObject({ scope_type: 'site', company_id: 4, site_id: 7, review_enabled: true, review_interval_months: 36, review_baseline: 'completion_date' });
+    expect(options.headers['X-CSRF-TOKEN']).toBe('sample-csrf');
+});

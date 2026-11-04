@@ -95,10 +95,14 @@ class NumberingController extends Controller
             }
             $configuration = $series->currentConfiguration;
 
-            return response()->json(['number' => NumberingFormat::render($configuration->prefix, $configuration->padding, $year, $value + 1)]);
+            return response()->json(['number' => NumberingFormat::render($configuration->prefix, $configuration->padding, $year, $value + 1, $configuration->format)]);
         }
 
-        return response()->json(['number' => NumberingFormat::render($request->validated('prefix'), $request->integer('padding'), $request->integer('year'), 1)]);
+        if ($request->has('reset_policy')) {
+            NumberingFormat::validateResetPolicy($request->validated('format'), NumberingResetPolicy::from($request->validated('reset_policy')));
+        }
+
+        return response()->json(['number' => NumberingFormat::render($request->validated('prefix'), $request->integer('padding'), $request->integer('year'), 1, $request->validated('format'))]);
     }
 
     public function history(NumberingRequest $request, string $series): JsonResponse
@@ -106,6 +110,6 @@ class NumberingController extends Controller
         $record = NumberingSeries::query()->where('scope_id', $request->scopeContext()->id)->whereKey($series)->first();
         abort_if(! $record, 404);
 
-        return response()->json($record->configurations()->orderByDesc('version')->paginate($request->integer('per_page', 10), ['id', 'version', 'prefix', 'padding', 'active', 'change_reason', 'effective_at', 'created_by']));
+        return response()->json($record->configurations()->orderByDesc('version')->paginate($request->integer('per_page', 10), ['id', 'version', 'prefix', 'padding', 'format', 'active', 'change_reason', 'effective_at', 'created_by']));
     }
 }

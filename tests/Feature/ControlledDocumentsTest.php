@@ -14,6 +14,7 @@ use App\Models\DocumentCategory;
 use App\Models\DocumentSecurityAudit;
 use App\Models\DocumentType;
 use App\Models\IssuedDocumentNumber;
+use App\Models\NumberingSeries;
 use App\Models\OrganizationMembership;
 use App\Models\Permission;
 use App\Models\RegisterConfiguration;
@@ -133,7 +134,7 @@ class ControlledDocumentsTest extends TestCase
         $record = $this->draft();
         $this->assertNull($record['internal_number']);
         $this->assertNull($record['authoritative_revision_id']);
-        $this->assertSame('00', $record['revisions'][0]['identifier']);
+        $this->assertSame('R00', $record['revisions'][0]['identifier']);
         $this->assertDatabaseCount('numbering_counters', 0);
         $body = $this->payload();
         unset($body['classification']);
@@ -167,7 +168,7 @@ class ControlledDocumentsTest extends TestCase
         $this->fixture();
         $record = $this->released($this->registered($this->draft()));
         $first = $record['authoritative_revision_id'];
-        $record = $this->postJson($this->url('/'.$record['id'].'/revisions'), ['lock_version' => $record['lock_version'], 'revision_reason' => 'Annual review', 'change_description' => 'Updated precautions'])->assertOk()->assertJsonPath('data.authoritative_revision_id', $first)->assertJsonPath('data.revisions.1.identifier', '01')->json('data');
+        $record = $this->postJson($this->url('/'.$record['id'].'/revisions'), ['lock_version' => $record['lock_version'], 'revision_reason' => 'Annual review', 'change_description' => 'Updated precautions'])->assertOk()->assertJsonPath('data.authoritative_revision_id', $first)->assertJsonPath('data.revisions.1.identifier', 'R01')->json('data');
         $this->assertSame($first, $record['revisions'][1]['supersedes_id']);
         $this->postJson($this->url('/'.$record['id'].'/revisions'), ['lock_version' => $record['lock_version'], 'revision_reason' => 'Duplicate', 'change_description' => 'Duplicate'])->assertUnprocessable();
         $body = $this->payload();
@@ -203,6 +204,40 @@ class ControlledDocumentsTest extends TestCase
         }
         $this->expectException(ValidationException::class);
         ControlledDocument::findOrFail($record['id'])->currentRevision->update(['title_en' => 'FORGED']);
+    }
+
+    #[TestWith(['LEGACY/SOP/001'])]
+    #[TestWith(['EXAMPLE-ADM-SOP-0001-R00'])]
+    public function test_revision_labels_advance_without_rewriting_identity_history_or_allocating_another_number(string $code): void
+    {
+        $this->fixture();
+        $series = NumberingSeries::query()->sole();
+        app(ManageNumbering::class)->save($this->actor, $this->scope, ['prefix' => 'TEST/CD', 'padding' => 6, 'active' => true,
+            'format' => ['pattern' => '{prefix}/{year}/{sequence}-R00']], (string) $series->id);
+        $record = $this->released($this->registered($this->draft(['document_code' => $code])));
+        $id = $record['id'];
+        $number = $record['internal_number'];
+        $this->assertSame('TEST/CD/2026/000001-R00', $number);
+        $original = ControlledRevision::findOrFail($record['revisions'][0]['id'])->getRawOriginal();
+        $issuance = IssuedDocumentNumber::query()->sole()->getRawOriginal();
+        for ($revision = 1; $revision <= 2; $revision++) {
+            $record = $this->postJson($this->url('/'.$id.'/revisions'), ['lock_version' => $record['lock_version'],
+                'revision_reason' => 'Periodic review', 'change_description' => 'Updated content'])->assertOk()->json('data');
+            $this->assertSame($id, $record['id']);
+            $this->assertSame($code, $record['document_code']);
+            $this->assertSame($number, $record['internal_number']);
+            $this->assertSame($revision === 1 ? 'R01' : 'R02', $record['revisions'][$revision]['identifier']);
+            $this->assertSame($code === 'LEGACY/SOP/001' ? $code.($revision === 1 ? '-R01' : '-R02') : null, $record['revisions'][$revision]['display_identifier']);
+            $record = $this->released($record);
+        }
+        $this->getJson($this->url('/'.$id))->assertOk()->assertJsonPath('data.revisions.0.identifier', 'R00')
+            ->assertJsonPath('data.revisions.1.identifier', 'R01')->assertJsonPath('data.revisions.2.identifier', 'R02')
+            ->assertJsonPath('data.revisions.0.status', 'superseded')->assertJsonPath('data.revisions.2.status', 'current');
+        $this->assertSame($code === 'LEGACY/SOP/001' ? 'LEGACY/SOP/001-R00' : $code, $record['revisions'][0]['display_identifier']);
+        $this->assertSame($original, ControlledRevision::findOrFail($original['id'])->getRawOriginal());
+        $this->assertSame($issuance, IssuedDocumentNumber::query()->sole()->getRawOriginal());
+        $this->assertDatabaseCount('issued_document_numbers', 1);
+        $this->assertSame(1, DB::table('numbering_counters')->sole()->value);
     }
 
     public function test_stale_edits_wrong_revision_and_unregistered_release_cannot_change_authority(): void

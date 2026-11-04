@@ -36,7 +36,7 @@ const history = ref([]);
 const historyPage = ref(1);
 const historyTotal = ref(0);
 const historyLoading = ref(false);
-const form = reactive({ register_id: '', purpose: 'internal_register', reset_policy: 'annual', prefix: '', padding: '6', active: true, change_reason: '', year: String(new Date().getFullYear()) });
+const form = reactive({ register_id: '', purpose: 'internal_register', reset_policy: 'annual', prefix: '', padding: '6', active: true, change_reason: '', year: String(new Date().getFullYear()), custom_format: false, pattern: '', company: '', department: '', document_type: '' });
 const xpplOptions = ref({ departments: [], types: [], series: [], history: [], mappings: [] });
 const xpplKind = ref('');
 const xpplKinds = computed(() => [{ value: '', label: t('uiChoose') }, ...['xppl_controlled', 'xppl_letter'].map(value => ({ value, label: t(`numberingFormat-${value}`) }))]);
@@ -97,10 +97,12 @@ const canManage = computed(() => !revoked.value && props.scope.permissions.inclu
 const options = computed(() => [{ value: '', label: t('uiChoose') }, ...registers.value.map(row => ({ value: row.id, label: t(`masterRegister-${row.register_key}`), disabled: !row.active }))]);
 const purposes = computed(() => ['internal_register', 'official_outgoing'].map(value => ({ value, label: t(`numberingPurpose-${value}`), disabled: value === 'official_outgoing' && registers.value.find(row => row.id === Number(form.register_id))?.register_key !== 'outgoing' })));
 const policies = computed(() => ['annual', 'continuous'].map(value => ({ value, label: t(`numberingPolicy-${value}`) })));
-const columns = computed(() => [{ key: 'register_label', label: t('masterRegister') }, { key: 'purpose_label', label: t('numberingPurpose') }, { key: 'prefix', label: t('numberingPrefix') }, { key: 'policy_label', label: t('numberingPolicy') }, { key: 'status', label: t('uiStatus') }, { key: 'actions', label: t('rbacActions') }]);
-const displayRows = computed(() => rows.value.map(row => ({ ...row, register_label: t(`masterRegister-${row.register_key}`), purpose_label: t(`numberingPurpose-${row.purpose}`), prefix: row.configuration?.prefix ?? '—', policy_label: t(`numberingPolicy-${row.reset_policy}`), status: t(!row.configuration?.active ? 'rbacInactive' : row.effective ? 'rbacActive' : 'masterBlocked') })));
-const historyColumns = computed(() => [{ key: 'version', label: t('numberingVersion') }, { key: 'prefix', label: t('numberingPrefix') }, { key: 'padding', label: t('numberingPadding') }, { key: 'status', label: t('uiStatus') }, { key: 'effective_at', label: t('numberingEffective') }, { key: 'created_by', label: t('numberingActor') }, { key: 'change_reason', label: t('numberingReason') }]);
-const historyRows = computed(() => history.value.map(row => ({ ...row, effective_at: formatDateTime(row.effective_at), status: t(row.active ? 'rbacActive' : 'rbacInactive') })));
+const columns = computed(() => [{ key: 'register_label', label: t('masterRegister') }, { key: 'purpose_label', label: t('numberingPurpose') }, { key: 'prefix', label: t('numberingPrefix') }, { key: 'format_definition', label: t('numberingFormatDefinition') }, { key: 'policy_label', label: t('numberingPolicy') }, { key: 'status', label: t('uiStatus') }, { key: 'actions', label: t('rbacActions') }]);
+const displayRows = computed(() => rows.value.map(row => ({ ...row, register_label: t(`masterRegister-${row.register_key}`), purpose_label: t(`numberingPurpose-${row.purpose}`), prefix: row.configuration?.prefix ?? '—', format_definition: formatDefinition(row.configuration?.format), policy_label: t(`numberingPolicy-${row.reset_policy}`), status: t(!row.configuration?.active ? 'rbacInactive' : row.effective ? 'rbacActive' : 'masterBlocked') })));
+const historyColumns = computed(() => [{ key: 'version', label: t('numberingVersion') }, { key: 'prefix', label: t('numberingPrefix') }, { key: 'format_definition', label: t('numberingFormatDefinition') }, { key: 'padding', label: t('numberingPadding') }, { key: 'status', label: t('uiStatus') }, { key: 'effective_at', label: t('numberingEffective') }, { key: 'created_by', label: t('numberingActor') }, { key: 'change_reason', label: t('numberingReason') }]);
+const historyRows = computed(() => history.value.map(row => ({ ...row, format_definition: formatDefinition(row.format), effective_at: formatDateTime(row.effective_at), status: t(row.active ? 'rbacActive' : 'rbacInactive') })));
+function formatDefinition(format) { return format ? JSON.stringify(format, null, 2) : t('numberingLegacyFormat'); }
+function formatData() { return form.custom_format ? { pattern: form.pattern, ...Object.fromEntries(['company', 'department', 'document_type'].filter(key => form[key] !== '').map(key => [key, form[key]])) } : null; }
 function scopeData() { return { scope_type: props.scope.scope_type, company_id: props.scope.company_id, site_id: props.scope.site_id }; }
 function url(path = '', requestedPage = 1) { return `${props.endpoint}${path}?${new URLSearchParams(Object.entries({ ...scopeData(), page: requestedPage, per_page: 10 }).filter(([, value]) => value !== null))}`; }
 function fail(error) {
@@ -145,7 +147,8 @@ async function reset() {
 async function edit(row = null) {
     editor.value = { id: row?.id ?? null };
     fields.value = {}; errorKey.value = ''; preview.value = '';
-    Object.assign(form, { register_id: row?.register_id ?? '', purpose: row?.purpose ?? 'internal_register', reset_policy: row?.reset_policy ?? 'annual', prefix: row?.configuration?.prefix ?? '', padding: String(row?.configuration?.padding ?? 6), active: row?.configuration?.active ?? true, change_reason: '', year: String(new Date().getFullYear()) });
+    Object.assign(form, { register_id: row?.register_id ?? '', purpose: row?.purpose ?? 'internal_register', reset_policy: row?.reset_policy ?? 'annual', prefix: row?.configuration?.prefix ?? '', padding: String(row?.configuration?.padding ?? 6), active: row?.configuration?.active ?? true, change_reason: '', year: String(new Date().getFullYear()), custom_format: row?.configuration?.format != null, pattern: row?.configuration?.format?.pattern ?? '', company: row?.configuration?.format?.company ?? '', department: row?.configuration?.format?.department ?? '', document_type: row?.configuration?.format?.document_type ?? '' });
+    previewController?.abort(); previewLoading.value = false;
     await nextTick();
     editorElement.value?.querySelector('h4')?.focus();
 }
@@ -154,7 +157,7 @@ async function showPreview(savedSeries = false) {
     const signal = previewController.signal;
     previewLoading.value = true; preview.value = ''; errorKey.value = ''; fields.value = {};
     try {
-        const result = await request(`${props.endpoint}/preview`, { method: 'POST', signal, body: savedSeries ? { ...scopeData(), series_id: editor.value.id } : { ...scopeData(), prefix: form.prefix, padding: Number(form.padding), year: Number(form.year) } });
+        const result = await request(`${props.endpoint}/preview`, { method: 'POST', signal, body: savedSeries ? { ...scopeData(), series_id: editor.value.id } : { ...scopeData(), prefix: form.prefix, padding: Number(form.padding), year: Number(form.year), reset_policy: form.reset_policy, ...(form.custom_format ? { format: formatData() } : {}) } });
         if (!signal.aborted) { preview.value = result.number; }
     } catch (error) { if (!signal.aborted) { fail(error); } }
     finally { if (!signal.aborted) { previewLoading.value = false; } }
@@ -163,7 +166,7 @@ async function save() {
     if (!canManage.value || !editor.value || saving.value) { return; }
     const originalScope = props.scope.scope_key;
     const id = editor.value.id;
-    const body = { ...scopeData(), prefix: form.prefix, padding: Number(form.padding), active: form.active, change_reason: form.change_reason };
+    const body = { ...scopeData(), prefix: form.prefix, padding: Number(form.padding), active: form.active, change_reason: form.change_reason, format: formatData() };
     if (!id) { Object.assign(body, { register_id: form.register_id, purpose: form.purpose, reset_policy: form.reset_policy }); }
     saving.value = true; errorKey.value = ''; fields.value = {};
     try {
@@ -187,7 +190,7 @@ async function loadHistory(row = historySeries.value) {
     } catch (error) { if (!signal.aborted) { fail(error); } }
     finally { if (!signal.aborted) { historyLoading.value = false; } }
 }
-watch([() => form.prefix, () => form.padding, () => form.year], () => { previewController?.abort(); previewLoading.value = false; preview.value = ''; });
+watch([() => form.prefix, () => form.padding, () => form.year, () => form.custom_format, () => form.pattern, () => form.company, () => form.department, () => form.document_type, () => form.reset_policy], () => { previewController?.abort(); previewLoading.value = false; preview.value = ''; });
 watch(() => form.register_id, () => { if (!editor.value?.id && registers.value.find(row => row.id === Number(form.register_id))?.register_key !== 'outgoing') { form.purpose = 'internal_register'; } });
 watch(() => props.scope.scope_key, reset, { immediate: true });
 onBeforeUnmount(() => { controller?.abort(); previewController?.abort(); historyController?.abort(); });
@@ -256,27 +259,36 @@ onBeforeUnmount(() => { controller?.abort(); previewController?.abort(); history
             <div class="mt-4 flex flex-col gap-5">
                 <p class="text-sm leading-7 text-slate-600">{{ t('numberingBoundary') }}</p>
                 <div v-if="canManage"><UiButton :disabled="loading || saving" @click="edit()">{{ t('numberingCreate') }}</UiButton></div>
-                <DataTable v-model:page="page" :rows="displayRows" :columns="columns" :caption="t('numberingTitle')" :loading="loading" server-side :total="total" :per-page="10" @change="load">
-                    <template #cell-actions="{ row }"><div class="flex flex-wrap gap-2"><UiButton variant="secondary" :disabled="saving" @click="edit(row)">{{ t(canManage ? 'rbacEdit' : 'rbacDetails') }}</UiButton><UiButton variant="secondary" :disabled="saving" @click="loadHistory(row)">{{ t('numberingHistory') }}</UiButton></div></template>
-                </DataTable>
-                <form v-if="editor" ref="editorElement" novalidate class="flex flex-col gap-5 rounded-xl border border-slate-200 bg-white p-6" @submit.prevent="confirmationOpen = canManage">
-                    <h4 tabindex="-1" class="font-semibold">{{ t(editor.id ? 'numberingEdit' : 'numberingCreate') }}</h4>
-                    <p class="text-xs leading-6 text-slate-500">{{ t('numberingIdentityHelp') }}</p>
-                    <div class="grid gap-5 sm:grid-cols-2">
-                        <SelectInput v-model="form.register_id" :label="t('masterRegister')" :options="options" :disabled="!!editor.id || !canManage || saving" :error-key="fields.register_id?.[0]" required />
-                        <SelectInput v-model="form.purpose" :label="t('numberingPurpose')" :options="purposes" :disabled="!!editor.id || !canManage || saving" :error-key="fields.purpose?.[0]" required />
-                        <SelectInput v-model="form.reset_policy" :label="t('numberingPolicy')" :options="policies" :disabled="!!editor.id || !canManage || saving" :error-key="fields.reset_policy?.[0]" required />
-                        <TextInput v-model="form.prefix" :label="t('numberingPrefix')" :helper="t('numberingPrefixHelp')" :readonly="!canManage || saving" :error-key="fields.prefix?.[0]" maxlength="80" required />
-                        <TextInput v-model="form.padding" type="number" :label="t('numberingPadding')" :readonly="!canManage || saving" :error-key="fields.padding?.[0]" min="1" max="12" required />
-                        <CheckboxInput v-model="form.active" :label="t('rbacActive')" :disabled="!canManage || saving" />
-                        <TextInput v-model="form.change_reason" :label="t('numberingReason')" :readonly="!canManage || saving" :error-key="fields.change_reason?.[0]" maxlength="500" />
-                    </div>
-                    <div class="flex flex-wrap items-end gap-3"><TextInput v-model="form.year" type="number" :label="t('numberingPreviewYear')" :error-key="fields.year?.[0]" min="2000" max="9999" /><UiButton variant="secondary" :loading="previewLoading" :disabled="saving" @click="showPreview()">{{ t('numberingPreview') }}</UiButton><UiButton v-if="editor.id" variant="secondary" :loading="previewLoading" :disabled="saving" @click="showPreview(true)">{{ t('numberingNextPreview') }}</UiButton></div>
-                    <p v-if="editor.id" class="text-xs leading-6 text-slate-500">{{ t('numberingNextPreviewHelp') }}</p>
-                    <p v-if="preview" role="status" class="wrap-anywhere font-mono text-sm">{{ preview }}</p>
-                    <div class="flex flex-wrap gap-3"><UiButton v-if="canManage" type="submit" :disabled="saving">{{ t('numberingSave') }}</UiButton><UiButton variant="secondary" :disabled="saving" @click="editor = null">{{ t('uiCancel') }}</UiButton></div>
-                </form>
-                <section v-if="historySeries" class="flex flex-col gap-3" aria-labelledby="numbering-history"><h4 id="numbering-history" class="font-semibold">{{ t('numberingHistory') }} · {{ historySeries.configuration?.prefix }}</h4><DataTable v-model:page="historyPage" :rows="historyRows" :columns="historyColumns" :caption="t('numberingHistory')" :loading="historyLoading" server-side :total="historyTotal" :per-page="10" @change="loadHistory()" /></section>
+            <DataTable v-model:page="page" :rows="displayRows" :columns="columns" :caption="t('numberingTitle')" :loading="loading" server-side :total="total" :per-page="10" @change="load">
+                <template #cell-format_definition="{ row }"><pre class="whitespace-pre-wrap wrap-anywhere font-mono text-xs">{{ row.format_definition }}</pre></template>
+                <template #cell-actions="{ row }"><div class="flex flex-wrap gap-2"><UiButton variant="secondary" :disabled="saving" @click="edit(row)">{{ t(canManage ? 'rbacEdit' : 'rbacDetails') }}</UiButton><UiButton variant="secondary" :disabled="saving" @click="loadHistory(row)">{{ t('numberingHistory') }}</UiButton></div></template>
+            </DataTable>
+            <form v-if="editor" ref="editorElement" novalidate class="flex flex-col gap-5 rounded-xl border border-slate-200 bg-white p-6" @submit.prevent="confirmationOpen = canManage">
+                <h4 tabindex="-1" class="font-semibold">{{ t(editor.id ? 'numberingEdit' : 'numberingCreate') }}</h4>
+                <p class="text-xs leading-6 text-slate-500">{{ t('numberingIdentityHelp') }}</p>
+                <div class="grid gap-5 sm:grid-cols-2">
+                    <SelectInput v-model="form.register_id" :label="t('masterRegister')" :options="options" :disabled="!!editor.id || !canManage || saving" :error-key="fields.register_id?.[0]" required />
+                    <SelectInput v-model="form.purpose" :label="t('numberingPurpose')" :options="purposes" :disabled="!!editor.id || !canManage || saving" :error-key="fields.purpose?.[0]" required />
+                    <SelectInput v-model="form.reset_policy" :label="t('numberingPolicy')" :options="policies" :disabled="!!editor.id || !canManage || saving" :error-key="fields.reset_policy?.[0]" required />
+                    <TextInput v-model="form.prefix" :label="t('numberingPrefix')" :helper="t('numberingPrefixHelp')" :readonly="!canManage || saving" :error-key="fields.prefix?.[0]" maxlength="80" required />
+                    <TextInput v-model="form.padding" type="number" :label="t('numberingPadding')" :readonly="!canManage || saving" :error-key="fields.padding?.[0]" min="1" max="12" required />
+                    <CheckboxInput v-model="form.active" :label="t('rbacActive')" :disabled="!canManage || saving" />
+                    <TextInput v-model="form.change_reason" :label="t('numberingReason')" :readonly="!canManage || saving" :error-key="fields.change_reason?.[0]" maxlength="500" />
+                </div>
+                <fieldset :disabled="!canManage || saving" class="flex flex-col gap-4 rounded-xl border border-slate-200 p-4">
+                    <legend class="px-2 font-semibold">{{ t('numberingFormatDefinition') }}</legend>
+                    <CheckboxInput v-model="form.custom_format" :label="t('numberingCustomFormat')" />
+                    <p class="text-sm text-slate-600">{{ t(form.custom_format ? 'numberingFormatHelp' : 'numberingLegacyFormat') }}</p>
+                    <template v-if="form.custom_format">
+                        <TextInput v-model="form.pattern" :label="t('numberingFormatPattern')" :error-key="fields['format.pattern']?.[0] || fields.format?.[0]" maxlength="256" required />
+                        <div class="grid gap-4 sm:grid-cols-3"><TextInput v-for="code in ['company', 'department', 'document_type']" :key="code" v-model="form[code]" :label="t(`numberingComponent-${code}`)" :error-key="fields[`format.${code}`]?.[0]" maxlength="32" /></div>
+                    </template>
+                </fieldset>
+                <div class="flex flex-wrap items-end gap-3"><TextInput v-model="form.year" type="number" :label="t('numberingPreviewYear')" :error-key="fields.year?.[0]" min="2000" max="9999" /><UiButton variant="secondary" :loading="previewLoading" :disabled="saving" @click="showPreview()">{{ t('numberingPreview') }}</UiButton><UiButton v-if="editor.id" variant="secondary" :loading="previewLoading" :disabled="saving" @click="showPreview(true)">{{ t('numberingNextPreview') }}</UiButton></div>
+                <p v-if="preview" role="status" class="wrap-anywhere font-mono text-sm">{{ preview }}</p>
+                <div class="flex flex-wrap gap-3"><UiButton v-if="canManage" type="submit" :disabled="saving">{{ t('numberingSave') }}</UiButton><UiButton variant="secondary" :disabled="saving" @click="editor = null">{{ t('uiCancel') }}</UiButton></div>
+            </form>
+            <section v-if="historySeries" class="flex flex-col gap-3" aria-labelledby="numbering-history"><h4 id="numbering-history" class="font-semibold">{{ t('numberingHistory') }} · {{ historySeries.configuration?.prefix }}</h4><DataTable v-model:page="historyPage" :rows="historyRows" :columns="historyColumns" :caption="t('numberingHistory')" :loading="historyLoading" server-side :total="historyTotal" :per-page="10" @change="loadHistory()"><template #cell-format_definition="{ row }"><pre class="whitespace-pre-wrap wrap-anywhere font-mono text-xs">{{ row.format_definition }}</pre></template></DataTable></section>
             </div>
         </details>
         <ConfirmDialog v-model="confirmationOpen" :title="t('numberingSave')" :message="t('numberingSaveConfirm')" :loading="saving" @confirm="save" />

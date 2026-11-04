@@ -1,12 +1,14 @@
 <?php
 
 use App\Http\Controllers\AdministrationHistoryController;
+use App\Http\Controllers\ApprovalWorkflowController;
 use App\Http\Controllers\AuthenticatedSessionController;
 use App\Http\Controllers\AuthorizationContextController;
 use App\Http\Controllers\ConfidentialityAdministrationController;
 use App\Http\Controllers\ControlledDocumentController;
 use App\Http\Controllers\CurrentUserController;
 use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\DocumentApprovalController;
 use App\Http\Controllers\DocumentMasterDataController;
 use App\Http\Controllers\DocumentSearchController;
 use App\Http\Controllers\DocumentStorageController;
@@ -21,6 +23,7 @@ use App\Http\Controllers\OutgoingOperationController;
 use App\Http\Controllers\PhysicalCustodyController;
 use App\Http\Controllers\RoleAssignmentController;
 use App\Http\Controllers\RoleController;
+use App\Http\Controllers\TemplateCatalogueController;
 use App\Http\Controllers\UserManagementController;
 use App\Http\Middleware\AuditDocumentStorageRequests;
 use App\Http\Middleware\EnsureActiveUserSession;
@@ -76,6 +79,19 @@ Route::middleware(['auth:web', EnsureActiveUserSession::class])->group(function 
             Route::post('documents/{type}/{document}/grants', 'grantDocument')->whereIn('type', ['incoming', 'outgoing', 'controlled'])->whereNumber('document')->name('grants.store');
             Route::delete('documents/{type}/{document}/grants/{grant}', 'revokeDocument')->whereIn('type', ['incoming', 'outgoing', 'controlled'])->whereNumber('document')->whereNumber('grant')->name('grants.revoke');
         });
+        Route::get('document-approvals/{type}/{record}', [DocumentApprovalController::class, 'show'])->name('document-approvals.show');
+        Route::post('document-approvals/{type}/{record}', [DocumentApprovalController::class, 'store'])->name('document-approvals.store');
+        Route::get('approval-workflows', [ApprovalWorkflowController::class, 'index'])->name('approval-workflows.index');
+        Route::get('approval-workflows/roles', [ApprovalWorkflowController::class, 'roles'])->name('approval-workflows.roles');
+        Route::post('approval-workflows/{register}', [ApprovalWorkflowController::class, 'store'])->name('approval-workflows.store');
+        Route::get('approval-workflows/{register}/history', [ApprovalWorkflowController::class, 'history'])->name('approval-workflows.history');
+        Route::get('document-templates', [TemplateCatalogueController::class, 'index'])->name('templates.index');
+        Route::get('document-templates/sources', [TemplateCatalogueController::class, 'sources'])->name('templates.sources');
+        Route::post('document-templates', [TemplateCatalogueController::class, 'store'])->name('templates.store');
+        Route::get('document-templates/{template}', [TemplateCatalogueController::class, 'show'])->name('templates.show');
+        Route::post('document-templates/{template}/publish', [TemplateCatalogueController::class, 'publish'])->name('templates.publish');
+        Route::get('document-templates/{template}/download', [TemplateCatalogueController::class, 'download'])->middleware(AuditDocumentStorageRequests::class)->name('templates.download');
+        Route::post('document-templates/{template}/retire', [TemplateCatalogueController::class, 'retire'])->name('templates.retire');
         Route::get('document-search/lookups', [DocumentSearchController::class, 'lookups'])->name('document-search.lookups');
         Route::get('document-search', [DocumentSearchController::class, 'index'])->name('document-search');
         Route::get('reports/lookups', [ManagementReportController::class, 'lookups'])->name('reports.lookups');
@@ -90,6 +106,8 @@ Route::middleware(['auth:web', EnsureActiveUserSession::class])->group(function 
         Route::patch('controlled-documents/{record}', [ControlledDocumentController::class, 'update'])->name('controlled.update');
         Route::post('controlled-documents/{record}/register', [ControlledDocumentController::class, 'register'])->name('controlled.register');
         Route::post('controlled-documents/{record}/revisions', [ControlledDocumentController::class, 'revise'])->name('controlled.revise');
+        Route::post('controlled-documents/{record}/revisions/{revision}/reviews', [ControlledDocumentController::class, 'recordReview'])->name('controlled.reviews.record');
+        Route::post('controlled-documents/{record}/revisions/{revision}/approvals', [ControlledDocumentController::class, 'recordApproval'])->name('controlled.approvals.record');
         Route::post('controlled-documents/{record}/release', [ControlledDocumentController::class, 'release'])->name('controlled.release');
         Route::post('controlled-documents/{record}/status', [ControlledDocumentController::class, 'changeStatus'])->name('controlled.changeStatus');
         Route::get('outgoing-correspondence/{record}/operation-options', [OutgoingOperationController::class, 'options'])->name('outgoing.operation-options');

@@ -86,6 +86,9 @@ class ManageNumbering
                     'purpose' => $series ? ['prohibited'] : ['required', Rule::enum(NumberingPurpose::class)],
                     'reset_policy' => $series ? ['prohibited'] : ['required', Rule::enum(NumberingResetPolicy::class)],
                 ], array_fill_keys(['required', 'string', 'max', 'min', 'regex', 'integer', 'boolean', 'prohibited'], 'numberingInvalidFormat'))->validate();
+                $format = array_key_exists('format', $validated) ? $validated['format'] : $current?->format;
+                NumberingFormat::render($validated['prefix'], (int) $validated['padding'], (int) now()->format('Y'), NumberingFormat::MAX_SEQUENCE, $format);
+                NumberingFormat::validateResetPolicy($format, $series?->reset_policy ?? NumberingResetPolicy::from($validated['reset_policy']));
                 if (! $series) {
                     $register = RegisterConfiguration::query()->where('scope_id', $scope->id)->whereKey($validated['register_id'])->first();
                     if (! $register || ! $register->active || ($validated['purpose'] === NumberingPurpose::OfficialOutgoing->value && $register->register_key !== DocumentResourceType::Outgoing)) {
@@ -97,7 +100,7 @@ class ManageNumbering
                         throw new \LogicException('Numbering series persistence was cancelled.');
                     }
                 }
-                if ($current && $current->prefix === $validated['prefix'] && $current->padding === (int) $validated['padding'] && $current->active === (bool) $validated['active']) {
+                if ($current && $current->prefix === $validated['prefix'] && $current->padding === (int) $validated['padding'] && $current->active === (bool) $validated['active'] && $current->format == $format) {
                     return $series->load(['register', 'currentConfiguration']);
                 }
                 DB::table('numbering_namespaces')->insertOrIgnore(['prefix' => $validated['prefix'], 'series_id' => $series->id]);
@@ -108,6 +111,7 @@ class ManageNumbering
                 $configuration = new NumberingConfiguration([
                     'series_id' => $series->id, 'version' => ($current?->version ?? 0) + 1,
                     'prefix' => $validated['prefix'], 'padding' => $validated['padding'], 'active' => $validated['active'], 'change_reason' => $validated['change_reason'] ?? null,
+                    'format' => $format,
                 ]);
                 $configuration->created_by = $actor->id;
                 $configuration->effective_at = now();

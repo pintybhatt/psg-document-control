@@ -54,6 +54,7 @@ class DocumentNumbering
             if (! $configuration?->active || ! $register->active || ! $scope->isActive()) {
                 throw ValidationException::withMessages(['series' => 'numberingInactive']);
             }
+            NumberingFormat::validateResetPolicy($configuration->format, $series->reset_policy);
             $year = (int) now()->format('Y');
             $period = $series->reset_policy === NumberingResetPolicy::Annual ? $year : 0;
             DB::table('numbering_counters')->insertOrIgnore(['series_id' => $series->id, 'period' => $period, 'value' => 0]);
@@ -62,7 +63,7 @@ class DocumentNumbering
                 throw ValidationException::withMessages(['series' => 'numberingExhausted']);
             }
             $sequence = (int) DB::table('numbering_counters')->where('series_id', $series->id)->where('period', $period)->lockForUpdate()->value('value');
-            $number = NumberingFormat::render($configuration->prefix, $configuration->padding, $year, $sequence);
+            $number = NumberingFormat::render($configuration->prefix, $configuration->padding, $year, $sequence, $configuration->format);
             $shared = null;
             $registerFormat = $xppl !== null && in_array($xppl['format'] ?? null, ['xppl_incoming', 'xppl_outgoing'], true);
             if ($xppl !== null) {
