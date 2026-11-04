@@ -670,6 +670,19 @@ class AuthorizationAuditTests(unittest.TestCase):
             self.assertIsNotNone(datetime.datetime.fromisoformat(record['time']).tzinfo)
         self.assertEqual(stat.S_IMODE(self.log.stat().st_mode), 0o600)
 
+    def test_time_failure_categories_are_audited_as_fixed_codes_only(self):
+        for reason in ('OIDC_TIME_INVALID', 'OIDC_EXPIRED', 'OIDC_ISSUED_IN_FUTURE',
+                       'OIDC_NOT_YET_VALID', 'OIDC_TOO_OLD', 'OIDC_LIFETIME_INVALID'):
+            progress = deploy.auth.AuthorizationProgress()
+            progress.mark('oidc_time', reason)
+            deploy.audit_failure(progress)
+        records = [json.loads(line) for line in self.log.read_text().splitlines()]
+        self.assertEqual(len(records), 6)
+        for record in records:
+            self.assertEqual(set(record), {'time', 'stage', 'reason'})
+            self.assertEqual(record['stage'], 'oidc_time')
+        self.assertEqual(stat.S_IMODE(self.log.stat().st_mode), 0o600)
+
     def test_malformed_request_is_audited_before_authorization_or_history_without_body(self):
         with patch.object(deploy.sys, 'stdin', SimpleNamespace(buffer=io.BytesIO(b'{synthetic-secret-request'))), \
                 patch.object(deploy, 'execute') as execute, self.assertRaises(SystemExit) as result:

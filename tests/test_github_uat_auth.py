@@ -232,8 +232,8 @@ class OidcVerificationTests(unittest.TestCase):
             self.verify('.'.join(parts), progress=progress)
         self.assertEqual((progress.stage, progress.reason), ('oidc_signature', 'OIDC_SIGNATURE_INVALID'))
         with self.assertRaises(ValueError):
-            self.verify(self.token(dict(claims_for(request()), iat=NOW+1)), progress=progress)
-        self.assertEqual((progress.stage, progress.reason), ('oidc_time', 'OIDC_TIME_INVALID'))
+            self.verify(self.token(dict(claims_for(request()), iat=NOW+31)), progress=progress)
+        self.assertEqual((progress.stage, progress.reason), ('oidc_time', 'OIDC_ISSUED_IN_FUTURE'))
 
     def test_modified_signature_and_request_are_refused(self):
         token = self.token()
@@ -258,9 +258,68 @@ class OidcVerificationTests(unittest.TestCase):
 
     def test_expired_future_and_long_lived_tokens_are_refused(self):
         original = claims_for(request())
-        for change in ({'exp': NOW}, {'nbf': NOW+1}, {'iat': NOW+1}, {'iat': NOW-301}, {'exp': NOW+3600}, {'exp': None}):
+        for change in ({'exp': NOW}, {'nbf': NOW+31}, {'iat': NOW+31}, {'iat': NOW-301}, {'exp': NOW+3600}, {'exp': None}):
             with self.subTest(change=change), self.assertRaises(ValueError):
                 self.verify(self.token(dict(original, **change)))
+
+    def test_signed_future_claims_within_thirty_seconds_are_accepted(self):
+        original = claims_for(request())
+        for offset in (0, 1, 29, 30):
+            for changes in ({'iat': NOW+offset}, {'nbf': NOW+offset},
+                            {'iat': NOW+offset, 'nbf': NOW+offset}):
+                with self.subTest(changes=changes):
+                    claims = dict(original, **changes)
+                    self.assertEqual(self.verify(self.token(claims)), claims)
+
+    def test_signed_timestamp_failures_have_fixed_reasons_without_claim_values(self):
+        cases = [({'iat': NOW+31}, 'OIDC_ISSUED_IN_FUTURE'),
+                 ({'nbf': NOW+31}, 'OIDC_NOT_YET_VALID'),
+                 ({'exp': NOW}, 'OIDC_EXPIRED'),
+                 ({'exp': NOW-1}, 'OIDC_EXPIRED'),
+                 ({'iat': NOW-301}, 'OIDC_TOO_OLD'),
+                 ({'exp': NOW+591}, 'OIDC_LIFETIME_INVALID'),
+                 ({'exp': NOW-10}, 'OIDC_LIFETIME_INVALID'),
+                 ({'nbf': NOW+290}, 'OIDC_LIFETIME_INVALID')]
+        for changes, reason in cases:
+            with self.subTest(changes=changes):
+                progress = auth.AuthorizationProgress()
+                with self.assertRaises(ValueError):
+                    self.verify(self.token(dict(claims_for(request()), **changes)), progress=progress)
+                self.assertEqual(vars(progress), {'stage': 'oidc_time', 'reason': reason})
+
+    def test_time_claims_require_integers_and_must_be_present(self):
+        for field in ('iat', 'nbf', 'exp'):
+            for value in (None, True, False, '1793102400', NOW+0.5):
+                with self.subTest(field=field, value=value):
+                    progress = auth.AuthorizationProgress()
+                    with self.assertRaises(ValueError):
+                        self.verify(self.token(dict(claims_for(request()), **{field: value})), progress=progress)
+                    self.assertEqual(vars(progress), {'stage': 'oidc_time', 'reason': 'OIDC_TIME_INVALID'})
+            claims = claims_for(request())
+            del claims[field]
+            with self.subTest(missing=field), self.assertRaises(ValueError):
+                self.verify(self.token(claims))
+
+    def test_exact_age_lifetime_and_fractional_expiry_boundaries_remain_strict(self):
+        claims = dict(claims_for(request()), iat=NOW-300, nbf=NOW-300, exp=NOW+300)
+        self.assertEqual(self.verify(self.token(claims)), claims)
+        token = self.token(dict(claims_for(request()), exp=NOW+1))
+        with patch.object(auth, 'read_https', return_value=json.dumps({'keys': [self.jwk]}).encode()):
+            auth.verify_oidc(token, request(), POLICY, now=NOW+0.999)
+            for now in (NOW+1, NOW+1.001):
+                with self.subTest(now=now), self.assertRaises(ValueError):
+                    auth.verify_oidc(token, request(), POLICY, now=now)
+
+    def test_skew_does_not_bypass_identity_or_signature_verification(self):
+        claims = dict(claims_for(request()), iat=NOW+30, nbf=NOW+30)
+        for field, value in (('iss', 'untrusted'), ('aud', 'wrong'), ('actor_id', '999'),
+                             ('workflow_ref', 'wrong'), ('runner_environment', 'github-hosted')):
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                self.verify(self.token(dict(claims, **{field: value})))
+        parts = self.token(claims).split('.')
+        parts[-1] = base64.urlsafe_b64encode(bytes(256)).decode().rstrip('=')
+        with self.assertRaises(ValueError):
+            self.verify('.'.join(parts))
 
     def test_unknown_duplicate_keys_algorithm_confusion_and_remote_key_urls_are_refused(self):
         with self.assertRaises(ValueError):

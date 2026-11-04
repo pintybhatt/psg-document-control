@@ -25,6 +25,7 @@ REPOSITORY = evidence.REPOSITORY
 WORKFLOW = '.github/workflows/deploy-uat.yml'
 ISSUER = 'https://token.actions.githubusercontent.com'
 AUDIENCE = 'https://github.com/'+REPOSITORY+'/uat/'
+OIDC_FUTURE_SKEW_SECONDS = 30
 REQUEST_KEYS = {'deployment_run_id', 'deployment_run_attempt', 'release_run_id', 'release_run_attempt',
                 'release_artifact_id', 'image', 'manifest_sha256', 'operation', 'rollback_compatibility_reference'}
 
@@ -47,7 +48,8 @@ class AuthorizationProgress:
         'oidc_header': {'OIDC_HEADER_INVALID'},
         'oidc_jwks': {'OIDC_JWKS_UNAVAILABLE', 'OIDC_SIGNING_KEY_INVALID'},
         'oidc_signature': {'OIDC_SIGNATURE_INVALID'},
-        'oidc_time': {'OIDC_TIME_INVALID'},
+        'oidc_time': {'OIDC_TIME_INVALID', 'OIDC_EXPIRED', 'OIDC_ISSUED_IN_FUTURE',
+                      'OIDC_NOT_YET_VALID', 'OIDC_TOO_OLD', 'OIDC_LIFETIME_INVALID'},
         'oidc_identity': {
             'OIDC_ISSUER_MISMATCH', 'OIDC_AUDIENCE_MISMATCH', 'OIDC_REPOSITORY_MISMATCH',
             'OIDC_REPOSITORY_ID_MISMATCH', 'OIDC_EVENT_MISMATCH', 'OIDC_REF_MISMATCH',
@@ -242,8 +244,18 @@ def verify_oidc(token, request, policy, now=None, progress=None):
     claims = parse_json(decode64(claims64))
     for key in ('iat', 'nbf', 'exp'):
         require(type(claims.get(key)) is int, 'Missing OIDC time claim.')
-    require(claims['nbf'] <= now < claims['exp'] and now-300 <= claims['iat'] <= now
-            and claims['iat'] < claims['exp'] <= claims['iat']+600, 'Expired/future OIDC authorization.')
+    progress.mark('oidc_time', 'OIDC_LIFETIME_INVALID')
+    require(claims['iat'] < claims['exp'] <= claims['iat']+600 and claims['nbf'] < claims['exp'],
+            'Invalid OIDC lifetime.')
+    # Future-only skew allowance: expiry and the maximum admission age have no leeway.
+    progress.mark('oidc_time', 'OIDC_EXPIRED')
+    require(now < claims['exp'], 'Expired OIDC authorization.')
+    progress.mark('oidc_time', 'OIDC_ISSUED_IN_FUTURE')
+    require(claims['iat'] <= now+OIDC_FUTURE_SKEW_SECONDS, 'OIDC issued too far in future.')
+    progress.mark('oidc_time', 'OIDC_NOT_YET_VALID')
+    require(claims['nbf'] <= now+OIDC_FUTURE_SKEW_SECONDS, 'OIDC not yet valid.')
+    progress.mark('oidc_time', 'OIDC_TOO_OLD')
+    require(now-300 <= claims['iat'], 'OIDC authorization too old.')
     expected = {'iss': ISSUER, 'aud': audience(request), 'repository': REPOSITORY,
                 'repository_id': str(policy['repository_id']), 'event_name': 'workflow_dispatch',
                 'ref': 'refs/heads/main', 'ref_type': 'branch', 'repository_visibility': 'private',
