@@ -69,6 +69,51 @@ class UatPreflightTests(unittest.TestCase):
         self.assertIn('Daemon probes not requested', result.stdout)
         self.assertNotIn('synthetic-test-password', result.stdout+result.stderr)
 
+    def approved_live_profile(self):
+        path = self.repository/'compose.uat.yaml'
+        content = path.read_text().replace('640m', '2g').replace('768m', '1536m').replace('cpus: 0.50', 'cpus: 2.00', 1)
+        content = content.replace('      - --mysqlx=OFF', '      - --mysqlx=OFF\n      - --log-bin-trust-function-creators=ON')
+        path.write_text(content)
+        apache = self.repository/'docker/apache-uat.conf'
+        apache.write_text(apache.read_text().replace('ServerLimit 2', 'ServerLimit 8').replace('MaxRequestWorkers 2', 'MaxRequestWorkers 8'))
+        self.write('app.env', (self.directory/'app.env').read_text()+'XPPL_UAT_IMPORT_ENABLED=false\n')
+
+    def test_approved_live_profile_is_accepted_without_changing_server_managed_files(self):
+        self.approved_live_profile()
+        paths = [self.repository/'compose.uat.yaml', self.repository/'docker/apache-uat.conf', self.directory/'app.env', self.directory/'compose.env']
+        originals = {path: path.read_bytes() for path in paths}
+
+        result = self.run_plan()
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('No deployment performed', result.stdout)
+        for path, content in originals.items():
+            self.assertEqual(path.read_bytes(), content)
+
+    def test_unapproved_live_resources_and_swap_are_refused(self):
+        self.approved_live_profile()
+        path = self.repository/'compose.uat.yaml'
+        original = path.read_text()
+        for change in (original.replace('cpus: 2.00', 'cpus: 3.00'),
+                       original.replace('mem_limit: 2g', 'mem_limit: 0'),
+                       original.replace('memswap_limit: 2g', 'memswap_limit: 4g'),
+                       original.replace('1536m', '768m'),
+                       original.replace('cpus: 0.50', 'cpus: 1.00')):
+            with self.subTest(configuration=change[:20]):
+                path.write_text(change)
+                self.assert_refused()
+        path.write_text(original)
+
+    def test_approved_resources_do_not_bypass_database_identity_or_storage_protections(self):
+        self.approved_live_profile()
+        application = (self.directory/'app.env').read_text()
+        self.write('app.env', application.replace('DB_DATABASE=dcms_uat', 'DB_DATABASE=development'))
+        self.assert_refused()
+        self.write('app.env', application)
+        compose = self.repository/'compose.release.yaml'
+        compose.write_text(compose.read_text().replace('  database:\n', '  database:\n    external: true\n    name: unrelated-data\n'))
+        self.assert_refused()
+
     def test_production_and_unrelated_projects_are_refused(self):
         for arguments in ({'target': 'production'}, {'project': 'netbox'}, {'project': 'dcms-uat-other'}):
             with self.subTest(arguments=arguments):

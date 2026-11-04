@@ -102,10 +102,16 @@ if args.uat_profile:
                 require(mount['type'] == 'volume' and mount['source'] == source, 'Expected project-owned persistent volume.')
     require(app.get('read_only') and 'ALL' in app.get('cap_drop', [])
             and 'no-new-privileges:true' in app.get('security_opt', []), 'Application runtime protections required.')
-    for name, memory in [('app', 640*1024*1024), ('db', 768*1024*1024)]:
+    approved_resources = {
+        ((640*1024*1024, 0.5), (768*1024*1024, 0.5)),
+        ((2048*1024*1024, 2.0), (1536*1024*1024, 0.5)),
+    }
+    resources = tuple((int(config['services'][name].get('mem_limit', 0)), float(config['services'][name].get('cpus', 0)))
+                      for name in ('app', 'db'))
+    require(resources in approved_resources, 'Reviewed UAT resource limits required.')
+    for name in ('app', 'db'):
         service = config['services'][name]
-        require(int(service.get('mem_limit', 0)) == memory and int(service.get('memswap_limit', 0)) == memory
-                and float(service.get('cpus', 0)) == 0.5, 'Reviewed UAT resource limits required.')
+        require(int(service.get('memswap_limit', 0)) == int(service['mem_limit']), 'Reviewed UAT memory/swap limits required.')
         require(not service.get('privileged') and not service.get('network_mode') and not service.get('container_name'), 'Host/privileged/shared container settings refused.')
     for kind in ('volumes', 'networks'):
         for resource in config[kind].values():
