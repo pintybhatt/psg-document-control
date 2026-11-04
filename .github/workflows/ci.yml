@@ -20,7 +20,7 @@ on:
         default: false
     outputs:
       image_artifact:
-        description: Exact tested image archive; available only after full validation and explicit retention
+        description: Exact tested image archive; available after full validation when retained
         value: ${{ jobs.full_release.outputs.image_artifact }}
 permissions:
   contents: read
@@ -59,6 +59,7 @@ jobs:
         with:
           name: frontend-assets
           path: public/build
+          overwrite: true
           if-no-files-found: error
           retention-days: 1
 
@@ -238,9 +239,9 @@ jobs:
             /tmp/dcms-smoke-*/runtime.log
           if-no-files-found: warn
           retention-days: 3
-      - name: Retain the tested image only when explicitly requested
+      - name: Retain the exact tested image for main publication or explicit review
         id: archive
-        if: inputs.retain_image == true
+        if: inputs.retain_image == true || (github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'pintybhatt/psg-document-control' && inputs.source_commit == '')
         env:
           IMAGE_ID: ${{ steps.build.outputs.imageid }}
           SOURCE: ${{ inputs.source_commit || github.sha }}
@@ -251,9 +252,9 @@ jobs:
           (cd "$RUNNER_TEMP/validated-image" && sha256sum image.tar > image.tar.sha256)
           printf '%s\n' "$IMAGE_ID" > "$RUNNER_TEMP/validated-image/image-id.txt"
           printf '%s\n' "$SOURCE" > "$RUNNER_TEMP/validated-image/source-commit.txt"
-          echo "artifact_name=validated-image-$SOURCE" >> "$GITHUB_OUTPUT"
+          echo "artifact_name=validated-image-$SOURCE-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" >> "$GITHUB_OUTPUT"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: inputs.retain_image == true
+        if: inputs.retain_image == true || (github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'pintybhatt/psg-document-control' && inputs.source_commit == '')
         with:
           name: ${{ steps.archive.outputs.artifact_name }}
           path: ${{ runner.temp }}/validated-image
@@ -276,3 +277,15 @@ jobs:
           MYSQL: ${{ needs.mysql.result }}
           IMAGE: ${{ needs.image.result }}
         run: test "$FAST" = success && test "$MYSQL" = success && test "$IMAGE" = success
+
+  publish:
+    name: Publish release
+    needs: full_release
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'pintybhatt/psg-document-control' && inputs.source_commit == ''
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/release-image.yml
+    with:
+      source_commit: ${{ github.sha }}
+      image_artifact: ${{ needs.full_release.outputs.image_artifact }}

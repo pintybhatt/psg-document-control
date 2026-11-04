@@ -25,7 +25,8 @@ class RestoreTests(unittest.TestCase):
                 item.size = 4
                 archive.addfile(item, io.BytesIO(b'test'))
             rows = [[identity, '4', hashlib.sha256(b'test').hexdigest()]]
-            restore.verify_documents(rows, archive_path)
+            with patch.object(restore.paired.hashlib, 'file_digest', None, create=True):
+                restore.verify_documents(rows, archive_path)
             for changes in ([identity, '5', rows[0][2]], [identity, '4', '0'*64], ['b'*36, '4', rows[0][2]]):
                 with self.subTest(changes=changes), self.assertRaises(ValueError):
                     restore.verify_documents([changes], archive_path)
