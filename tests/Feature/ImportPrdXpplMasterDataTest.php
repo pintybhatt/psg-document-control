@@ -37,10 +37,16 @@ class ImportPrdXpplMasterDataTest extends TestCase
     {
         parent::setUp();
         $this->assertSame('testing', $this->app->environment());
-        $this->assertSame('sqlite', config('database.default'));
-        $this->assertSame(':memory:', config('database.connections.sqlite.database'));
         $this->directory = sys_get_temp_dir().'/dcms-prd-import-'.bin2hex(random_bytes(8));
         mkdir($this->directory.'/seeders', 0700, true);
+
+        if (config('database.default') !== 'sqlite') {
+            $this->markTestSkipped(
+                'Production importer integration fixtures require isolated in-memory SQLite; MySQL target-guard behavior is tested separately.'
+            );
+        }
+
+        $this->assertSame(':memory:', config('database.connections.sqlite.database'));
     }
 
     protected function tearDown(): void
