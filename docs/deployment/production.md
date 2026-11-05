@@ -1,8 +1,9 @@
-# Production configuration and deployment engine — Phases 12.2A–B
+# Production configuration, deployment and recovery — Phases 12.2A–12.3
 
-These phases prepare local configuration and the Production deployment/backup/recovery
-engine. Nothing has been installed, initialized, published or deployed. The GitHub
-workflow and one-time server bootstrap remain separate work; there is no `deploy-prd.yml` workflow.
+These phases prepare local configuration, the Production deployment/backup/recovery
+engine, and `.github/workflows/deploy-prd.yml`. Nothing has been installed, initialized,
+published or deployed. GitHub/environment setup and one-time server bootstrap remain
+separate operations; preparing the workflow does not activate or authorize a deployment.
 
 | Setting | Production |
 | --- | --- |
@@ -115,8 +116,9 @@ they do not replace an actual Nginx syntax/TLS/runtime check.
   resource limits, observed proxy IP, HTTPS login/cookies/redirects, confidential
   upload/download/RBAC/audit behavior and coexistence with existing services.
 
-GitHub settings, deployment credentials/workflow and activation remain outside
-Phases 12.2A–B. Copying templates or passing preflight does not authorize deployment.
+GitHub settings, deployment credentials and activation remain separate setup work.
+Phase 12.3 prepares the workflow locally. Copying templates or passing preflight does
+not authorize deployment.
 
 ## Routine deployment interface and trust boundary
 
@@ -130,9 +132,9 @@ configuration and ancestor directories. SSH must disable PTY, forwarding, user R
 agent forwarding and unrestricted commands. The dedicated Production key/account
 must differ from UAT. No SSH/sudo enrollment is performed by this phase.
 
-The future **Deploy DCMS PRD** workflow must run its reviewed deployment tooling from
-`main`, validate its `confirm_deploy` input, resolve `ref` to a published release,
-and send a bounded JSON request on stdin containing exactly:
+The **Deploy DCMS PRD** workflow runs its reviewed deployment tooling from `main`,
+validates its `confirm_deploy` input, resolves `ref` to a published release, and sends
+a bounded JSON request on stdin containing exactly:
 
 ```json
 {
@@ -163,8 +165,9 @@ publication and artifact identity; and checks image/source/hash against the requ
 The source must belong to main history and advance the currently recorded source.
 The pulled image's registry manifest, tested configuration ID, platform and source
 labels must match, including support for classic/containerd image stores.
-The future workflow still needs its own reviewed SSH credential/confirmation handling;
-merely naming a workflow in this document does not configure it.
+The workflow uses its own Production SSH credentials and the existing server contract
+unchanged. GitHub environment secrets, runner labeling and server SSH enrollment still
+need setup; no settings or operational servers were changed during implementation.
 
 ## Server state and credentials
 
@@ -349,3 +352,113 @@ DNS/TLS/proxy behavior, resource competition and a controlled recovery drill. De
 have a one-hour bound; backup streams/import have ten-minute bounds, off-host transfer
 has a twenty-minute bound, and restore verification has its own bounded lifetime. Measure
 these against Production data before activation. No operational host was contacted here.
+
+## Phase 12.3 operator workflow
+
+Use **Actions → Deploy DCMS PRD → Run workflow**, leaving GitHub's built-in workflow
+branch selector on **main**. There are exactly two custom inputs:
+
+| Input | Required | Default | Accepted value |
+| --- | --- | --- | --- |
+| `confirm_deploy` | Yes, string | None | Exactly `DEPLOY_PRD`, including case; no whitespace |
+| `ref` | Yes, string | `main` | `main`, an eligible tag, or a full 40-character commit SHA |
+
+There is no image/run/artifact override, environment selector or further approval
+file/switch. The workflow adds no extra manual confirmation/reviewer mechanism.
+GitHub's workflow branch selects trusted tooling; the custom `ref` selects application
+source only. Checkout is pinned to `github.sha`, never to the administrator's `ref`.
+Both shell guards and `select-prd-release.py` check the repository, main workflow path,
+workflow revision, confirmation and active deployment run/attempt. The API must show
+that revision as the current protected main head; a queued run that has become stale
+fails before contacting Production. Dispatch a new run from current main after review.
+
+The selector performs read-only GitHub API operations:
+
+- `main` resolves to the checked protected main head. A full SHA is validated as a
+  commit in this repository. Uppercase hex is normalized to the same lowercase SHA.
+- A tag is resolved by its exact `refs/tags/NAME` reference. Lightweight tags point
+  directly to commits; annotated/nested tag objects are peeled with a bounded cycle
+  check. `refs/tags/NAME` is also accepted explicitly. Safe ASCII tag names may include
+  dots, underscores, hyphens and slash-separated components. Bare hex names that could
+  be short SHAs are refused; use an explicit tag ref to disambiguate such a tag.
+- Arbitrary branches, `refs/heads/...`, short SHAs, repository-qualified refs, Git
+  revision expressions and shell syntax are rejected. There is no branch fallback.
+- The resolved commit must be an ancestor of the approved main revision. Reference
+  resolution is repeated before writing the request; a moved/deleted tag or changed
+  main stops selection rather than substituting another commit.
+- Search covers main push CI publications for the exact source and retained historical
+  main release-workflow publications. Only artifacts whose release name identifies
+  that source are candidates. The newest candidate publication is selected by run ID;
+  expired, failed, ambiguous or unverifiable selected evidence fails without falling
+  back to older evidence. A run without a manifest is not a publication candidate.
+  Search is bounded to ten pages of 100 runs per workflow and rejects pagination drift.
+- The existing authenticated artifact downloader and `verify_publication` verify the
+  repository/workflow/source, full CI, MySQL checks, exact-image smoke, publication,
+  immutable GHCR digest, platform, migration inventory, artifact and current attempt.
+  Both modern publications and the verifier's supported historical layout are accepted.
+  There is no additional seven-day UAT selection window; actual artifact expiry applies.
+- The selected run and artifact are checked again and the eight-field request is
+  generated automatically with the original manifest bytes' SHA-256. The request is
+  private (0600), never an administrator input or uploaded workflow artifact.
+
+See the [GitHub reference API](https://docs.github.com/en/rest/git/refs#get-a-reference),
+[tag object API](https://docs.github.com/en/rest/git/tags#get-a-tag) and
+[workflow contexts](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#github-context)
+for the underlying API/context contracts. Selection never builds an image, dispatches
+CI/publication, pushes a tag, or silently chooses a different source. If evidence is
+missing or has expired, stop and resolve release retention/publication through its
+existing process outside this deployment workflow.
+
+## Phase 12.3 GitHub and runner prerequisites
+
+Prepare the **prd** GitHub environment with these independently provisioned secrets:
+
+| Secret | Purpose |
+| --- | --- |
+| `PRD_SSH_KEY` | Production-only private key for `dcms-prd-deploy@192.168.0.228` |
+| `PRD_KNOWN_HOSTS` | Independently verified pinned host-key data for `192.168.0.228` on port 22 |
+
+Do not copy the UAT key. Enroll the corresponding Production public key for the
+restricted `prd-ssh-command.sh` forced command and no-argument sudo entry point on
+`192.168.0.228`. The workflow can invoke only **`deploy-dcms-prd`**, sending the
+validated request on stdin. It cannot select a different host, port, command, root,
+Compose project or database. SSH disables ambient client configuration, proxy commands,
+agent/password/interactive authentication and forwarding, and uses strict host-key
+verification plus one connection attempt. Temporary key/known-host/request files are
+removed on success/failure. Captured SSH diagnostics remain private and are not echoed
+into CI logs; the server's protected history remains the recovery authority.
+
+Use the existing trusted self-hosted runner infrastructure on **192.168.0.227**. Add a
+`dcms-prd-runner` label to an eligible Linux/X64 runner there; no new runner or UAT
+workflow modification is implemented. The job requires
+`[self-hosted, Linux, X64, dcms-prd-runner]`. Labels route jobs and do not isolate secrets:
+keep that runner/account restricted to trusted code and trusted deployment jobs.
+Ensure Python 3, Git and OpenSSH client tools are present and that outbound GitHub API,
+artifact download and fixed Production SSH routes are permitted.
+
+Restrict the `prd` environment to main deployments and scope the two Production secrets
+there. Do not add required reviewers or another confirmation gate for this workflow.
+The job token needs only `contents: read` and `actions: read`; no publishing, package-write,
+OIDC or repository-settings permission is requested. Keep the existing protected main
+and publication process. No environment/settings/key/runner changes were made here.
+The Production host still needs the Phase 12.2B engine, protected server-side GitHub read
+credential, registry access, healthy initialized stack, separate migration/backup accounts,
+off-host restore verification, TLS and recovery drill described above.
+
+Production deployments use concurrency group `dcms-prd-xppl-deployment` with cancellation
+disabled. Backup, migrations, replacement and health checks run exclusively in the
+server engine. Success is reported only after its SSH invocation exits successfully.
+A failure/cancellation/interruption has no automatic retry: inspect protected
+`/srv/dcms-prd/history/gha-RUN-ATTEMPT/result.json` and
+`/srv/dcms-prd/config/recovery-required.json` if the entry point started. A transport
+failure may occur before server history exists. Follow the controlled recovery procedure
+before manually rerunning an uncertain deployment; the server independently refuses
+replays, unresolved recovery, downgrades and already-current releases.
+
+Local verification uses mocked GitHub metadata and fake SSH executables, full YAML
+structure checks when PyYAML is available, and Bash syntax checks. It does not execute
+GitHub Actions or contact either host. Real GitHub environment/runner routing, host-key
+custody, SSH forced-command enrollment and end-to-end execution still require setup and
+verification. Evidence or registry availability can change after runner verification;
+the server independently re-verifies evidence and pulls/checks the immutable image before
+maintenance, refusing unsafe deployment rather than rebuilding or substituting an image.
