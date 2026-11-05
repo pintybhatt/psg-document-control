@@ -40,7 +40,9 @@ require(not args.prd_profile or (args.target == 'production' and not args.uat_pr
 require(args.target != 'production' or args.prd_profile, 'Production requires the explicit --prd-profile.')
 require(not args.localhost_verification or args.uat_profile, 'Localhost verification requires the UAT profile.')
 if args.prd_profile:
-    require(args.compose_env == Path('/srv/dcms-prd/config/compose.env') and args.compose_env.resolve() == args.compose_env,
+    production_env = args.compose_env == Path('/srv/dcms-prd/config/compose.env')
+    candidate_env = re.fullmatch(r'/srv/dcms-prd/history/gha-[1-9][0-9]*-[1-9][0-9]*/compose.env', str(args.compose_env))
+    require((production_env or candidate_env) and args.compose_env.resolve() == args.compose_env,
             'Production Compose configuration must use its fixed isolated path, without symlinks.')
 protected_file(args.compose_env)
 # Never source shell code. Validate Production paths before Compose can read env_file/secrets.

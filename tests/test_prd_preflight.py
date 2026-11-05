@@ -65,6 +65,7 @@ class ProductionPreflightTests(unittest.TestCase):
         command += list(extra)
         original_read, original_stat, original_is_file = Path.read_text, Path.stat, Path.is_file
         virtual = {PRODUCTION_CONFIG/name: self.directory/name for name in ('compose.env', 'app.env', 'db-password', 'db-root-password')}
+        virtual[compose_env] = self.directory/'compose.env'
         output, errors = io.StringIO(), io.StringIO()
         environment = dict(self.environment, DCMS_IMAGE='untrusted', DCMS_HTTP_PORT='18084',
                            COMPOSE_FILE='/untrusted.yaml', COMPOSE_PROJECT_NAME='dcms-uat-xppl',
@@ -115,6 +116,15 @@ class ProductionPreflightTests(unittest.TestCase):
                           {'extra': ['--localhost-verification']}, {'profile': False, 'project': 'dcms-production-xppl'}):
             with self.subTest(arguments=arguments):
                 self.assert_refused(**arguments)
+
+    def test_candidate_config_is_limited_to_the_production_deployment_history(self):
+        code, output, _ = self.run_plan(compose_env=Path('/srv/dcms-prd/history/gha-789-1/compose.env'))
+        self.assertEqual(code, 0)
+        self.assertIn('No deployment performed', output)
+        for path in ('/srv/dcms-uat/history/gha-789-1/compose.env', '/srv/dcms-prd/history/other/compose.env',
+                     '/srv/dcms-prd/history/gha-789-1/../compose.env', '/srv/dcms-prd/history/gha-0-1/compose.env'):
+            with self.subTest(path=path):
+                self.assert_refused(compose_env=Path(path))
 
     def test_uat_relative_and_alternative_configuration_paths_are_refused_before_compose(self):
         for path in ('/srv/dcms-uat/config/compose.env', 'compose.env', '/tmp/compose.env'):
