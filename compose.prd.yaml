@@ -1,0 +1,41 @@
+# Production only: merge after compose.release.yaml. Requires Compose >= 2.24.4 (!override).
+# Always use project dcms-prd-xppl and docker/prd.compose.env.example's protected paths.
+services:
+  app:
+    environment:
+      APP_ENV: production
+      PHP_MEMORY_LIMIT: 256M
+    ports: !override
+      - "127.0.0.1:18085:8080"
+    mem_limit: 2g
+    memswap_limit: 2g
+    cpus: 1.00
+    pids_limit: 128
+    tmpfs: !override
+      - /tmp:uid=33,gid=33,mode=1770,size=64m
+      - /var/www/html/bootstrap/cache:uid=33,gid=33,mode=0750,size=16m
+    volumes:
+      - type: bind
+        source: ./docker/apache-prd.conf
+        target: /etc/apache2/conf-enabled/zz-dcms-prd.conf
+        read_only: true
+        bind:
+          create_host_path: false
+  db:
+    mem_limit: 1536m
+    memswap_limit: 1536m
+    cpus: 0.50
+    pids_limit: 256
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-storage-engine=InnoDB
+      - --mysqlx=OFF
+      - --innodb-dedicated-server=OFF
+      - --innodb-buffer-pool-size=512M
+      - --max-connections=40
+      - --table-open-cache=512
+      - --tmp-table-size=16M
+      - --max-heap-table-size=16M
+      - --temptable-max-ram=32M
+      - --temptable-max-mmap=0

@@ -1,0 +1,104 @@
+name: Deploy DCMS PRD
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_deploy:
+        description: Type DEPLOY_PRD to deploy Production
+        required: true
+        type: string
+      ref:
+        description: main, eligible Git tag, or full commit SHA with a verified published image
+        required: true
+        type: string
+        default: main
+permissions:
+  contents: read
+  actions: read
+concurrency:
+  group: dcms-prd-xppl-deployment
+  cancel-in-progress: false
+jobs:
+  deploy:
+    environment: prd
+    runs-on: [self-hosted, Linux, X64, dcms-prd-runner]
+    timeout-minutes: 75
+    steps:
+      - name: Validate confirmed main workflow
+        env:
+          CONFIRM_DEPLOY: ${{ inputs.confirm_deploy }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" != workflow_dispatch || "$GITHUB_REF" != refs/heads/main ||
+                "$GITHUB_REPOSITORY" != pintybhatt/psg-document-control || "$CONFIRM_DEPLOY" != DEPLOY_PRD ||
+                "$WORKFLOW_REF" != pintybhatt/psg-document-control/.github/workflows/deploy-prd.yml@refs/heads/main ||
+                "$WORKFLOW_SHA" != "$GITHUB_SHA" || ! "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]; then
+            echo '::error::Production requires confirmation DEPLOY_PRD and the trusted main workflow definition.'
+            exit 1
+          fi
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Resolve reference and verify existing publication
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CONFIRM_DEPLOY: ${{ inputs.confirm_deploy }}
+          DEPLOY_REF: ${{ inputs.ref }}
+          WORKFLOW_REF: ${{ github.workflow_ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          python3 -B docker/select-prd-release.py
+      - name: Invoke only the Production entry point
+        id: production_deploy
+        env:
+          PRD_SSH_KEY: ${{ secrets.PRD_SSH_KEY }}
+          PRD_KNOWN_HOSTS: ${{ secrets.PRD_KNOWN_HOSTS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$PRD_SSH_KEY" && test -n "$PRD_KNOWN_HOSTS"
+          test -s "$RUNNER_TEMP/prd-request.json"
+          umask 077
+          ssh_dir=$(mktemp -d "$RUNNER_TEMP/dcms-prd-ssh.XXXXXXXX")
+          trap 'rm -rf -- "$ssh_dir"; rm -f -- "$RUNNER_TEMP/prd-request.json"' EXIT
+          printf '%s\n' "$PRD_SSH_KEY" > "$ssh_dir/key"
+          printf '%s\n' "$PRD_KNOWN_HOSTS" > "$ssh_dir/known_hosts"
+          unset PRD_SSH_KEY PRD_KNOWN_HOSTS
+          ssh-keygen -F 192.168.0.228 -f "$ssh_dir/known_hosts" > "$ssh_dir/host-check.log" 2>&1
+          ssh -F /dev/null -T -p 22 -i "$ssh_dir/key" \
+            -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityAgent=none \
+            -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$ssh_dir/known_hosts" \
+            -o GlobalKnownHostsFile=/dev/null -o UpdateHostKeys=no \
+            -o ProxyCommand=none -o ProxyJump=none -o ConnectionAttempts=1 \
+            -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no \
+            -o ClearAllForwardings=yes -o RequestTTY=no -o ConnectTimeout=15 \
+            -o ServerAliveInterval=15 -o ServerAliveCountMax=3 \
+            dcms-prd-deploy@192.168.0.228 deploy-dcms-prd \
+            < "$RUNNER_TEMP/prd-request.json" > "$ssh_dir/result.log" 2>&1
+      - name: Report verified Production success
+        if: success() && steps.production_deploy.outcome == 'success'
+        shell: bash
+        run: |
+          printf '%s\n' 'Production deployment completed successfully through the verified server entry point.' >> "$GITHUB_STEP_SUMMARY"
+      - name: Report Production failure
+        if: failure()
+        env:
+          DEPLOY_OUTCOME: ${{ steps.production_deploy.outcome }}
+        shell: bash
+        run: |
+          if [[ "$DEPLOY_OUTCOME" == failure ]]; then
+            printf '::error::Production deployment did not complete. Do not retry automatically; inspect protected /srv/dcms-prd/history/gha-%s-%s/result.json and /srv/dcms-prd/config/recovery-required.json if the server entry point began.\n' "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT"
+          else
+            echo '::error::Production workflow validation or release selection failed before the Production SSH step.'
+          fi
+      - name: Remove transient Production request
+        if: always()
+        shell: bash
+        run: rm -f -- "$RUNNER_TEMP/prd-request.json"
