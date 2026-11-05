@@ -2,6 +2,8 @@
 
 namespace Tests\Feature;
 
+use App\Authorization\AccessControl;
+use App\Authorization\CorrespondenceContexts;
 use App\Authorization\ManageNumbering;
 use App\Models\AuthorizationScope;
 use App\Models\ConfidentialityClearance;
@@ -45,6 +47,37 @@ class DashboardTest extends TestCase
         $this->signIn($user);
 
         return $user;
+    }
+
+    public function test_context_permissions_match_fresh_role_decisions_and_exact_memberships(): void
+    {
+        [, $site, $scope] = $this->workspace();
+        $reader = $this->reader($site);
+        $department = Department::factory()->for($site)->create();
+        Department::factory()->for($site)->create();
+        OrganizationMembership::factory()->for($reader)->inDepartment($department)->create();
+        $this->grant($reader, $scope, ['numbering.issue', 'reports.view', 'roles.view']);
+        $contexts = app(CorrespondenceContexts::class);
+        $roles = app(AccessControl::class);
+
+        $result = $contexts->forUser($reader);
+        $this->assertCount(2, $result);
+        foreach ($result as $context) {
+            $expected = $roles->permissions($reader, $scope, $context['department_id']);
+            sort($expected);
+            $actual = $context['permissions'];
+            sort($actual);
+            $this->assertSame($expected, $actual);
+        }
+        OrganizationMembership::query()->where('user_id', $reader->id)->where('membership_type', 'site')->sole()
+            ->forceFill(['active' => false, 'revoked_by' => $reader->id, 'revoked_at' => now()])->save();
+        $remaining = $contexts->forUser($reader);
+        $this->assertCount(1, $remaining);
+        $this->assertSame($department->id, $remaining[0]['department_id']);
+        $this->assertNotContains('numbering.issue', $remaining[0]['permissions']);
+        $this->assertNotContains('roles.view', $remaining[0]['permissions']);
+        $department->update(['active' => false]);
+        $this->assertSame([], $contexts->forUser($reader));
     }
 
     private function url(Site $site, string $path = 'dashboard'): string

@@ -11,13 +11,116 @@ import unittest
 from unittest.mock import patch
 import urllib.error
 
-from test_release_preparation import load, SOURCE
+from test_release_preparation import load, SOURCE, DIGEST, automatic_release
 from test_uat_deployment import release_fixture, prepare
 
 
 selector = load('uat_release_selection', 'select-uat-release.py')
 ROOT = Path(__file__).resolve().parent.parent
 NOW = datetime.datetime(2026, 10, 27, 12, tzinfo=datetime.timezone.utc)
+
+
+class MainCiDeploymentTests(unittest.TestCase):
+    def setUp(self):
+        self.fixture = automatic_release()
+        self.api = selector.auth.GitHub('synthetic-read-token')
+
+    def metadata(self, path):
+        if path == 'branches/main': return {'protected': True, 'commit': {'sha': SOURCE}}
+        if path == 'actions/runs/123': return self.fixture['run']
+        raise AssertionError('Unexpected API path: '+path)
+
+    def collection(self, path, key):
+        return self.fixture['jobs'] if key == 'jobs' else self.fixture['artifacts']
+
+    def select(self, candidates=None):
+        with patch.object(selector, 'runs', return_value=candidates or [self.fixture['run']]), \
+                patch.object(self.api, 'get', side_effect=self.metadata), \
+                patch.object(self.api, 'collection', side_effect=self.collection), \
+                patch.object(self.api, 'manifest', return_value=self.fixture['manifest']):
+            return selector.deployment_request(self.api, SOURCE, '789', '1')
+
+    def test_exact_successful_main_image_is_selected_and_the_latest_attempt_is_verified(self):
+        for attempt in (1, 2):
+            self.fixture = automatic_release(attempt)
+            self.assertEqual(self.select(), {'image': DIGEST, 'source_commit': SOURCE, 'run': '789-1'})
+
+    def test_selection_waits_only_for_the_exact_main_ci_run_and_never_builds_or_publishes(self):
+        run = self.fixture['run']
+        with patch.object(selector, 'runs', side_effect=[[], [dict(run, status='in_progress')], [run]]) as runs, \
+                patch.object(self.api, 'get', side_effect=self.metadata), \
+                patch.object(self.api, 'collection', side_effect=self.collection), \
+                patch.object(self.api, 'manifest', return_value=self.fixture['manifest']), \
+                patch.object(selector.time, 'sleep') as sleep, patch.object(selector, 'dispatch') as dispatch:
+            result = selector.deployment_request(self.api, SOURCE, '789', '1')
+        self.assertEqual(result['image'], DIGEST)
+        self.assertEqual(sleep.call_count, 2)
+        dispatch.assert_not_called()
+        for call in runs.call_args_list:
+            self.assertEqual(call.kwargs, dict(workflow=selector.CI_WORKFLOW, branch='main', event='push', head_sha=SOURCE))
+
+    def test_failed_newest_run_cannot_fall_back_to_an_older_successful_run(self):
+        for conclusion in ('failure', 'skipped', 'cancelled', 'timed_out'):
+            with self.subTest(conclusion=conclusion), self.assertRaisesRegex(ValueError, 'failed or was skipped'):
+                self.select([dict(self.fixture['run'], id=124, conclusion=conclusion), self.fixture['run']])
+
+    def test_missing_expired_and_ambiguous_evidence_fail_without_deployment(self):
+        for change in ('missing', 'expired', 'duplicate'):
+            self.fixture = automatic_release()
+            rows = self.fixture['artifacts']['artifacts']
+            if change == 'missing': rows.clear()
+            elif change == 'expired': rows[0]['expired'] = True
+            else: rows.append(dict(rows[0], id=457))
+            with self.subTest(change=change), self.assertRaisesRegex(ValueError, 'missing, expired or ambiguous'):
+                self.select()
+
+    def test_changed_main_wrong_source_and_timeout_refuse(self):
+        for change in ('main', 'source', 'attempt'):
+            self.fixture = automatic_release()
+            if change == 'source':
+                self.fixture['run']['head_sha'] = 'f'*40
+            elif change == 'attempt':
+                manifest = json.loads(self.fixture['manifest']); manifest['github_run_attempt'] = '2'
+                self.fixture['manifest'] = json.dumps(manifest).encode()
+            if change == 'main':
+                with patch.object(self.api, 'get', return_value={'protected': True, 'commit': {'sha': 'f'*40}}), self.assertRaises(ValueError):
+                    selector.deployment_request(self.api, SOURCE, '789', '1')
+            else:
+                with self.subTest(change=change), self.assertRaises(ValueError): self.select()
+        with patch.object(selector.time, 'monotonic', side_effect=[0, 2]), self.assertRaisesRegex(ValueError, 'Timed out'):
+            selector.deployment_request(self.api, SOURCE, '789', '1', timeout=1)
+
+    def test_main_is_checked_again_after_verification_and_racing_reruns_are_refused(self):
+        with patch.object(selector, 'runs', return_value=[self.fixture['run']]), \
+                patch.object(self.api, 'collection', side_effect=self.collection), \
+                patch.object(self.api, 'release', return_value=self.fixture), \
+                patch.object(selector, 'current_main', side_effect=[None, ValueError('main advanced')]), self.assertRaises(ValueError):
+            selector.deployment_request(self.api, SOURCE, '789', '1')
+        changed = copy.deepcopy(self.fixture); changed['run']['run_attempt'] = 2
+        with patch.object(selector, 'runs', return_value=[self.fixture['run']]), \
+                patch.object(self.api, 'get', side_effect=self.metadata), patch.object(self.api, 'collection', side_effect=self.collection), \
+                patch.object(self.api, 'release', return_value=changed), self.assertRaisesRegex(ValueError, 'identity changed'):
+            selector.deployment_request(self.api, SOURCE, '789', '1')
+
+    def test_deploy_cli_writes_the_existing_private_envelope_only_after_success(self):
+        with tempfile.TemporaryDirectory() as directory:
+            expected = {'image': DIGEST, 'source_commit': SOURCE, 'run': '789-1'}
+            with patch.dict(os.environ, GH_TOKEN='synthetic-read-token', GITHUB_SHA=SOURCE, GITHUB_RUN_ID='789', GITHUB_RUN_ATTEMPT='1', RUNNER_TEMP=directory), \
+                    patch.object(selector.sys, 'argv', ['selector', 'deploy']), \
+                    patch.object(selector, 'deployment_request', return_value=expected):
+                selector.main()
+            path = Path(directory)/'uat-request.json'
+            self.assertEqual(json.loads(path.read_text()), expected)
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+
+    def test_deploy_cli_does_not_write_a_request_or_echo_untrusted_errors_on_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.dict(os.environ, GH_TOKEN='synthetic-read-token', GITHUB_SHA=SOURCE, GITHUB_RUN_ID='789', GITHUB_RUN_ATTEMPT='1', RUNNER_TEMP=directory), \
+                    patch.object(selector.sys, 'argv', ['selector', 'deploy']), \
+                    patch.object(selector, 'deployment_request', side_effect=ValueError('synthetic-secret-token')), self.assertRaises(SystemExit) as error:
+                selector.main()
+            self.assertNotIn('synthetic-secret-token', str(error.exception))
+            self.assertFalse((Path(directory)/'uat-request.json').exists())
 
 
 class ReleaseSelectionTests(unittest.TestCase):
@@ -187,14 +290,14 @@ class WorkflowGateTests(unittest.TestCase):
         return subprocess.run(['bash', '-euo', 'pipefail', '-c', script], env=dict(os.environ, **environment),
                               capture_output=True, text=True, timeout=10)
 
-    def test_enabled_manual_main_dispatch_writes_only_validated_image_request(self):
-        script = self.script('deploy-uat.yml', 'Validate manual main deployment and prepare request')
+    def test_exact_confirmation_and_manual_main_are_required_before_checkout(self):
+        script = self.script('deploy-uat.yml', 'Validate manual main deployment')
         with tempfile.TemporaryDirectory() as directory:
-            environment = dict(ENABLED='true', CONFIRM='DEPLOY_UAT', IMAGE='ghcr.io/pintybhatt/psg-document-control@sha256:'+'a'*64,
+            environment = dict(ENABLED='true', CONFIRM='DEPLOY_UAT',
                                GITHUB_EVENT_NAME='workflow_dispatch', GITHUB_REF='refs/heads/main', GITHUB_SHA='b'*40,
                                GITHUB_REPOSITORY='pintybhatt/psg-document-control', GITHUB_RUN_ID='1', GITHUB_RUN_ATTEMPT='1', RUNNER_TEMP=directory)
             self.assertEqual(self.run_script(script, **environment).returncode, 0)
-            for key, value in [('ENABLED','false'), ('CONFIRM',''), ('IMAGE','latest'), ('GITHUB_REF','refs/heads/other'), ('GITHUB_EVENT_NAME','push')]:
+            for key, value in [('ENABLED','false'), ('CONFIRM',''), ('CONFIRM','deploy_uat'), ('CONFIRM','DEPLOY_UAT '), ('CONFIRM',' DEPLOY_UAT'), ('GITHUB_REF','refs/heads/other'), ('GITHUB_EVENT_NAME','push'), ('GITHUB_SHA','main'), ('GITHUB_REPOSITORY','untrusted/fork')]:
                 with self.subTest(key=key):
                     self.assertNotEqual(self.run_script(script, **dict(environment, **{key:value})).returncode, 0)
 
@@ -206,10 +309,30 @@ class WorkflowGateTests(unittest.TestCase):
             self.assertNotEqual(result.returncode, 0)
             self.assertIn('Image publication is disabled', result.stdout)
 
-    def test_manual_workflow_has_one_job_and_no_publication_or_oidc_or_restore_dependency(self):
+    def test_publisher_accepts_only_this_source_and_same_attempt_archive(self):
+        script = self.script('release-image.yml', 'Verify the exact main source and archive identity')
+        with tempfile.TemporaryDirectory() as directory:
+            git = Path(directory)/'git'
+            git.write_text('#!/usr/bin/python3\nimport os,sys\nif sys.argv[1:]==["rev-parse","HEAD"]: print(os.environ["SOURCE"])\n')
+            git.chmod(0o700)
+            environment = dict(PATH=directory+':/usr/bin:/bin', SOURCE=SOURCE, GITHUB_SHA=SOURCE,
+                               GITHUB_RUN_ID='123', GITHUB_RUN_ATTEMPT='2', ARTIFACT='validated-image-'+SOURCE+'-123-2')
+            self.assertEqual(self.run_script(script, **environment).returncode, 0)
+            for change in ({'GITHUB_SHA':'f'*40}, {'ARTIFACT':'validated-image-'+SOURCE+'-123-1'}, {'SOURCE':'main'}):
+                with self.subTest(change=change):
+                    self.assertNotEqual(self.run_script(script, **dict(environment, **change)).returncode, 0)
+
+    def test_manual_workflow_uses_read_only_selection_before_restricted_ssh(self):
         workflow = (ROOT/'.github/workflows/deploy-uat.yml').read_text()
         self.assertIn('UAT_HOST: 192.168.0.228', workflow)
         self.assertNotIn('id-token:', workflow)
         self.assertNotIn('  publish:', workflow)
         self.assertNotIn('  resolve:', workflow)
-        self.assertNotIn('select-uat-release', workflow)
+        self.assertIn('python3 -B docker/select-uat-release.py deploy', workflow)
+        self.assertIn('  actions: read', workflow)
+        self.assertIn('      confirmation:', workflow)
+        self.assertNotIn('      image:', workflow)
+        self.assertNotIn('inputs.image', workflow)
+        self.assertNotIn('select-uat-release.py publish', workflow)
+        self.assertLess(workflow.index('Validate manual main deployment'), workflow.index('actions/checkout@'))
+        self.assertLess(workflow.index('Select verified release'), workflow.index('Invoke only the enrolled'))

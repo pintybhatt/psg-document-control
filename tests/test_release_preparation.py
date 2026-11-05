@@ -35,6 +35,71 @@ DIGEST = 'ghcr.io/pintybhatt/psg-document-control@sha256:'+'c'*64
 TAG = 'v1.0.0-rc.1-'+SOURCE
 
 
+def automatic_release(attempt=1):
+    version = 'v0.0.123-rc.'+str(attempt)
+    manifest = {'image': DIGEST, 'source_commit': SOURCE, 'tested_image_id': IMAGE_ID,
+                'version': version, 'repository': evidence.REPOSITORY, 'platform': 'linux/amd64',
+                'migration_inventory': [{'path': 'database/migrations/synthetic.php', 'sha256': 'e'*64}],
+                'release_workflow_commit': SOURCE, 'github_run_id': '123', 'github_run_attempt': str(attempt)}
+    run = {'repository': {'full_name': evidence.REPOSITORY}, 'head_repository': {'full_name': evidence.REPOSITORY},
+           'path': '.github/workflows/ci.yml', 'event': 'push', 'head_branch': 'main', 'head_sha': SOURCE,
+           'status': 'completed', 'conclusion': 'success', 'id': 123, 'run_attempt': attempt}
+    names = ['Frontend', 'PHP / SQLite', 'Fast CI', 'Image / smoke', 'Full release validation', 'Publish release / publish',
+             *['MySQL 8.4 (shard '+str(number)+'/4)' for number in range(1, 5)]]
+    jobs = {'total_count': len(names), 'jobs': [{'name': name, 'run_id': 123, 'run_attempt': attempt,
+            'status': 'completed', 'conclusion': 'success', 'steps': [{'name': 'Test that exact image in a disposable stack', 'conclusion': 'success'}]} for name in names]}
+    artifacts = {'total_count': 1, 'artifacts': [{'id': 456, 'name': 'release-manifest-'+version+'-'+SOURCE, 'expired': False,
+                 'workflow_run': {'id': 123, 'head_sha': SOURCE, 'head_branch': 'main'}}]}
+    return {'manifest': json.dumps(manifest).encode(), 'run': run, 'jobs': jobs, 'artifacts': artifacts}
+
+
+class AutomaticPublicationEvidenceTests(unittest.TestCase):
+    def verify(self, fixture):
+        return evidence.verify_publication(fixture['manifest'], fixture['run'], fixture['jobs'], fixture['artifacts'], 456)
+
+    def test_same_main_run_and_attempt_with_every_required_check_passes(self):
+        for attempt in (1, 2):
+            for suffix in ('', '@main', '@refs/heads/main'):
+                fixture = automatic_release(attempt)
+                fixture['run']['path'] += suffix
+                self.assertEqual(self.verify(fixture), DIGEST)
+
+    def test_each_required_job_must_be_unique_present_successful_and_from_this_attempt(self):
+        for index in range(10):
+            for change in ('missing', 'duplicate', 'failed', 'skipped', 'attempt', 'run'):
+                fixture = automatic_release()
+                rows = fixture['jobs']['jobs']
+                if change == 'missing': rows.pop(index)
+                elif change == 'duplicate': rows.append(copy.deepcopy(rows[index]))
+                elif change in ('failed', 'skipped'): rows[index]['conclusion'] = 'failure' if change == 'failed' else 'skipped'
+                elif change == 'attempt': rows[index]['run_attempt'] = 2
+                elif change == 'run': rows[index]['run_id'] = 999
+                fixture['jobs']['total_count'] = len(rows)
+                with self.subTest(index=index, change=change), self.assertRaises(ValueError):
+                    self.verify(fixture)
+
+    def test_wrong_source_image_workflow_artifact_and_smoke_evidence_are_refused(self):
+        for change in ('source', 'workflow_commit', 'digest', 'image_id', 'event', 'branch', 'path', 'fork', 'artifact_source', 'expired', 'rerun', 'smoke', 'pagination'):
+            fixture = automatic_release()
+            manifest = json.loads(fixture['manifest'])
+            if change == 'source': manifest['source_commit'] = 'f'*40
+            elif change == 'workflow_commit': manifest['release_workflow_commit'] = 'f'*40
+            elif change == 'digest': manifest['image'] = 'ghcr.io/untrusted/image@sha256:'+'c'*64
+            elif change == 'image_id': manifest['tested_image_id'] = 'latest'
+            elif change == 'event': fixture['run']['event'] = 'pull_request'
+            elif change == 'branch': fixture['run']['head_branch'] = 'feature'
+            elif change == 'path': fixture['run']['path'] += '@refs/heads/feature'
+            elif change == 'fork': fixture['run']['head_repository']['full_name'] = 'untrusted/fork'
+            elif change == 'artifact_source': fixture['artifacts']['artifacts'][0]['workflow_run']['head_sha'] = 'f'*40
+            elif change == 'expired': fixture['artifacts']['artifacts'][0]['expired'] = True
+            elif change == 'rerun': fixture['run']['run_attempt'] = 2
+            elif change == 'smoke': fixture['jobs']['jobs'][3]['steps'][0]['conclusion'] = 'skipped'
+            elif change == 'pagination': fixture['jobs']['total_count'] += 1
+            fixture['manifest'] = json.dumps(manifest).encode()
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                self.verify(fixture)
+
+
 class GhcrPolicyTests(unittest.TestCase):
     def test_low_level_header_errors_cannot_print_registry_credentials(self):
         output = io.StringIO()
@@ -324,22 +389,29 @@ if args[:3] == ['buildx', 'imagetools', 'inspect']: print(json.dumps({'digest': 
 
 
 class ReleaseConfigurationTests(unittest.TestCase):
-    def test_publication_requires_explicit_switch_main_manual_and_full_validation(self):
+    def test_publication_reuses_main_validation_and_requires_the_existing_switch(self):
         workflow = (ROOT/'.github/workflows/release-image.yml').read_text()
         publish = workflow.split('  publish:\n', 1)[1]
-        self.assertRegex(publish, r'(?m)^    needs: ci$')
-        self.assertRegex(publish, r"\n    if: .*workflow_dispatch.*refs/heads/main.*pintybhatt/psg-document-control")
+        ci = (ROOT/'.github/workflows/ci.yml').read_text()
+        caller = ci.split('  publish:\n', 1)[1]
+        self.assertIn('    needs: full_release\n', caller)
+        self.assertIn('    uses: ./.github/workflows/release-image.yml\n', caller)
+        self.assertRegex(publish, r"(?m)^    if: .*push.*inputs.source_commit == github.sha.*refs/heads/main.*pintybhatt/psg-document-control")
+        self.assertIn('inputs.source_commit == \'\'', caller)
         self.assertIn('ENABLED: ${{ vars.ENABLE_IMAGE_PUBLISHING }}', publish)
         self.assertLess(publish.index('Require explicit publication authorization'), publish.index('actions/checkout@'))
         self.assertEqual(workflow.count('packages: write'), 1)
         self.assertIn('    environment: release-image\n', publish)
-        self.assertIn('      retain_image: true\n', workflow)
-        self.assertIn('    needs: identity\n', workflow)
+        self.assertIn('  workflow_call:\n', workflow)
+        self.assertNotIn('uses: ./.github/workflows/ci.yml', workflow)
+        self.assertIn('validated-image-$SOURCE-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT', ci)
+        self.assertIn('validated-image-$SOURCE-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT', workflow)
         self.assertIn('  contents: read\n', workflow)
         for path in (ROOT/'.github/workflows').glob('*.yml'):
             self.assertNotIn('pull_request_target:', path.read_text())
-            if path.name != 'release-image.yml':
+            if path.name not in ('release-image.yml', 'ci.yml'):
                 self.assertNotRegex(path.read_text(), r'packages:\s*write')
+        self.assertEqual(ci.count('packages: write'), 1)
         self.assertRegex(publish, r'\n      packages: write\n')
 
     def test_manifest_records_tested_identity_run_and_complete_migration_inventory(self):

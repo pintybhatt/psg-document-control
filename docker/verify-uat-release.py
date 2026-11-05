@@ -18,6 +18,10 @@ def require(condition, message):
         raise ValueError(message)
 
 
+def workflow_matches(run, path, event):
+    return run.get('path') in (path, path+'@main', path+'@refs/heads/main') and run.get('event') == event and run.get('head_branch') == 'main'
+
+
 def verify(manifest_bytes, approval, run, jobs, artifacts, now):
     manifest = json.loads(manifest_bytes)
     image, source = manifest.get('image', ''), manifest.get('source_commit', '')
@@ -54,8 +58,9 @@ def verify_publication(manifest_bytes, run, jobs, artifacts, artifact_id):
             and manifest.get('migration_inventory'), 'Missing tested image/migration identity.')
     require(run.get('repository', {}).get('full_name') == REPOSITORY
             and run.get('head_repository', {}).get('full_name') == REPOSITORY, 'Workflow repository mismatch.')
-    require(run.get('path') == '.github/workflows/release-image.yml'
-            and run.get('event') == 'workflow_dispatch' and run.get('head_branch') == 'main', 'Trusted manual-main release workflow required.')
+    automatic = workflow_matches(run, '.github/workflows/ci.yml', 'push')
+    legacy = workflow_matches(run, '.github/workflows/release-image.yml', 'workflow_dispatch')
+    require((automatic or legacy) and run.get('head_branch') == 'main', 'Trusted main release workflow required.')
     require(run.get('status') == 'completed' and run.get('conclusion') == 'success', 'Release workflow did not succeed.')
     require(run.get('head_sha') == manifest.get('release_workflow_commit')
             and re.fullmatch(r'[a-f0-9]{40}', run.get('head_sha', '')), 'Release workflow revision mismatch.')
@@ -63,19 +68,24 @@ def verify_publication(manifest_bytes, run, jobs, artifacts, artifact_id):
             and str(run.get('id', '')).isdigit(), 'Release run identity mismatch.')
     require(str(run.get('run_attempt')) == str(manifest.get('github_run_attempt'))
             and str(run.get('run_attempt', '')).isdigit(), 'Release attempt mismatch; refresh evidence/approval after reruns.')
+    if automatic:
+        require(run['head_sha'] == source and version == 'v0.0.'+str(run['id'])+'-rc.'+str(run['run_attempt']),
+                'Automatic publication must identify this exact main commit and attempt.')
     rows = jobs.get('jobs', [])
     require(jobs.get('total_count') == len(rows), 'Incomplete job evidence; fetch every page.')
-    mysql_names = [row.get('name', '') for row in rows if row.get('name', '').startswith('ci / MySQL')]
-    shards = ['ci / MySQL 8.4 (shard '+str(number)+'/4)' for number in range(1, 5)]
+    prefix = '' if automatic else 'ci / '
+    mysql_names = [row.get('name', '') for row in rows if row.get('name', '').startswith(prefix+'MySQL')]
+    shards = [prefix+'MySQL 8.4 (shard '+str(number)+'/4)' for number in range(1, 5)]
     # Historical RC evidence predates sharding. Never mix layouts or accept partial shards.
-    required_mysql = ['ci / MySQL 8.4'] if mysql_names == ['ci / MySQL 8.4'] else shards
+    required_mysql = ['ci / MySQL 8.4'] if legacy and mysql_names == ['ci / MySQL 8.4'] else shards
     require(sorted(mysql_names) == sorted(required_mysql), 'Incomplete or ambiguous MySQL release evidence.')
-    for name in ('ci / Fast CI', 'ci / Image / smoke', 'ci / Full release validation', 'publish', *required_mysql):
+    required = ['Frontend', 'PHP / SQLite', 'Fast CI', 'Image / smoke', 'Full release validation', 'Publish release / publish'] if automatic else ['ci / Fast CI', 'ci / Image / smoke', 'ci / Full release validation', 'publish']
+    for name in (*required, *required_mysql):
         matches = [row for row in rows if row.get('name') == name]
         require(len(matches) == 1 and matches[0].get('run_id') == run['id']
-                and matches[0].get('run_attempt', run['run_attempt']) == run['run_attempt']
+                and matches[0].get('run_attempt', None if automatic else run['run_attempt']) == run['run_attempt']
                 and matches[0].get('status') == 'completed' and matches[0].get('conclusion') == 'success', 'Required release job absent, failed, skipped or ambiguous: '+name)
-    image_job = next(row for row in rows if row['name'] == 'ci / Image / smoke')
+    image_job = next(row for row in rows if row['name'] == prefix+'Image / smoke')
     require(any(step.get('name') == 'Test that exact image in a disposable stack' and step.get('conclusion') == 'success'
                 for step in image_job.get('steps', [])), 'Successful exact-image smoke evidence required.')
     require(artifacts.get('total_count', len(artifacts.get('artifacts', []))) == len(artifacts.get('artifacts', [])), 'Incomplete artifact evidence.')
@@ -83,6 +93,9 @@ def verify_publication(manifest_bytes, run, jobs, artifacts, artifact_id):
     require(len(matches) == 1 and matches[0].get('expired') is False
             and matches[0].get('id') == artifact_id
             and matches[0].get('workflow_run', {}).get('id') == run['id'], 'Approved release manifest artifact mismatch/expired.')
+    if automatic:
+        require(matches[0]['workflow_run'].get('head_sha') == source and matches[0]['workflow_run'].get('head_branch') == 'main',
+                'Artifact source must match the validated main commit.')
     return image
 
 

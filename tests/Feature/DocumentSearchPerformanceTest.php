@@ -153,6 +153,29 @@ class DocumentSearchPerformanceTest extends TestCase
             sort($times);
             $reportMeasurements[$name] = ['median_ms' => round($times[1], 3), 'max_ms' => round(max($times), 3)];
         }
+        foreach (['documents' => 2253, 'physical' => 300, 'revisions' => 751] as $view => $expected) {
+            foreach (['legacy' => [], 'selected' => ['trend_group' => 'category_en']] as $mode => $trendFilters) {
+                DB::flushQueryLog();
+                DB::enableQueryLog();
+                $start = hrtime(true);
+                try {
+                    $this->getJson('/api/v1/reports?'.http_build_query($filters + ['view' => $view, 'per_page' => 10] + $trendFilters))
+                        ->assertOk()->assertJsonPath('meta.total', $expected)->assertJsonCount(10, 'data');
+                    $log = DB::getQueryLog();
+                    $reportMeasurements['http_'.$view.($mode === 'selected' ? '_selected' : '')] = ['ms' => round((hrtime(true) - $start) / 1e6, 3), 'queries' => count($log), 'sql_ms' => round(array_sum(array_column($log, 'time')), 3)];
+                } finally {
+                    DB::disableQueryLog();
+                }
+                if (DB::getDriverName() === 'mysql' && $view === 'physical' && $mode === 'legacy') {
+                    usort($log, fn (array $first, array $second): int => $second['time'] <=> $first['time']);
+                    $plans = [];
+                    foreach (array_slice($log, 0, 4) as $logged) {
+                        $plans[] = ['query' => $logged['query'], 'ms' => $logged['time'], 'plan' => DB::select('EXPLAIN FORMAT=JSON '.$logged['query'], $logged['bindings'])];
+                    }
+                    file_put_contents('/tmp/dcms-reports-plans.json', json_encode($plans, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR));
+                }
+            }
+        }
         $inventory = $reports->physical(clone $documents, []);
         $inventoryPlan = DB::select((DB::getDriverName() === 'mysql' ? 'EXPLAIN ' : 'EXPLAIN QUERY PLAN ').$inventory->toSql(), $inventory->getBindings());
         file_put_contents('/tmp/dcms-phase9-performance-'.DB::getDriverName().'.json', json_encode(['documents' => 3003, 'restricted' => 750, 'revisions' => 1001, 'physical_copies' => 300, 'file_events' => 3000, 'runs' => 3, 'measurements' => $reportMeasurements, 'inventory_plan' => $inventoryPlan], JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR));

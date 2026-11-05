@@ -2,6 +2,7 @@
 
 namespace App\Authorization;
 
+use App\Models\AuthorizationScope;
 use App\Models\ConfidentialityClearance;
 use App\Models\DocumentSecurityAudit;
 use App\Models\DocumentSecurityProfile;
@@ -29,14 +30,26 @@ class SearchDocuments
         $profiles = DocumentSecurityProfile::query()->where('active', true)
             ->where('company_id', $scope->companyId)->where('site_id', $scope->siteId)->where('department_id', $scope->departmentId)
             ->whereIn('classification', array_column(Confidentiality::cases(), 'value'));
+
+        return $this->metadataVisibility($actor, $profiles);
+    }
+
+    /** @param EloquentBuilder<DocumentSecurityProfile> $profiles
+     * @return EloquentBuilder<DocumentSecurityProfile>
+     */
+    private function metadataVisibility(User $actor, EloquentBuilder $profiles): EloquentBuilder
+    {
         if ($this->roles->isSystemAdministrator($actor)) {
             return $profiles;
         }
-        $clearances = ConfidentialityClearance::query()->where('user_id', $actor->id)->where('company_id', $scope->companyId)
-            ->where('site_id', $scope->siteId)->where('department_id', $scope->departmentId)->where('active', true)->whereNull('revoked_at')
-            ->where(fn (EloquentBuilder $query): EloquentBuilder => $query->whereNull('expires_at')->orWhere('expires_at', '>', now()))->select('classification');
+        $clearances = ConfidentialityClearance::query()->where('user_id', $actor->id)
+            ->whereColumn('company_id', 'document_security_profiles.company_id')->whereColumn('site_id', 'document_security_profiles.site_id')
+            ->where(fn (EloquentBuilder $query): EloquentBuilder => $query->whereColumn('department_id', 'document_security_profiles.department_id')
+                ->orWhere(fn (EloquentBuilder $query): EloquentBuilder => $query->whereNull('department_id')->whereNull('document_security_profiles.department_id')))
+            ->whereColumn('classification', 'document_security_profiles.classification')->where('active', true)->whereNull('revoked_at')
+            ->where(fn (EloquentBuilder $query): EloquentBuilder => $query->whereNull('expires_at')->orWhere('expires_at', '>', now()))->selectRaw('1');
 
-        return $profiles->where(fn (EloquentBuilder $query): EloquentBuilder => $query->where('classification', 'normal')->orWhereIn('classification', $clearances))
+        return $profiles->where(fn (EloquentBuilder $query): EloquentBuilder => $query->where('classification', 'normal')->orWhereExists($clearances->toBase()))
             ->where(fn (EloquentBuilder $query): EloquentBuilder => $query->where(fn (EloquentBuilder $query): EloquentBuilder => $query->where('restricted', false)->where('classification', '<>', 'highly_confidential'))
                 ->orWhereHas('accessGrants', fn (EloquentBuilder $query): EloquentBuilder => $query->where('user_id', $actor->id)->where('operation', 'metadata')->where('active', true)->whereNull('revoked_at')
                     ->where(fn (EloquentBuilder $query): EloquentBuilder => $query->whereNull('expires_at')->orWhere('expires_at', '>', now()))));
@@ -46,6 +59,42 @@ class SearchDocuments
     public function query(User $actor, DocumentScope $scope, array $filters): Builder
     {
         $profiles = $this->visibleProfiles($actor, $scope);
+
+        return $this->queryFromProfiles($profiles, [$scope->authorizationScope()->id], $filters);
+    }
+
+    /** Revalidate the requested contexts on every construction; never trust a previously returned permission list.
+     * @param  list<array<string, mixed>>  $contexts
+     * @param  array<string, mixed>  $filters
+     */
+    public function queryForContexts(User $actor, array $contexts, array $filters): Builder
+    {
+        $identity = fn (array $context): string => $context['company_id'].':'.$context['site_id'].':'.($context['department_id'] ?? 'site');
+        $requested = collect($contexts)->keyBy($identity);
+        $siteFilters = $requested->unique('site_id')->count() === 1 ? array_intersect_key($requested->first(), ['company_id' => true, 'site_id' => true]) : [];
+        $authorized = collect(app(CorrespondenceContexts::class)->forUser($actor, $siteFilters))->keyBy($identity)->intersectByKeys($requested);
+        abort_if($requested->isEmpty() || $authorized->count() !== $requested->count(), 403, 'rbacForbidden');
+        $profiles = DocumentSecurityProfile::query()->where('active', true)->whereIn('classification', array_column(Confidentiality::cases(), 'value'))
+            ->where(function (EloquentBuilder $query) use ($authorized): void {
+                foreach ($authorized as $context) {
+                    $query->orWhere(fn (EloquentBuilder $query): EloquentBuilder => $query->where('company_id', $context['company_id'])
+                        ->where('site_id', $context['site_id'])->where('department_id', $context['department_id']));
+                }
+            })
+            ->whereExists(fn (Builder $query): Builder => $query->selectRaw('1')->from('authorization_scopes as profile_scope')
+                ->where('profile_scope.scope_type', 'site')->whereColumn('profile_scope.id', 'd.scope_id')
+                ->whereColumn('profile_scope.company_id', 'document_security_profiles.company_id')->whereColumn('profile_scope.site_id', 'document_security_profiles.site_id'));
+        $scopeIds = $authorized->unique('site_id')->map(fn (array $context): ?int => AuthorizationScope::context('site', $context['company_id'], $context['site_id'])->id)->values()->all();
+
+        return $this->queryFromProfiles($this->metadataVisibility($actor, $profiles), $scopeIds, $filters);
+    }
+
+    /** @param EloquentBuilder<DocumentSecurityProfile> $profiles
+     * @param  list<int|null>  $scopeIds
+     * @param  array<string, mixed>  $filters
+     */
+    private function queryFromProfiles(EloquentBuilder $profiles, array $scopeIds, array $filters): Builder
+    {
         if (! empty($filters['classification'])) {
             $profiles->where('classification', $filters['classification']);
         }
@@ -60,7 +109,7 @@ class SearchDocuments
             $table = match ($register) {
                 'incoming' => 'incoming_correspondences', 'outgoing' => 'outgoing_correspondences', default => 'controlled_documents'
             };
-            $query = DB::table($table.' as d')->where('d.scope_id', $scope->authorizationScope()->id)
+            $query = DB::table($table.' as d')->whereIn('d.scope_id', $scopeIds)
                 ->whereIn('d.profile_id', (clone $profiles)->where('resource_type', $register)->select('id'));
             $number = $register === 'controlled' ? 'd.document_code' : 'd.internal_number';
             $date = match ($register) {

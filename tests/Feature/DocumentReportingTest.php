@@ -2,6 +2,9 @@
 
 namespace Tests\Feature;
 
+use App\Authorization\CorrespondenceContexts;
+use App\Authorization\DocumentReporting;
+use App\Authorization\DocumentScope;
 use App\Authorization\ManageControlledDocuments;
 use App\Authorization\ManageIncomingCorrespondence;
 use App\Authorization\ManageNumbering;
@@ -16,9 +19,11 @@ use App\Models\OutgoingRecipient;
 use App\Models\Site;
 use App\Models\User;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use PhpOffice\PhpSpreadsheet\Cell\DataType;
 use PhpOffice\PhpSpreadsheet\IOFactory;
 use PHPUnit\Framework\Attributes\TestWith;
+use Symfony\Component\HttpKernel\Exception\HttpException;
 use Tests\Concerns\InteractsWithDocumentStorage;
 use Tests\Concerns\InteractsWithRbac;
 use Tests\TestCase;
@@ -27,9 +32,114 @@ class DocumentReportingTest extends TestCase
 {
     use InteractsWithDocumentStorage, InteractsWithRbac, LazilyRefreshDatabase;
 
+    #[TestWith(['membership'])]
+    #[TestWith(['role'])]
+    #[TestWith(['permission'])]
+    #[TestWith(['user'])]
+    #[TestWith(['site'])]
+    #[TestWith(['company'])]
+    public function test_previously_discovered_contexts_are_rejected_after_authority_changes(string $change): void
+    {
+        [$record, $actor, $role] = $this->fixture();
+        $reports = app(DocumentReporting::class);
+        $contexts = app(CorrespondenceContexts::class)->forUser($actor);
+        $this->assertCount(1, $contexts);
+        $this->assertSame(1, $reports->documents($actor, [], $contexts)->count());
+        match ($change) {
+            'membership' => OrganizationMembership::query()->where('user_id', $actor->id)->sole()->forceFill(['active' => false, 'revoked_by' => $actor->id, 'revoked_at' => now()])->save(),
+            'role' => $role->update(['active' => false]),
+            'permission' => $role->permissions()->detach(),
+            'user' => $actor->deactivate(),
+            'site' => Site::findOrFail($record->profile->site_id)->update(['active' => false]),
+            'company' => Site::findOrFail($record->profile->site_id)->company->update(['active' => false]),
+        };
+
+        try {
+            $reports->documents($actor, [], $contexts)->get();
+            $this->fail('Stale reporting contexts must not confer authority.');
+        } catch (HttpException $exception) {
+            $this->assertSame(403, $exception->getStatusCode());
+        }
+    }
+
+    public function test_multi_context_clearances_match_the_exact_department_and_current_grants(): void
+    {
+        [$record, $actor] = $this->fixture('incoming', 'highly_confidential');
+        $this->freezeTime();
+        $site = Site::findOrFail($record->profile->site_id);
+        $department = Department::factory()->for($site)->create();
+        OrganizationMembership::factory()->for($actor)->inDepartment($department)->create();
+        $departmentRecord = app(ManageIncomingCorrespondence::class)->save($actor, new DocumentScope($site->company_id, $site->id, $department->id), [
+            'type_id' => $record->type_id, 'subject' => 'Restricted department record', 'priority' => 'normal', 'classification' => 'highly_confidential',
+            'sender_organization' => 'Synthetic sender', 'correspondence_date' => '2026-10-25', 'received_date' => '2026-10-26', 'channel' => 'email',
+        ]);
+        $reader = User::factory()->create();
+        OrganizationMembership::factory()->for($reader)->atSite($site)->create();
+        OrganizationMembership::factory()->for($reader)->inDepartment($department)->create();
+        $this->grant($reader, $record->profile->documentScope()->authorizationScope(), ['documents.metadata.view', 'reports.view']);
+        ConfidentialityClearance::factory()->forProfile($record->profile)->create(['user_id' => $reader->id]);
+        DocumentAccessGrant::factory()->create(['profile_id' => $record->profile_id, 'user_id' => $reader->id]);
+        $departmentGrant = DocumentAccessGrant::factory()->create(['profile_id' => $departmentRecord->profile_id, 'user_id' => $reader->id]);
+        $this->signIn($reader);
+        $url = $this->reportUrl($record, 'reports', ['all_departments' => 1]);
+
+        $this->getJson($url)->assertOk()->assertJsonPath('summary.total', 1)->assertJsonPath('data.0.id', $record->id)->assertJsonCount(1, 'data');
+        $clearance = ConfidentialityClearance::factory()->forProfile($departmentRecord->profile)->expired()->create(['user_id' => $reader->id]);
+        $this->getJson($url)->assertOk()->assertJsonPath('summary.total', 1);
+        $clearance->update(['expires_at' => now()->addHour()]);
+        $this->getJson($url)->assertOk()->assertJsonPath('summary.total', 2)->assertJsonPath('meta.total', 2);
+        $departmentGrant->forceFill(['active' => false, 'revoked_by' => $actor->id, 'revoked_at' => now()])->save();
+        $this->getJson($url)->assertOk()->assertJsonPath('summary.total', 1)->assertJsonPath('meta.total', 1);
+    }
+
+    public function test_multi_site_reporting_combines_only_explicitly_authorized_companies_and_registers(): void
+    {
+        [$incoming, $reader] = $this->fixture();
+        [$outgoing] = $this->fixture('outgoing');
+        $this->fixture('controlled');
+        $this->grant($reader, $incoming->profile->documentScope()->authorizationScope(), ['reports.view']);
+        $otherSite = Site::findOrFail($outgoing->profile->site_id);
+        OrganizationMembership::factory()->for($reader)->atSite($otherSite)->create();
+        $this->grant($reader, $outgoing->profile->documentScope()->authorizationScope(), ['documents.metadata.view', 'reports.view']);
+        $this->signIn($reader);
+        $filters = ['all_sites' => 1, 'all_departments' => 1];
+
+        $result = $this->getJson($this->reportUrl($incoming, 'reports', $filters))->assertOk()->assertJsonPath('summary.total', 2)
+            ->assertJsonPath('summary.incoming', 1)->assertJsonPath('summary.outgoing', 1)->assertJsonPath('summary.controlled', 0)->assertJsonCount(2, 'scope')->json();
+        $this->assertEqualsCanonicalizing([$incoming->profile->company_id, $outgoing->profile->company_id], array_column($result['data'], 'company_id'));
+        $this->getJson($this->reportUrl($incoming, 'reports', $filters + ['register' => 'outgoing']))->assertOk()->assertJsonPath('meta.total', 1)->assertJsonPath('data.0.id', $outgoing->id);
+    }
+
     private function reportUrl(object $record, string $path = 'dashboard', array $filters = []): string
     {
         return '/api/v1/'.$path.'?'.http_build_query($filters + ['company_id' => $record->profile->company_id, 'site_id' => $record->profile->site_id]);
+    }
+
+    public function test_requested_breakdown_preserves_rows_summary_and_the_default_report_contract(): void
+    {
+        [$record, $actor] = $this->fixture();
+        $this->grant($actor, $record->profile->documentScope()->authorizationScope(), ['reports.view']);
+        $results = [];
+        $groupQueries = [];
+        foreach (['default' => [], 'selected' => ['trend_group' => 'category_en']] as $mode => $filters) {
+            DB::flushQueryLog();
+            DB::enableQueryLog();
+            try {
+                $results[$mode] = $this->getJson($this->reportUrl($record, 'reports', $filters))->assertOk()->json();
+                $groupQueries[$mode] = count(array_filter(DB::getQueryLog(), fn (array $query): bool => str_contains(strtolower($query['query']), 'group by')));
+            } finally {
+                DB::disableQueryLog();
+            }
+        }
+
+        $this->assertSame(['register', 'type_en', 'category_en', 'department_en', 'site_en', 'company_en', 'status', 'owner_name', 'monthly'], array_keys($results['default']['trends']));
+        $this->assertSame(['category_en'], array_keys($results['selected']['trends']));
+        foreach (['data', 'meta', 'summary', 'scope'] as $key) {
+            $this->assertSame($results['default'][$key], $results['selected'][$key]);
+        }
+        $this->assertSame($results['default']['trends']['category_en'], $results['selected']['trends']['category_en']);
+        $this->assertSame(['default' => 9, 'selected' => 1], $groupQueries);
+        $this->getJson($this->reportUrl($record, 'reports', ['trend_group' => 'untrusted_column']))->assertUnprocessable()->assertJsonValidationErrors('trend_group');
     }
 
     public function test_dashboard_lifecycle_totals_do_not_count_physical_copies_as_documents(): void

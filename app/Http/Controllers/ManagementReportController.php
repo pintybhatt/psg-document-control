@@ -56,7 +56,7 @@ class ManagementReportController extends Controller
             ->selectRaw("COUNT(*) as revisions, SUM(CASE WHEN revision_status = 'draft' THEN 1 ELSE 0 END) as draft_revisions, SUM(CASE WHEN revision_status = 'superseded' THEN 1 ELSE 0 END) as superseded_revisions")->first();
 
         return response()->json(['data' => $rows, 'meta' => ['total' => $page->total(), 'current_page' => $page->currentPage(), 'per_page' => $page->perPage()],
-            'summary' => $reports->totals(clone $documents, $filters) + array_map(intval(...), (array) $revisionTotals), 'trends' => $reports->trends(clone $documents),
+            'summary' => $reports->totals(clone $documents, $filters) + array_map(intval(...), (array) $revisionTotals), 'trends' => $reports->trends(clone $documents, empty($filters['trend_group']) ? null : [$filters['trend_group']]),
             'scope' => $contexts, 'filters' => $filters], headers: ['Cache-Control' => 'private, no-store']);
     }
 

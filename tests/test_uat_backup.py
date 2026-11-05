@@ -98,6 +98,13 @@ class UatBackupTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             backup.validate(self.source)
 
+    def test_chunked_sha256_matches_content_larger_than_one_chunk(self):
+        block = b'uat backup integrity'
+        content = block * (backup.HASH_CHUNK_SIZE // len(block) + 2)
+        expected = hashlib.sha256(content).hexdigest()
+
+        self.assertEqual(backup.sha256_stream(io.BytesIO(content)), expected)
+
     def test_archive_traversal_is_refused_before_restore(self):
         stream = io.BytesIO()
         with tarfile.open(fileobj=stream, mode='w') as archive:

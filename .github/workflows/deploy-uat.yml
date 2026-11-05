@@ -2,16 +2,13 @@ name: Deploy DCMS UAT
 on:
   workflow_dispatch:
     inputs:
-      confirm_deploy:
+      confirmation:
         description: Type DEPLOY_UAT to deploy to 192.168.0.228
-        required: true
-        type: string
-      image:
-        description: Approved application image, ghcr.io/pintybhatt/psg-document-control@sha256:...
         required: true
         type: string
 permissions:
   contents: read
+  actions: read
 concurrency:
   group: dcms-uat-xppl-deployment
   cancel-in-progress: false
@@ -19,12 +16,11 @@ jobs:
   deploy:
     environment: uat
     runs-on: [self-hosted, Linux, X64, dcms-uat-runner]
-    timeout-minutes: 45
+    timeout-minutes: 75
     steps:
-      - name: Validate manual main deployment and prepare request
+      - name: Validate manual main deployment
         env:
-          CONFIRM: ${{ inputs.confirm_deploy }}
-          IMAGE: ${{ inputs.image }}
+          CONFIRM: ${{ inputs.confirmation }}
           ENABLED: ${{ vars.ENABLE_UAT_DEPLOYMENT }}
         shell: bash
         run: |
@@ -34,17 +30,19 @@ jobs:
           test "$GITHUB_REPOSITORY" = pintybhatt/psg-document-control
           test "$CONFIRM" = DEPLOY_UAT
           test "$ENABLED" = true
+          [[ "$GITHUB_SHA" =~ ^[a-f0-9]{40}$ ]]
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Select verified release for this exact main commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
           umask 077
-          python3 - <<'PYTHON'
-          import json, os, re
-          from pathlib import Path
-          image = os.environ['IMAGE']
-          assert re.fullmatch(r'ghcr\.io/pintybhatt/psg-document-control@sha256:[a-f0-9]{64}', image)
-          assert re.fullmatch(r'[a-f0-9]{40}', os.environ['GITHUB_SHA'])
-          Path(os.environ['RUNNER_TEMP'], 'uat-request.json').write_text(json.dumps({
-              'image': image, 'source_commit': os.environ['GITHUB_SHA'],
-              'run': os.environ['GITHUB_RUN_ID']+'-'+os.environ['GITHUB_RUN_ATTEMPT']}))
-          PYTHON
+          python3 -B docker/select-uat-release.py deploy
       - name: Invoke only the enrolled UAT entry point
         env:
           UAT_SSH_KEY: ${{ secrets.UAT_SSH_KEY }}

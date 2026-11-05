@@ -16,6 +16,7 @@ SPEC = importlib.util.spec_from_file_location('uat_selection_auth', Path(__file_
 auth = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(auth)
 RELEASE_WORKFLOW = 'actions/workflows/release-image.yml'
+CI_WORKFLOW = 'actions/workflows/ci.yml'
 
 
 def current_main(api, source):
@@ -25,10 +26,10 @@ def current_main(api, source):
                  'Dispatch must use current protected main; dispatch again after main changes.')
 
 
-def runs(api, **filters):
+def runs(api, workflow=RELEASE_WORKFLOW, **filters):
     rows = []
     for page in range(1, 11):
-        result = api.get(RELEASE_WORKFLOW+'/runs?'+urllib.parse.urlencode(dict(filters, per_page=100, page=page)))
+        result = api.get(workflow+'/runs?'+urllib.parse.urlencode(dict(filters, per_page=100, page=page)))
         batch = result['workflow_runs']
         rows.extend(batch)
         if len(batch) < 100:
@@ -114,10 +115,49 @@ def output(selection):
         stream.write('needs_publication='+str(selection is None).lower()+'\n')
 
 
+def deployment_request(api, source, run_id, attempt, timeout=1800):
+    auth.require(all(re.fullmatch(r'[1-9][0-9]{0,19}', value) for value in (run_id, attempt)), 'Invalid deployment identity.')
+    deadline = time.monotonic()+timeout
+    observed = None
+    while time.monotonic() < deadline:
+        current_main(api, source)
+        candidates = runs(api, workflow=CI_WORKFLOW, branch='main', event='push', head_sha=source)
+        if candidates:
+            run = candidates[0]
+            auth.require(auth.evidence.workflow_matches(run, '.github/workflows/ci.yml', 'push')
+                         and run.get('head_sha') == source, 'Untrusted CI run.')
+            auth.require(observed in (None, run['id']), 'CI run changed; dispatch again.')
+            observed = run['id']
+            if run['status'] == 'completed':
+                auth.require(run['conclusion'] == 'success', 'Main validation/publication failed or was skipped; inspect DCMS CI.')
+                name = 'release-manifest-v0.0.'+str(run['id'])+'-rc.'+str(run['run_attempt'])+'-'+source
+                artifacts = api.collection('actions/runs/'+str(run['id'])+'/artifacts', 'artifacts')['artifacts']
+                matches = [row for row in artifacts if row.get('name') == name and row.get('expired') is False]
+                auth.require(len(matches) == 1, 'Release evidence is missing, expired or ambiguous; no deployment attempted.')
+                try:
+                    release = api.release(run['id'], matches[0]['id'])
+                except (ValueError, KeyError, TypeError):
+                    raise ValueError('Release evidence verification failed; inspect required CI jobs, smoke and source/attempt identity.') from None
+                manifest = auth.parse_json(release['manifest'])
+                auth.require(release['run']['id'] == run['id'] and release['run']['run_attempt'] == run['run_attempt']
+                             and manifest['source_commit'] == source, 'Release identity changed; dispatch again.')
+                current_main(api, source)
+                return {'image': manifest['image'], 'source_commit': source, 'run': run_id+'-'+attempt}
+        time.sleep(15)
+    raise ValueError('Timed out waiting for main validation/publication; no deployment attempted.')
+
+
 def main():
     try:
         api = auth.GitHub(os.environ['GH_TOKEN'])
         source = os.environ['GITHUB_SHA']
+        if sys.argv[1:] == ['deploy']:
+            data = deployment_request(api, source, os.environ['GITHUB_RUN_ID'], os.environ['GITHUB_RUN_ATTEMPT'])
+            path = Path(os.environ['RUNNER_TEMP'])/'uat-request.json'
+            path.write_text(json.dumps(data))
+            path.chmod(0o600)
+            print('Verified release '+data['image']+' for '+source+'.')
+            return
         current_main(api, source)
         if sys.argv[1:] == ['publish']:
             result = publish(api, source, os.environ['GITHUB_RUN_ID'], os.environ['GITHUB_RUN_ATTEMPT'])
@@ -147,6 +187,13 @@ def main():
 
 
 SAFE_ERRORS = {
+    'Release evidence verification failed; inspect required CI jobs, smoke and source/attempt identity.',
+    'Untrusted CI run.',
+    'Main validation/publication failed or was skipped; inspect DCMS CI.',
+    'Release evidence is missing, expired or ambiguous; no deployment attempted.',
+    'Timed out waiting for main validation/publication; no deployment attempted.',
+    'CI run changed; dispatch again.',
+    'Release identity changed; dispatch again.',
     'Dispatch must use current protected main; dispatch again after main changes.',
     'Advanced rollback requires previous release IDs and a compatibility review reference.',
     'Normal deployment does not accept manual release overrides.',

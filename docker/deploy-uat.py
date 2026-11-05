@@ -27,6 +27,15 @@ auth = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(auth)
 evidence = auth.evidence
 require = auth.require
+HASH_CHUNK_SIZE = 1024 * 1024
+
+
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with path.open('rb') as source:
+        while chunk := source.read(HASH_CHUNK_SIZE):
+            digest.update(chunk)
+    return digest.hexdigest()
 
 # Read-only query, fixed source. Never evaluates request data or executes migration classes.
 SCHEMA_PROBE = r'''
@@ -222,8 +231,7 @@ class Deployment:
                 archive.add(protected(ROOT/'config'/filename, True), arcname=filename, recursive=False)
         sums = []
         for filename in ('database.sql', 'documents.tar', 'configuration.tar'):
-            with (destination/filename).open('rb') as source:
-                sums.append(hashlib.file_digest(source, 'sha256').hexdigest()+'  '+filename)
+            sums.append(sha256_file(destination/filename)+'  '+filename)
         (destination/'SHA256SUMS').write_text('\n'.join(sums)+'\n')
         # UAT recovery policy requires verified paired off-host backups before migration.
         # The enrolled root-owned hook must fail unless that policy has been satisfied.

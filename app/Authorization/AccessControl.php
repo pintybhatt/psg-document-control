@@ -59,10 +59,12 @@ class AccessControl
     {
         $membership = app(MembershipAccess::class);
         $isSystemAdministrator = $this->isSystemAdministrator($user);
+        $granted = $this->grantedPermissions($user, $scope);
+        $hasMembership = $isSystemAdministrator || ($granted !== [] && $membership->matches($user, $scope, $departmentId));
 
-        return array_values(array_filter($this->grantedPermissions($user, $scope),
+        return array_values(array_filter($granted,
             fn (string $key): bool => ! PermissionCatalog::requiresDocument($key) && ($isSystemAdministrator || (PermissionCatalog::administrative($key)
-                ? $departmentId === null : $membership->matches($user, $scope, $departmentId)))));
+                ? $departmentId === null : $hasMembership))));
     }
 
     public function allows(User $user, string $permission, AuthorizationScope $scope, ?int $departmentId = null): bool

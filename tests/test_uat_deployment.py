@@ -518,7 +518,11 @@ class BackupTests(unittest.TestCase):
         import tarfile
         with tarfile.open(destination/'configuration.tar') as archive:
             self.assertEqual(set(archive.getnames()), set(self.files))
-        self.assertEqual(len((destination/'SHA256SUMS').read_text().splitlines()), 3)
+        checksum_lines = (destination/'SHA256SUMS').read_text().splitlines()
+        self.assertEqual(len(checksum_lines), 3)
+        for filename in ('database.sql', 'documents.tar', 'configuration.tar'):
+            self.assertIn(hashlib.sha256((destination/filename).read_bytes()).hexdigest()+'  '+filename,
+                          checksum_lines)
         self.assertIn('--triggers --routines --events', stream.call_args_list[0].args[0][-1])
         self.assertIn('--network', stream.call_args_list[1].args[0])
         self.assertEqual(run.call_args.args[0], [str(self.root/'config/verify-backup'), str(destination)])
@@ -775,7 +779,9 @@ class DeploymentBoundaryTests(unittest.TestCase):
         self.assertIn('  contents: read', workflow)
         self.assertNotIn('id-token:', workflow)
         self.assertNotIn('packages: write', workflow)
-        self.assertIn('      image:', workflow)
+        self.assertIn('      confirmation:', workflow)
+        self.assertIn('  actions: read', workflow)
+        self.assertNotIn('      image:', workflow)
         self.assertNotIn('      request_id:', workflow)
         self.assertNotIn('pull_request', workflow)
         self.assertIs(json.loads((repository/'docker/uat-automation.example.json').read_text())['enabled'], False)

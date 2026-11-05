@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 """Restore one UAT backup into an ephemeral socket-only MySQL; never connect to a live DB."""
-import hashlib
 import importlib.machinery
 import importlib.util
 import json
@@ -80,7 +79,7 @@ def verify_documents(rows, path):
             item = objects.get('documents/objects/'+identity)
             require(item is not None and item.size == int(size))
             with archive.extractfile(item) as content:
-                require(hashlib.file_digest(content, 'sha256').hexdigest() == checksum)
+                require(paired.sha256_stream(content) == checksum)
 
 
 def restore(directory):

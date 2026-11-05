@@ -18,6 +18,14 @@ CONFIG = {'app.env', 'compose.env', 'db-password', 'db-root-password', 'migratio
           'backup.cnf', 'current.json', 'automation.json'}
 STORE = Path('/srv/dcms-uat-backups/managed-v1')
 RESTORE = '/usr/local/libexec/dcms-uat-restore-check'
+HASH_CHUNK_SIZE = 1024 * 1024
+
+
+def sha256_stream(source):
+    digest = hashlib.sha256()
+    while chunk := source.read(HASH_CHUNK_SIZE):
+        digest.update(chunk)
+    return digest.hexdigest()
 
 
 def require(condition):
@@ -38,7 +46,7 @@ def validate(directory):
         path = directory/name
         require(path.is_file() and not path.is_symlink() and path.stat().st_size > 0)
         with path.open('rb') as source:
-            require(hashlib.file_digest(source, 'sha256').hexdigest() == checksum)
+            require(sha256_stream(source) == checksum)
     with (directory/'database.sql').open('rb') as source:
         source.seek(max(0, (directory/'database.sql').stat().st_size-4096))
         require(b'-- Dump completed on ' in source.read())
