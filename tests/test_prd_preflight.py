@@ -111,6 +111,15 @@ class ProductionPreflightTests(unittest.TestCase):
         for path, content in originals.items():
             self.assertEqual(path.read_bytes(), content)
 
+    def test_production_import_template_is_disabled_with_independent_identity_unset(self):
+        environment = self.config['services']['app']['environment']
+        self.assertEqual(str(environment['XPPL_PRD_IMPORT_ENABLED']).lower(), 'false')
+        for field in ('HOST', 'PORT', 'DATABASE', 'SERVER_UUID', 'ACCOUNT'):
+            self.assertFalse(environment.get('XPPL_PRD_IMPORT_'+field))
+        code, output, _ = self.run_plan()
+        self.assertEqual(code, 0)
+        self.assertIn('No deployment performed', output)
+
     def test_profile_requires_production_exact_project_and_https_only(self):
         for arguments in ({'target': 'uat'}, {'project': 'dcms-uat-xppl'}, {'project': 'dcms-production-xppl'},
                           {'project': 'dcms-prd-other'}, {'extra': ['--uat-profile']},
