@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Validate a release plan. Optional local probes are read-only; this tool cannot deploy."""
 import argparse
+import base64
+import ipaddress
 import json
 import os
 from pathlib import Path
@@ -17,6 +19,7 @@ parser.add_argument('--compose-env', type=Path, required=True)
 parser.add_argument('--manifest', type=Path, required=True)
 parser.add_argument('--probe-local', action='store_true', help='Read local daemon/image/current stack; never pull, start, migrate or deploy')
 parser.add_argument('--uat-profile', action='store_true', help='Validate shared-host UAT overlay; only dcms-uat-xppl is accepted')
+parser.add_argument('--prd-profile', action='store_true', help='Validate fixed Production overlay; only dcms-prd-xppl is accepted')
 parser.add_argument('--localhost-verification', action='store_true', help='UAT profile only: permit HTTP loopback technical checks, never user access')
 args = parser.parse_args()
 
@@ -28,10 +31,33 @@ def protected_file(path):
     require(path.is_absolute() and path.is_file(), 'Required absolute configuration/secret file missing.')
     require(not stat.S_IMODE(path.stat().st_mode) & 0o077, 'Configuration/secret files must be owner-only (0600).')
 
-require(re.fullmatch(r'dcms-'+args.target+r'-[a-z0-9-]+', args.project), 'Use a distinct dcms-TARGET-NAME project.')
+if args.prd_profile:
+    require(args.project == 'dcms-prd-xppl', 'Production requires project dcms-prd-xppl.')
+else:
+    require(re.fullmatch(r'dcms-'+args.target+r'-[a-z0-9-]+', args.project), 'Use a distinct dcms-TARGET-NAME project.')
 require(not args.uat_profile or (args.target == 'uat' and args.project == 'dcms-uat-xppl'), 'UAT profile requires target uat and project dcms-uat-xppl.')
+require(not args.prd_profile or (args.target == 'production' and not args.uat_profile), 'Production profile requires target production and no UAT overlay.')
+require(args.target != 'production' or args.prd_profile, 'Production requires the explicit --prd-profile.')
 require(not args.localhost_verification or args.uat_profile, 'Localhost verification requires the UAT profile.')
+if args.prd_profile:
+    require(args.compose_env == Path('/srv/dcms-prd/config/compose.env') and args.compose_env.resolve() == args.compose_env,
+            'Production Compose configuration must use its fixed isolated path, without symlinks.')
 protected_file(args.compose_env)
+# Never source shell code. Validate Production paths before Compose can read env_file/secrets.
+variables = dict(line.split('=', 1) for line in args.compose_env.read_text().splitlines() if line and not line.startswith('#') and '=' in line)
+if args.prd_profile:
+    required_variables = {
+        'DCMS_ENVIRONMENT': 'production', 'DCMS_BIND_ADDRESS': '127.0.0.1', 'DCMS_HTTP_PORT': '18085',
+        'DCMS_DB_DATABASE': 'dcms_prd', 'DCMS_DB_USERNAME': 'dcms_prd',
+        'DCMS_APP_ENV_FILE': '/srv/dcms-prd/config/app.env',
+        'DCMS_DB_PASSWORD_FILE': '/srv/dcms-prd/config/db-password',
+        'DCMS_DB_ROOT_PASSWORD_FILE': '/srv/dcms-prd/config/db-root-password',
+    }
+    require(all(variables.get(key) == value for key, value in required_variables.items()), 'Fixed Production environment, database, port and isolated paths required.')
+    for key in ('DCMS_APP_ENV_FILE', 'DCMS_DB_PASSWORD_FILE', 'DCMS_DB_ROOT_PASSWORD_FILE'):
+        path = Path(variables[key])
+        require(path.resolve() == path, 'Production configuration/secret symlinks refused.')
+        protected_file(path)
 manifest = json.loads(args.manifest.read_text())
 image = manifest.get('image', '')
 require(re.fullmatch(r'ghcr\.io/[a-z0-9._/-]+@sha256:[a-f0-9]{64}', image), 'Immutable GHCR digest required.')
@@ -46,6 +72,8 @@ compose = ['docker', '--host', 'unix:///var/run/docker.sock', 'compose', '--proj
            '--env-file', str(args.compose_env), '-f', str(repository/'compose.release.yaml')]
 if args.uat_profile:
     compose += ['-f', str(repository/'compose.uat.yaml')]
+if args.prd_profile:
+    compose += ['-f', str(repository/'compose.prd.yaml')]
 
 def run(command):
     result = subprocess.run(command, env=environment, text=True, capture_output=True)
@@ -116,11 +144,83 @@ if args.uat_profile:
     for kind in ('volumes', 'networks'):
         for resource in config[kind].values():
             require(not resource.get('external') and resource.get('name', '').startswith(args.project+'_'), 'Only project-owned storage/networks allowed.')
+if args.prd_profile:
+    require(config.get('name') == args.project and set(config['services']) == {'app', 'db'}, 'Only the fixed Production app/database project is allowed.')
+    require(re.fullmatch(r'ghcr\.io/pintybhatt/psg-document-control@sha256:[a-f0-9]{64}', image), 'Only the approved DCMS repository image is accepted.')
+    require(app_env.get('APP_URL') == 'https://dcms.phonesackgroup.com:9444', 'Fixed Production HTTPS URL required.')
+    require(app_env.get('DB_DATABASE') == 'dcms_prd' and app_env.get('DB_USERNAME') == 'dcms_prd', 'Production database identity required.')
+    require(not app_env.get('DB_URL') and not app_env.get('DB_SOCKET') and str(app_env.get('DB_PORT')) == '3306', 'Production database overrides refused.')
+    require(app_env.get('SESSION_COOKIE') == 'dcms_prd_session' and app_env.get('CACHE_PREFIX') == 'dcms_prd_', 'Production session/cache isolation required.')
+    require(str(app_env.get('SESSION_ENCRYPT')).lower() == 'true' and str(app_env.get('SESSION_HTTP_ONLY')).lower() == 'true'
+            and app_env.get('SESSION_SAME_SITE') == 'lax' and app_env.get('SESSION_DOMAIN') in (None, '', 'null')
+            and app_env.get('SESSION_PATH') == '/', 'Encrypted, host-only, HTTP-only Production sessions required.')
+    require(app_env.get('FILESYSTEM_DISK') == 'local' and str(app_env.get('XPPL_UAT_IMPORT_ENABLED')).lower() == 'false', 'Private storage and disabled UAT import required.')
+    require(not any(app_env.get(key) for key in ('SESSION_CONNECTION', 'SESSION_STORE', 'DB_CACHE_CONNECTION', 'DB_CACHE_LOCK_CONNECTION', 'APP_PREVIOUS_KEYS')), 'Shared session/cache connections and previous environment keys refused.')
+    try:
+        valid_key = len(base64.b64decode(app_env['APP_KEY'][7:], validate=True)) == 32
+        proxies = [ipaddress.ip_address(value.strip()) for value in app_env.get('TRUSTED_PROXIES', '').split(',')]
+        valid_proxies = all(not address.is_unspecified and not address.is_multicast for address in proxies)
+    except ValueError:
+        valid_key, valid_proxies = False, False
+    require(valid_key and valid_proxies, 'Valid Production APP_KEY and explicit ingress IP addresses required; broad proxy networks refused.')
+    db = config['services']['db']
+    require(re.fullmatch(r'mysql:8\.4\.\d+@sha256:[a-f0-9]{64}', db.get('image', '')), 'Pinned MySQL 8.4 required.')
+    require(db.get('environment') == {'MYSQL_DATABASE': 'dcms_prd', 'MYSQL_USER': 'dcms_prd',
+            'MYSQL_PASSWORD_FILE': '/run/secrets/db_password', 'MYSQL_ROOT_PASSWORD_FILE': '/run/secrets/db_root_password'}, 'Isolated MySQL credentials required; inline overrides refused.')
+    require(set(config.get('secrets', {})) == {'db_password', 'db_root_password'}, 'Only Production database secrets allowed.')
+    for name, variable in (('db_password', 'DCMS_DB_PASSWORD_FILE'), ('db_root_password', 'DCMS_DB_ROOT_PASSWORD_FILE')):
+        secret = config['secrets'][name]
+        require(secret.get('file') == variables[variable] and not secret.get('external')
+                and secret.get('name', args.project+'_'+name) == args.project+'_'+name, 'Only fixed Production secret files allowed.')
+    require({secret['source'] for secret in db.get('secrets', [])} == {'db_password', 'db_root_password'}
+            and not app.get('secrets'), 'Database secrets must remain on the database service.')
+    password = Path(variables['DCMS_DB_PASSWORD_FILE']).read_text().rstrip('\n')
+    root_password = Path(variables['DCMS_DB_ROOT_PASSWORD_FILE']).read_text().rstrip('\n')
+    require(password and root_password and password != root_password
+            and not any(marker in value.lower() for value in (password, root_password) for marker in ('replace', 'changeme', 'placeholder')),
+            'Distinct non-placeholder Production database passwords required.')
+    ports = app.get('ports', [])
+    require(len(ports) == 1 and ports[0].get('host_ip') == '127.0.0.1' and ports[0].get('target') == 8080
+            and str(ports[0].get('published')) == '18085' and ports[0].get('protocol') == 'tcp', 'Only Production loopback TCP port 18085 is allowed.')
+    require(not db.get('ports'), 'Production database must not publish ports.')
+    require(set(app.get('networks', {})) == {'ingress', 'backend'} and set(db.get('networks', {})) == {'backend'}
+            and config['networks']['backend'].get('internal') and not config['networks']['ingress'].get('internal'), 'Production ingress/internal database boundary required.')
+    for kind, names in (('volumes', {'database', 'documents', 'private', 'framework'}), ('networks', {'ingress', 'backend'})):
+        require(set(config.get(kind, {})) == names, 'Unexpected Production storage/network resource.')
+        for name, resource in config[kind].items():
+            require(resource.get('name') == args.project+'_'+name and not resource.get('external') and not resource.get('driver_opts')
+                    and resource.get('driver', 'local' if kind == 'volumes' else 'bridge') == ('local' if kind == 'volumes' else 'bridge'),
+                    'Only exact project-owned local volumes and bridge networks allowed.')
+    expected_mounts = {
+        'app': {'/var/www/html/storage/app/document-vault': 'documents', '/var/www/html/storage/app/private': 'private',
+                '/var/www/html/storage/framework': 'framework', '/etc/apache2/conf-enabled/zz-dcms-prd.conf': None},
+        'db': {'/var/lib/mysql': 'database'},
+    }
+    for name, expected in expected_mounts.items():
+        mounts = config['services'][name].get('volumes', [])
+        require(len(mounts) == len(expected) and {mount['target'] for mount in mounts} == set(expected), 'Unexpected Production storage mount.')
+        for mount in mounts:
+            source = expected[mount['target']]
+            if source is None:
+                require(mount['type'] == 'bind' and mount.get('read_only') and mount['source'] == str(repository/'docker/apache-prd.conf')
+                        and not mount.get('bind', {}).get('create_host_path', True), 'Only the reviewed read-only Production Apache file may be bind mounted.')
+            else:
+                require(mount['type'] == 'volume' and mount['source'] == source and not mount.get('volume', {}).get('subpath'), 'Expected isolated Production persistent volume.')
+    require(app.get('read_only') and app.get('cap_drop') == ['ALL'] and not app.get('cap_add')
+            and 'no-new-privileges:true' in app.get('security_opt', []), 'Production runtime protections required.')
+    require(set(app.get('tmpfs', [])) == {'/tmp:uid=33,gid=33,mode=1770,size=64m', '/var/www/html/bootstrap/cache:uid=33,gid=33,mode=0750,size=16m'}, 'Bounded Production writable tmpfs required.')
+    require(app_env.get('PHP_MEMORY_LIMIT') == '256M', 'Reviewed Production PHP memory limit required.')
+    for name, memory, cpus, pids in (('app', 2048*1024*1024, 1.0, 128), ('db', 1536*1024*1024, 0.5, 256)):
+        service = config['services'][name]
+        require(int(service.get('mem_limit', 0)) == memory and int(service.get('memswap_limit', 0)) == memory
+                and float(service.get('cpus', 0)) == cpus and service.get('pids_limit') == pids, 'Fixed Production resource limits required.')
+        require(not any(service.get(key) for key in ('privileged', 'network_mode', 'container_name', 'pid', 'ipc', 'devices', 'volumes_from', 'build', 'user', 'entrypoint', 'cap_add')),
+                'Host/privileged/shared container or image runtime overrides refused.')
+    require(not app.get('command') and db.get('healthcheck') and not db['healthcheck'].get('disable'), 'Image application command and database healthcheck required.')
 # Protect all referenced files without displaying their content or rendered environment.
 for secret in config['secrets'].values():
     protected_file(Path(secret['file']))
-# Compose config resolves env_file content; recover its path from raw interpolation, never source shell code.
-variables = dict(line.split('=', 1) for line in args.compose_env.read_text().splitlines() if line and not line.startswith('#') and '=' in line)
+# Compose resolves env_file content; protect the original application file too.
 if args.uat_profile:
     require(variables.get('DCMS_ENVIRONMENT') == 'uat', 'UAT environment selection required.')
 protected_file(Path(variables.get('DCMS_APP_ENV_FILE', '')))
