@@ -46,6 +46,24 @@ class ProductionPreflightTests(unittest.TestCase):
         result = subprocess.run(command, env=self.environment, text=True, capture_output=True, timeout=30)
         self.assertEqual(result.returncode, 0, 'Local Compose rendering failed; inspect synthetic fixtures privately.')
         self.config = json.loads(result.stdout)
+
+        # CI diagnostic: mount metadata only; never print rendered
+        # environment variables, database secrets or full Compose JSON.
+        apache_target = '/etc/apache2/conf-enabled/zz-dcms-prd.conf'
+        apache_mounts = [
+            mount for mount in self.config['services']['app']['volumes']
+            if mount.get('target') == apache_target
+        ]
+        assert len(apache_mounts) == 1
+        apache = apache_mounts[0]
+        print(
+            'PRD_APACHE_MOUNT_DIAGNOSTIC:',
+            'type=', apache.get('type'),
+            'source_matches=', apache.get('source') == str(REPOSITORY/'docker/apache-prd.conf'),
+            'read_only=', apache.get('read_only'),
+            'create_host_path=', apache.get('bind', {}).get('create_host_path', '<missing>'),
+            file=sys.stderr,
+        )
         # The CLI boundary is virtualized only for fixed /srv files. Compose above is real.
         for secret in self.config['secrets'].values():
             secret['file'] = secret['file'].replace(str(self.directory), str(PRODUCTION_CONFIG))
