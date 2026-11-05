@@ -97,7 +97,7 @@ After applying the account migration, an authorized operator can run:
 php artisan user:bootstrap-admin --name='VERIFIED DISPLAY NAME' --email='VERIFIED EMAIL' --language=en
 ```
 
-Replace the placeholders with the intended identity. The command requires hidden password and confirmation prompts, without a visible-input fallback. Passwords must contain at least 16 characters, at most 72 bytes (avoiding bcrypt truncation), and no null bytes. Login also rejects passwords exceeding that byte limit, preventing extra suffixes from matching a bcrypt prefix. There is no password argument, environment-variable shortcut or default password. Do not put passwords in shell arguments, scripts or Git. Noninteractive creation is refused.
+Replace the placeholders with the intended identity. The command requires hidden password and confirmation prompts, without a visible-input fallback. Passwords must contain at least 8 characters, at most 72 bytes (avoiding bcrypt truncation), and no null bytes. Login also rejects passwords exceeding that byte limit, preventing extra suffixes from matching a bcrypt prefix. There is no password argument, environment-variable shortcut or default password. Do not put passwords in shell arguments, scripts or Git. Noninteractive creation is refused.
 
 Creation is transactional and coordinated through an atomic cache lock. An existing email is a no-op: no password reset, rename, reactivation or privilege changes occur. If any other account already exists, creation is refused. Default seeding creates no accounts. The bootstrap command and XPPL initializer were not executed against the development database for this phase.
 
