@@ -205,7 +205,7 @@ if args.prd_profile:
             source = expected[mount['target']]
             if source is None:
                 require(mount['type'] == 'bind' and mount.get('read_only') and mount['source'] == str(repository/'docker/apache-prd.conf')
-                        and not mount.get('bind', {}).get('create_host_path', True), 'Only the reviewed read-only Production Apache file may be bind mounted.')
+                        and not mount.get('bind', {}).get('create_host_path', False), 'Only the reviewed read-only Production Apache file may be bind mounted.')
             else:
                 require(mount['type'] == 'volume' and mount['source'] == source and not mount.get('volume', {}).get('subpath'), 'Expected isolated Production persistent volume.')
     require(app.get('read_only') and app.get('cap_drop') == ['ALL'] and not app.get('cap_add')

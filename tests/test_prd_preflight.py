@@ -47,23 +47,6 @@ class ProductionPreflightTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, 'Local Compose rendering failed; inspect synthetic fixtures privately.')
         self.config = json.loads(result.stdout)
 
-        # CI diagnostic: mount metadata only; never print rendered
-        # environment variables, database secrets or full Compose JSON.
-        apache_target = '/etc/apache2/conf-enabled/zz-dcms-prd.conf'
-        apache_mounts = [
-            mount for mount in self.config['services']['app']['volumes']
-            if mount.get('target') == apache_target
-        ]
-        assert len(apache_mounts) == 1
-        apache = apache_mounts[0]
-        print(
-            'PRD_APACHE_MOUNT_DIAGNOSTIC:',
-            'type=', apache.get('type'),
-            'source_matches=', apache.get('source') == str(REPOSITORY/'docker/apache-prd.conf'),
-            'read_only=', apache.get('read_only'),
-            'create_host_path=', apache.get('bind', {}).get('create_host_path', '<missing>'),
-            file=sys.stderr,
-        )
         # The CLI boundary is virtualized only for fixed /srv files. Compose above is real.
         for secret in self.config['secrets'].values():
             secret['file'] = secret['file'].replace(str(self.directory), str(PRODUCTION_CONFIG))
@@ -219,6 +202,35 @@ class ProductionPreflightTests(unittest.TestCase):
                         self.config = copy.deepcopy(original)
                         self.config[kind][name].update(change)
                         self.assert_refused()
+
+
+    def test_compose_optional_bind_flag_compatibility(self):
+        """Missing rendered flag is allowed; explicit true is refused."""
+        import copy
+
+        original = copy.deepcopy(self.config)
+        target = '/etc/apache2/conf-enabled/zz-dcms-prd.conf'
+
+        mount = next(
+            item for item in self.config['services']['app']['volumes']
+            if item['target'] == target
+        )
+
+        # Some Compose versions omit the optional rendered flag.
+        mount.get('bind', {}).pop('create_host_path', None)
+        code, output, _ = self.run_plan()
+        self.assertEqual(code, 0)
+
+        # Explicit automatic host-path creation remains prohibited.
+        self.config = copy.deepcopy(original)
+        mount = next(
+            item for item in self.config['services']['app']['volumes']
+            if item['target'] == target
+        )
+        mount.setdefault('bind', {})['create_host_path'] = True
+        self.assert_refused('Apache file')
+
+        self.config = original
 
     def test_unreviewed_mounts_and_public_database_and_network_connections_are_refused(self):
         original = copy.deepcopy(self.config)
