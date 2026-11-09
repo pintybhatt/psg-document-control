@@ -91,8 +91,7 @@ class ProductionDeploymentTests(unittest.TestCase):
             'config/db-password': 'synthetic-runtime', 'config/db-root-password': 'synthetic-root',
             'config/migration.env': 'DB_USERNAME=dcms_prd_migrate\nDB_PASSWORD=synthetic-migration\n',
             'config/backup.cnf': '[client]\nuser=dcms_prd_backup\npassword=synthetic-backup\n',
-            'config/backup-target.json': '{"host":"backup.example.test","port":22}',
-            'config/backup-known-hosts': 'synthetic-key-pin', 'config/backup-ssh-key': 'synthetic-backup-key',
+            'config/qnap-readiness-known-hosts': 'synthetic-key-pin', 'config/qnap-readiness-key': 'synthetic-read-only-key',
             'config/github-read-token': 'synthetic-server-token', 'registry/config.json': '{}',
             'release/compose.release.yaml': 'synthetic reviewed release configuration',
             'release/compose.prd.yaml': 'synthetic reviewed Production overlay',
@@ -198,16 +197,17 @@ class ProductionDeploymentTests(unittest.TestCase):
             if self.failure == 'dump': raise ValueError('dump')
         else:
             with tarfile.open(destination, 'x') as archive:
-                for name in ('documents', 'private'):
+                for name in (('foreign', 'private') if self.failure == 'archive' else ('documents', 'private')):
                     item = tarfile.TarInfo(name)
                     item.type = tarfile.DIRTYPE
                     archive.addfile(item)
         destination.chmod(0o600)
 
-    def verify_backup(self, directory):
-        if self.failure == 'restore': raise ValueError('restore verification')
-        digest, identity = prd.paired.validate(directory)
-        return {'verified': True, 'sha256sums': digest, 'backup_id': identity['backup_id']}
+    def verify_qnap(self):
+        self.calls.append(['verify-qnap'])
+        if self.failure == 'qnap':
+            raise ValueError('QNAP readiness')
+        return {'verified': True, 'scope': 'off-host'}
 
     def exercise(self):
         with patch.object(prd, 'ROOT', self.root), patch.object(prd.paired, 'ROOT', self.root), \
@@ -217,7 +217,7 @@ class ProductionDeploymentTests(unittest.TestCase):
                 patch.object(prd.shared.auth, 'GitHub', return_value=self.api), \
                 patch.object(prd.Deployment, 'run', side_effect=self.fake_run), \
                 patch.object(prd.Deployment, 'stream', side_effect=self.stream), \
-                patch.object(prd.paired, 'send', side_effect=self.verify_backup):
+                patch.object(prd.qnap, 'verify', side_effect=self.verify_qnap):
             prd.execute(self.data)
 
     def test_success_backs_up_before_forward_migration_and_replaces_only_production_app(self):
@@ -226,6 +226,7 @@ class ProductionDeploymentTests(unittest.TestCase):
         backup_index = next(i for i, c in enumerate(self.calls) if 'mysqldump' in ' '.join(c))
         migrate_index = next(i for i, c in enumerate(self.calls) if 'migrate' in c)
         replace_index = next(i for i, c in enumerate(self.calls) if '--force-recreate' in c)
+        self.assertLess(self.calls.index(['verify-qnap']), next(i for i, c in enumerate(self.calls) if 'down' in c))
         self.assertLess(backup_index, migrate_index)
         self.assertLess(migrate_index, replace_index)
         self.assertEqual(self.calls[replace_index][-1], 'app')
@@ -233,7 +234,9 @@ class ProductionDeploymentTests(unittest.TestCase):
         self.assertIn(str(self.root/'config/migration.env'), self.calls[migrate_index])
         self.assertEqual(json.loads((self.root/'config/current.json').read_text()), self.manifest)
         self.assertEqual(json.loads((self.history/'result.json').read_text())['status'], 'deployed')
-        self.assertTrue(json.loads((self.history/'backup.json').read_text())['verified'])
+        self.assertEqual(json.loads((self.history/'backup.json').read_text())['scope'], 'local')
+        self.assertTrue(json.loads((self.history/'qnap-backup.json').read_text())['verified'])
+        self.assertEqual(prd.paired.validate(self.root/'backups/gha-789-1')[1]['backup_id'], 'gha-789-1')
         self.assertFalse((self.root/'config/recovery-required.json').exists())
         for name, content in self.files.items():
             if name not in ('config/current.json', 'config/compose.env'):
@@ -246,20 +249,21 @@ class ProductionDeploymentTests(unittest.TestCase):
         self.assertTrue(all(command[:3] == prd.DOCKER for command in self.calls if '/usr/bin/docker' in command))
 
     def test_failures_before_maintenance_do_not_create_recovery_state(self):
-        for failure in ('preflight', 'extra_container'):
+        for failure in ('preflight', 'extra_container', 'qnap'):
             with self.subTest(failure=failure):
                 self.failure = failure
                 with self.assertRaises(ValueError): self.exercise()
                 self.assertFalse((self.root/'config/recovery-required.json').exists())
                 self.assertFalse(self.migrated or self.replaced)
+                self.assertFalse(any('down' in c or 'stop' in c or 'mysqldump' in ' '.join(c) for c in self.calls))
                 self.assertEqual(json.loads((self.history/'result.json').read_text())['status'], 'failed')
                 # A workflow attempt is deliberately single-use; use a new run for the next case.
                 self.data['deployment_run_attempt'] += 1
                 self.api.get.side_effect = lambda path: dict(self.github(path), run_attempt=self.data['deployment_run_attempt']) if not path.startswith('compare/') else {'status': 'ahead'}
                 self.history = self.root/'history'/('gha-789-'+str(self.data['deployment_run_attempt']))
 
-    def test_dump_restore_migration_health_and_exposure_failures_preserve_recovery_evidence(self):
-        for failure, stage in (('dump', 'backup_restore_verification'), ('restore', 'backup_restore_verification'),
+    def test_dump_migration_health_and_exposure_failures_preserve_recovery_evidence(self):
+        for failure, stage in (('dump', 'local_backup'), ('archive', 'local_backup'),
                                ('migration', 'migrations'), ('health', 'health'), ('exposure', 'health'),
                                ('database_restart', 'health')):
             fixture = ProductionDeploymentTests()
@@ -274,7 +278,7 @@ class ProductionDeploymentTests(unittest.TestCase):
                 self.assertTrue((fixture.root/'backups/gha-789-1/database.sql').exists())
                 self.assertEqual(json.loads((fixture.root/'config/current.json').read_text()), fixture.current)
                 self.assertEqual((fixture.root/'config/compose.env').read_text(), fixture.files['config/compose.env'])
-                if failure in ('dump', 'restore'):
+                if failure in ('dump', 'archive'):
                     self.assertFalse(fixture.migrated or fixture.replaced)
                 if failure == 'migration': self.assertFalse(fixture.replaced)
             finally:
@@ -375,9 +379,9 @@ class ProductionDeploymentTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.exercise()
         self.assertFalse((self.root/'config/recovery-required.json').exists())
 
-    def test_unconfigured_offhost_backup_stops_before_maintenance(self):
-        (self.root/'config/backup-target.json').write_text('{"host":"REPLACE.invalid","port":22}')
-        with self.assertRaises(ValueError): self.exercise()
+    def test_missing_qnap_credentials_stop_before_maintenance(self):
+        (self.root/'config/qnap-readiness-key').unlink()
+        with self.assertRaises(FileNotFoundError): self.exercise()
         self.assertFalse((self.root/'config/recovery-required.json').exists())
 
     def test_unchanged_schema_skips_migration_and_clears_recovery_state(self):
