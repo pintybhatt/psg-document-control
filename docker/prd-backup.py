@@ -35,8 +35,8 @@ FILES = (*PAYLOAD, 'SHA256SUMS')
 CONFIG = ('app.env', 'compose.env', 'db-password', 'db-root-password', 'migration.env',
           'backup.cnf', 'current.json', 'backup-target.json', 'backup-known-hosts', 'backup-ssh-key', 'registry.json',
           'compose.release.yaml', 'compose.prd.yaml', 'apache-prd.conf')
-DEPLOY_CONFIG = tuple(name for name in CONFIG if name not in ('backup-target.json', 'backup-known-hosts', 'backup-ssh-key')) + (
-    'qnap-readiness-key', 'qnap-readiness-known-hosts')
+DEPLOY_CONFIG = tuple(name for name in CONFIG if name not in ('backup-target.json', 'backup-known-hosts', 'backup-ssh-key'))
+LEGACY_QNAP_CONFIG = DEPLOY_CONFIG + ('qnap-readiness-key', 'qnap-readiness-known-hosts')
 RELEASE_CONFIG = {'compose.release.yaml': 'compose.release.yaml', 'compose.prd.yaml': 'compose.prd.yaml',
                   'apache-prd.conf': 'docker/apache-prd.conf'}
 ENV = {'PATH': '/usr/bin:/bin', 'HOME': '/nonexistent', 'LC_ALL': 'C'}
@@ -106,7 +106,7 @@ def validate(directory, configuration=None):
             require(all(not Path(item.name).is_absolute() and '..' not in Path(item.name).parts
                         and (item.isfile() or item.isdir()) for item in members), 'Unsafe archive member.')
             if name == 'configuration.tar':
-                allowed = (configuration,) if configuration is not None else (CONFIG, DEPLOY_CONFIG)
+                allowed = (configuration,) if configuration is not None else (CONFIG, LEGACY_QNAP_CONFIG, DEPLOY_CONFIG)
                 require(any(set(names) == set(expected) for expected in allowed)
                         and all(item.isfile() and item.size > 0 for item in members), 'Required recovery configuration missing.')
                 manifest = shared.auth.parse_json(archive.extractfile('current.json').read())
