@@ -18,6 +18,7 @@ import tarfile
 spec = importlib.util.spec_from_file_location('prd_backup', Path(__file__).with_name('prd-backup.py'))
 paired = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(paired)
+qnap = paired.load('prd-qnap-readiness.py')
 shared = paired.shared
 require, protected = shared.require, shared.protected
 ROOT = Path('/srv/dcms-prd')
@@ -29,7 +30,7 @@ WORKFLOW = '.github/workflows/deploy-prd.yml'
 REQUEST_KEYS = {'deployment_run_id', 'deployment_run_attempt', 'release_run_id', 'release_run_attempt',
                 'release_artifact_id', 'image', 'source_commit', 'manifest_sha256'}
 STAGES = {'release_evidence', 'configuration', 'existing_runtime', 'candidate_image', 'maintenance',
-          'backup_restore_verification', 'migrations', 'application_replacement', 'health', 'record_success'}
+          'backup_readiness', 'local_backup', 'migrations', 'application_replacement', 'health', 'record_success'}
 SCHEMA_PROBE = r'''
 $files = glob("database/migrations/*.php"); sort($files); $inventory = [];
 foreach ($files as $file) { $inventory[] = ["path" => $file, "sha256" => hash_file("sha256", $file)]; }
@@ -231,7 +232,6 @@ class Deployment:
         passwords = [values['DB_PASSWORD'], backup['client']['password'], config['services']['app']['environment']['DB_PASSWORD'],
                      protected(ROOT/'config/db-root-password', True).read_text().rstrip('\n')]
         require(len(set(passwords)) == 4, 'Application, backup, migration and root credentials must differ.')
-        paired.target()
 
     def stream(self, command, destination):
         self.sequence += 1
@@ -258,7 +258,7 @@ class Deployment:
                     '--mount', 'type=volume,src='+PROJECT+'_private,dst=/private,readonly', current['image'],
                     '-cpf', '-', '-C', '/', 'documents', 'private'], destination/'documents.tar')
         with tarfile.open(destination/'configuration.tar', 'x') as archive:
-            for filename in paired.CONFIG:
+            for filename in paired.DEPLOY_CONFIG:
                 source = paired.configuration_path(filename)
                 archive.add(protected(source, filename not in paired.RELEASE_CONFIG), arcname=filename, recursive=False)
         with (destination/'configuration.tar').open('rb') as archive:
@@ -270,7 +270,8 @@ class Deployment:
             output.write('\n'.join(sums)+'\n')
             output.flush()
             os.fsync(output.fileno())
-        receipt = paired.send(destination)
+        digest, identity = paired.validate(destination, configuration=paired.DEPLOY_CONFIG)
+        receipt = {'backup_id': identity['backup_id'], 'sha256sums': digest, 'verified': True, 'scope': 'local'}
         write_json(self.history/'backup.json', dict(receipt, directory=str(destination)))
 
     def migrate(self):
@@ -290,7 +291,7 @@ def execute(data):
     validate_request(data)
     require(os.geteuid() == 0, 'Restricted root entry point required.')
     os.umask(0o077)
-    for name in ('release/docker/deploy-prd.py', 'release/docker/prd-backup.py', 'release/docker/deploy-uat.py',
+    for name in ('release/docker/deploy-prd.py', 'release/docker/prd-backup.py', 'release/docker/prd-qnap-readiness.py', 'release/docker/deploy-uat.py',
                  'release/docker/github-uat-auth.py', 'release/docker/verify-uat-release.py',
                  'history', 'backups', 'config', 'registry/config.json'):
         protected(ROOT/name)
@@ -340,7 +341,7 @@ def execute(data):
             deployment.credentials(config)
             snapshot = {paired.configuration_path(name): (shared.sha256_file(protected(paired.configuration_path(name), name not in paired.RELEASE_CONFIG)),
                                                          name not in paired.RELEASE_CONFIG)
-                        for name in paired.CONFIG}
+                        for name in paired.DEPLOY_CONFIG}
 
             def unchanged():
                 require(all(shared.sha256_file(protected(path, private)) == digest for path, (digest, private) in snapshot.items()), 'Production configuration changed during deployment.')
@@ -361,13 +362,16 @@ def execute(data):
             deployment.image(manifest)
             rows = deployment.schema(manifest, baseline=current)
             unchanged()
+            mark('backup_readiness')
+            write_json(history/'qnap-backup.json', qnap.verify())
+            unchanged()
             mark('maintenance')
             write_json(flag, {'backup_id': history.name, 'previous_image': current['image'], 'image': manifest['image'], 'stage': stage})
             maintenance = True
             deployment.dc('exec', '-T', 'app', 'php', 'artisan', 'down', '--no-interaction')
             deployment.maintenance_active()
             deployment.dc('stop', '--timeout', '30', 'app')
-            mark('backup_restore_verification')
+            mark('local_backup')
             deployment.backup(current, database)
             deployment.invariant(database)
             unchanged()
