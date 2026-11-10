@@ -91,7 +91,6 @@ class ProductionDeploymentTests(unittest.TestCase):
             'config/db-password': 'synthetic-runtime', 'config/db-root-password': 'synthetic-root',
             'config/migration.env': 'DB_USERNAME=dcms_prd_migrate\nDB_PASSWORD=synthetic-migration\n',
             'config/backup.cnf': '[client]\nuser=dcms_prd_backup\npassword=synthetic-backup\n',
-            'config/qnap-readiness-known-hosts': 'synthetic-key-pin', 'config/qnap-readiness-key': 'synthetic-read-only-key',
             'config/github-read-token': 'synthetic-server-token', 'registry/config.json': '{}',
             'release/compose.release.yaml': 'synthetic reviewed release configuration',
             'release/compose.prd.yaml': 'synthetic reviewed Production overlay',
@@ -203,12 +202,6 @@ class ProductionDeploymentTests(unittest.TestCase):
                     archive.addfile(item)
         destination.chmod(0o600)
 
-    def verify_qnap(self):
-        self.calls.append(['verify-qnap'])
-        if self.failure == 'qnap':
-            raise ValueError('QNAP readiness')
-        return {'verified': True, 'scope': 'off-host'}
-
     def exercise(self):
         with patch.object(prd, 'ROOT', self.root), patch.object(prd.paired, 'ROOT', self.root), \
                 patch.object(prd, 'protected', side_effect=lambda path, *args: Path(path)), \
@@ -216,8 +209,7 @@ class ProductionDeploymentTests(unittest.TestCase):
                 patch.object(prd.os, 'geteuid', return_value=0), \
                 patch.object(prd.shared.auth, 'GitHub', return_value=self.api), \
                 patch.object(prd.Deployment, 'run', side_effect=self.fake_run), \
-                patch.object(prd.Deployment, 'stream', side_effect=self.stream), \
-                patch.object(prd.qnap, 'verify', side_effect=self.verify_qnap):
+                patch.object(prd.Deployment, 'stream', side_effect=self.stream):
             prd.execute(self.data)
 
     def test_success_backs_up_before_forward_migration_and_replaces_only_production_app(self):
@@ -226,7 +218,6 @@ class ProductionDeploymentTests(unittest.TestCase):
         backup_index = next(i for i, c in enumerate(self.calls) if 'mysqldump' in ' '.join(c))
         migrate_index = next(i for i, c in enumerate(self.calls) if 'migrate' in c)
         replace_index = next(i for i, c in enumerate(self.calls) if '--force-recreate' in c)
-        self.assertLess(self.calls.index(['verify-qnap']), next(i for i, c in enumerate(self.calls) if 'down' in c))
         self.assertLess(backup_index, migrate_index)
         self.assertLess(migrate_index, replace_index)
         self.assertEqual(self.calls[replace_index][-1], 'app')
@@ -235,7 +226,7 @@ class ProductionDeploymentTests(unittest.TestCase):
         self.assertEqual(json.loads((self.root/'config/current.json').read_text()), self.manifest)
         self.assertEqual(json.loads((self.history/'result.json').read_text())['status'], 'deployed')
         self.assertEqual(json.loads((self.history/'backup.json').read_text())['scope'], 'local')
-        self.assertTrue(json.loads((self.history/'qnap-backup.json').read_text())['verified'])
+        self.assertFalse((self.history/'qnap-backup.json').exists())
         self.assertEqual(prd.paired.validate(self.root/'backups/gha-789-1')[1]['backup_id'], 'gha-789-1')
         self.assertFalse((self.root/'config/recovery-required.json').exists())
         for name, content in self.files.items():
@@ -249,7 +240,7 @@ class ProductionDeploymentTests(unittest.TestCase):
         self.assertTrue(all(command[:3] == prd.DOCKER for command in self.calls if '/usr/bin/docker' in command))
 
     def test_failures_before_maintenance_do_not_create_recovery_state(self):
-        for failure in ('preflight', 'extra_container', 'qnap'):
+        for failure in ('preflight', 'extra_container'):
             with self.subTest(failure=failure):
                 self.failure = failure
                 with self.assertRaises(ValueError): self.exercise()
@@ -379,10 +370,19 @@ class ProductionDeploymentTests(unittest.TestCase):
         with self.assertRaises(ValueError): self.exercise()
         self.assertFalse((self.root/'config/recovery-required.json').exists())
 
-    def test_missing_qnap_credentials_stop_before_maintenance(self):
-        (self.root/'config/qnap-readiness-key').unlink()
-        with self.assertRaises(FileNotFoundError): self.exercise()
-        self.assertFalse((self.root/'config/recovery-required.json').exists())
+    def test_deployment_succeeds_without_qnap_files_or_backup_ssh_access(self):
+        for path in self.root.rglob('*qnap*'):
+            self.fail('Unexpected QNAP fixture: '+str(path))
+        with patch.object(prd.paired.subprocess, 'run', side_effect=AssertionError('Backup SSH access forbidden')), \
+                patch.object(prd.paired, 'send', side_effect=AssertionError('Off-host backup forbidden')):
+            self.exercise()
+        self.assertTrue(self.migrated and self.replaced)
+        self.assertEqual(json.loads((self.history/'result.json').read_text())['status'], 'deployed')
+        with tarfile.open(self.root/'backups/gha-789-1/configuration.tar') as archive:
+            self.assertEqual(set(archive.getnames()), set(prd.paired.DEPLOY_CONFIG))
+            self.assertIn('app.env', archive.getnames())
+            self.assertIn('current.json', archive.getnames())
+        self.assertFalse((self.history/'qnap-backup.json').exists())
 
     def test_unchanged_schema_skips_migration_and_clears_recovery_state(self):
         self.manifest['migration_inventory'] = [ONE]

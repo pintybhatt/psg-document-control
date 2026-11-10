@@ -67,6 +67,18 @@ class ProductionBackupTests(unittest.TestCase):
         self.assertEqual(digest, hashlib.sha256((self.source/'SHA256SUMS').read_bytes()).hexdigest())
         self.assertEqual(identity, self.identity)
 
+    def test_current_and_previous_qnap_recovery_configuration_remain_valid(self):
+        for configuration in (backup.DEPLOY_CONFIG, backup.LEGACY_QNAP_CONFIG):
+            with tarfile.open(self.source/'configuration.tar', 'w') as archive:
+                for name in configuration:
+                    content = json.dumps(self.manifest).encode() if name == 'current.json' else b'synthetic recovery data'
+                    archive_file(archive, name, content)
+            self.checksums()
+            with self.subTest(configuration=configuration):
+                self.assertEqual(backup.validate(self.source)[1], self.identity)
+        with self.assertRaisesRegex(ValueError, 'configuration missing'):
+            backup.validate(self.source, configuration=backup.DEPLOY_CONFIG)
+
     def test_tampering_missing_members_public_permissions_and_incomplete_dump_are_refused(self):
         original = (self.source/'database.sql').read_bytes()
         (self.source/'database.sql').write_bytes(b'corrupt')

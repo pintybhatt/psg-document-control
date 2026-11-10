@@ -18,7 +18,6 @@ import tarfile
 spec = importlib.util.spec_from_file_location('prd_backup', Path(__file__).with_name('prd-backup.py'))
 paired = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(paired)
-qnap = paired.load('prd-qnap-readiness.py')
 shared = paired.shared
 require, protected = shared.require, shared.protected
 ROOT = Path('/srv/dcms-prd')
@@ -30,7 +29,7 @@ WORKFLOW = '.github/workflows/deploy-prd.yml'
 REQUEST_KEYS = {'deployment_run_id', 'deployment_run_attempt', 'release_run_id', 'release_run_attempt',
                 'release_artifact_id', 'image', 'source_commit', 'manifest_sha256'}
 STAGES = {'release_evidence', 'configuration', 'existing_runtime', 'candidate_image', 'maintenance',
-          'backup_readiness', 'local_backup', 'migrations', 'application_replacement', 'health', 'record_success'}
+          'local_backup', 'migrations', 'application_replacement', 'health', 'record_success'}
 SCHEMA_PROBE = r'''
 $files = glob("database/migrations/*.php"); sort($files); $inventory = [];
 foreach ($files as $file) { $inventory[] = ["path" => $file, "sha256" => hash_file("sha256", $file)]; }
@@ -291,7 +290,7 @@ def execute(data):
     validate_request(data)
     require(os.geteuid() == 0, 'Restricted root entry point required.')
     os.umask(0o077)
-    for name in ('release/docker/deploy-prd.py', 'release/docker/prd-backup.py', 'release/docker/prd-qnap-readiness.py', 'release/docker/deploy-uat.py',
+    for name in ('release/docker/deploy-prd.py', 'release/docker/prd-backup.py', 'release/docker/deploy-uat.py',
                  'release/docker/github-uat-auth.py', 'release/docker/verify-uat-release.py',
                  'history', 'backups', 'config', 'registry/config.json'):
         protected(ROOT/name)
@@ -361,9 +360,6 @@ def execute(data):
             deployment.run(DOCKER+['pull', manifest['image']], timeout=600)
             deployment.image(manifest)
             rows = deployment.schema(manifest, baseline=current)
-            unchanged()
-            mark('backup_readiness')
-            write_json(history/'qnap-backup.json', qnap.verify())
             unchanged()
             mark('maintenance')
             write_json(flag, {'backup_id': history.name, 'previous_image': current['image'], 'image': manifest['image'], 'stage': stage})

@@ -1,9 +1,11 @@
-# Production configuration, deployment and recovery — Phase 12 (QNAP integration)
+# Production configuration, deployment and recovery — Phase 12 (simplified routine deployment)
 
 The original phases prepared configuration, the Production deployment/backup/recovery
 engine and `.github/workflows/deploy-prd.yml`. Production is now installed on NetBox
-192.168.0.228, according to the operator. Phase 12.1 simplifies the backup integration
-locally; it makes no server, cron, runner or GitHub changes and does not deploy anything.
+192.168.0.228, according to the operator. Routine deployment uses an automatic local
+pre-deployment backup; daily QNAP backups operate independently. This simplification
+is prepared locally; no server, cron, runner or GitHub settings were changed and no
+deployment was performed.
 Historical initial-setup guidance below remains for reference; do not bootstrap the
 existing installation again.
 
@@ -184,8 +186,8 @@ request/publication evidence, previous/candidate manifests, backup receipt and a
 fixed-stage `result.json`. Requests cannot choose these paths. Concurrent or replayed
 attempts are refused. History/logs contain sensitive configuration and must stay private.
 Stage records and recovery markers are synced before each destructive stage; state
-publication syncs files/directories before reporting success. The QNAP evidence is
-read live and recorded in the private deployment history.
+publication syncs files/directories before reporting success. The local backup receipt
+is recorded in the private deployment history.
 
 In addition to the Phase 12.2A files, provision separately generated accounts:
 
@@ -219,11 +221,7 @@ an initial database, seeds users/business data, imports UAT data or starts/recre
    migration filenames/hashes without executing them. Previously deployed inventory
    must remain an unchanged prefix and live migration names/batches must match the
    current manifest. New migration files must be unique and sorted.
-3. At stage `backup_readiness`, verify the recent completed daily backup **live on
-   QNAP through the existing NFS server**, and persist private `qnap-backup.json`
-   evidence. Refusal happens before maintenance, app stop, migrations or replacement;
-   current image/configuration remain active and no recovery marker is created.
-   Then persist `config/recovery-required.json`, enter Laravel file maintenance, verify the
+3. Persist `config/recovery-required.json`, enter Laravel file maintenance, verify the
    shared marker, and stop only `app`. The enrolled topology has synchronous queues
    and no external writers; setup must confirm no cron/import/DB writers bypass it.
    The database stays running. This quiescence provides a paired database/file snapshot.
@@ -231,8 +229,9 @@ an initial database, seeds users/business data, imports UAT data or starts/recre
    archive required protected configuration/current identity, and create `identity.json`
    plus SHA-256 checksums. Stream dumps to exclusive private files, validate every
    checksum/archive and record `backup.json` with `scope=local` at stage `local_backup`.
-   This fresh quiesced backup remains mandatory before migration. It supplements the
-   verified daily off-host set; it is not claimed to be off-host or restore-tested.
+   This fresh quiesced local backup remains mandatory before migration. Any dump,
+   archive or checksum failure blocks migrations/replacement and retains recovery state.
+   It is not claimed to be off-host or restore-tested.
 5. Recheck database identity/start time/mounts and unchanged protected configuration.
    Only when inventory advances, run the candidate's
    `php artisan migrate --force --no-interaction` using the dedicated migration env file.
@@ -263,194 +262,70 @@ prove that arbitrary new PHP/DDL preserves business semantics. Release review mu
 assess new migration operations and data compatibility. A modified old migration,
 unknown live migration, source downgrade, or ambiguous recovery state requires review.
 
-## Phase 12.1: QNAP backup readiness
+## Routine backups and independent daily QNAP protection
 
-The previous routine deployment called `prd-backup.send()`, whose dedicated SSH
-receiver invoked `prd-restore-check.py` before acknowledging success. It required a
-separate Linux receiver with native MySQL 8.4 and stopped the app before discovering
-an unavailable receiver. The GitHub workflow invokes the **installed** engine; a
-workflow checkout cannot replace that engine. Routine deployment now uses a read-only
-live QNAP check before maintenance, followed by a fresh local paired backup. It never
-calls the old receiver or requires a new MySQL installation. Legacy receiver/restore
-helpers and their tests remain available for separately managed recovery work.
+Routine Production deployment requires only the automatic **local** pre-deployment
+backup described above. There is no QNAP freshness gate, SSH backup-readiness call,
+mandatory off-host restore, NFS verifier installation or backup approval command.
+Use the existing **Deploy DCMS PRD** workflow with its existing inputs; **Deploy DCMS
+UAT** retains its existing workflow and independent deployment/backup behavior.
 
-The operator reports the established schedule:
+The local set contains `database.sql`, `documents.tar` (document vault and private
+files), `configuration.tar`, `identity.json` and `SHA256SUMS`, under
+`/srv/dcms-prd/backups/gha-RUN-ATTEMPT`. Configuration includes APP_KEY,
+runtime/root/migration/backup credentials, current release identity, registry
+configuration, Compose files and Apache tuning. The set is private recovery material;
+preserve host encryption/access controls. No QNAP SSH key, known-hosts file, backup
+receiver configuration or off-host credentials are needed to create or validate it.
+Older recovery archives containing those credentials remain valid for recovery.
 
-- NetBox 192.168.0.228: 01:00 Laos time `/usr/local/sbin/dcms-prd-daily-backup.sh`, covering
-  `dcms_prd`, document vault/private files, encrypted recovery configuration,
-  SHA-256 sums and a completed marker.
-- Existing NFS server 192.168.4.25: 01:30 Laos time
-  `/usr/local/sbin/dcms-prd-qnap-pull-backup.sh` SFTP pull to QNAP 192.168.0.239,
-  `/mnt/xppl_production_backup/XPPL DCMS/`; 01:45 retention preserves the latest
-  verified backup. **Do not edit, disable or replace these cron jobs.**
-- Reported manual drill: transfer/checksums and configuration decryption succeeded;
-  isolated MySQL 8.4 restore checked 71 tables and 36 migration records. Production
-  and UAT remained healthy. These are operator-reported results, not local test evidence.
+The established daily system continues independently, unchanged:
 
-`docker/prd-qnap-readiness.py` supports the existing `/usr/bin/python3` **3.6.15**
-on openSUSE Leap 15.5. Do not upgrade or modify NFS system Python, system packages,
-SAP services, other backups or cron schedules. It uses only Python 3.6 standard-library
-APIs, OpenSSH (Production client) and `findmnt` (NFS check). Install the same reviewed file on the existing NFS server as
-`/usr/local/libexec/dcms-prd/prd-qnap-readiness.py`, root-owned, mode 0755, with
-non-writable root-owned ancestors. Enroll a Production-only read account
-`dcms-prd-qnap-read`, with read/traverse access to these QNAP backup sets and no write
-access. Its SSH key must force exactly:
+- NetBox 192.168.0.228: 01:00 Laos time,
+  `/usr/local/sbin/dcms-prd-daily-backup.sh` creates the database, document/private
+  and encrypted recovery-configuration backup.
+- NFS server 192.168.4.25: 01:30 Laos time,
+  `/usr/local/sbin/dcms-prd-qnap-pull-backup.sh` pulls to QNAP
+  `192.168.0.239:/XPPL-PRODUCTION-BACKUP`, mounted at
+  `/mnt/xppl_production_backup`, under `XPPL DCMS/daily-YYYYMMDD_HHMMSS`.
+  Daily sets contain `database.sql`, `documents.tar`, `configuration.tar.enc`,
+  `SHA256SUMS` and `.complete` naming the completed set.
+- Retention runs at 01:45 and preserves the latest verified backup. Do not edit,
+  disable or replace these scripts or cron schedules as part of deployment.
 
-```text
-/usr/bin/python3 -I -B /usr/local/libexec/dcms-prd/prd-qnap-readiness.py
-```
+Backup owners retain responsibility for daily-job monitoring, key custody, retention
+and periodic isolated restores. The reported drill restored MySQL 8.4, checked 71
+tables and 36 migration records, and decrypted recovery configuration; retain the
+actual drill record. Routine deployment does not inspect this evidence or certify the
+latest daily transfer. It can proceed while QNAP is stale or unavailable. The fresh
+local set protects against deployment failure but not loss of the NetBox host; the
+off-host recovery point depends on the last successful daily pull and may lose later
+changes. No automatic database restore or schema downgrade is added.
 
-Disable PTY, forwarding, agent forwarding and user RC. The program accepts only
-`SSH_ORIGINAL_COMMAND=verify-dcms-prd-qnap`, no arguments, and a fresh random challenge
-on stdin. No shell, backup transfer, deletion, database access or restore is exposed.
-Keep the Production private key and independently verified NFS host pin at
-`/srv/dcms-prd/config/qnap-readiness-key` and `qnap-readiness-known-hosts`, root-owned
-0600. The destination account, IP and port 22 are fixed in code; SSH disables caller
-configuration, proxies, agent and password authentication. No new host/service is needed.
+`prd-qnap-readiness.py` and the legacy backup receiver/restore utilities remain
+standalone tools; the routine engine neither imports nor invokes the QNAP verifier
+or off-host transport. Existing installations of those tools need no removal for
+this change. No NFS Python/system package change or new account/service is required.
+TLS keys and host Nginx remain covered by the established host backup procedure.
 
-The operator verified the actual NFS backup structure. The verifier now pins these
-values directly; no `/etc/dcms-prd-qnap-readiness.json` or filename mapping is needed:
+## Updating the installed deployment tools
 
-| Item | Verified value |
-| --- | --- |
-| NFS source | `192.168.0.239:/XPPL-PRODUCTION-BACKUP` |
-| Mount point | `/mnt/xppl_production_backup` |
-| DCMS root | `/mnt/xppl_production_backup/XPPL DCMS` |
-| Set name | `daily-YYYYMMDD_HHMMSS`, e.g. `daily-20261109_131323` |
-| Completion marker | `.complete` |
-| Marker content | `Completed: daily-20261109_131323` (matching selected directory; optional final LF) |
-| Payloads | `database.sql`, `documents.tar`, `configuration.tar.enc` |
-| Checksums | `SHA256SUMS` covers exactly those three payloads |
+The GitHub workflows invoke the installed server tools, so a new workflow checkout
+or app image alone does not remove the old server-side admission gate. In the later
+installation window, update `deploy-prd.py` and `prd-backup.py` together from the
+reviewed revision under the existing Production deployment lock. Keep private copies
+and hashes of the previous tools, root custody and non-writable ancestors, and check
+syntax/imports before releasing the lock. Use atomic file replacement while the lock
+is held; restore the complete prior tool set if installation fails. Coordinate with
+existing daily jobs without disabling or changing them.
 
-Verification behavior:
-
-- Select the newest matching daily name in chronological name order, without
-  following symlinks or falling back if that set is incomplete. Unrelated directories
-  are ignored. Directory modification times do not determine the selected recovery point.
-- Validate the directory date/time in Laos time (UTC+07:00). The daily identity,
-  every payload, manifest and marker must be no older than 36 hours and not future
-  dated. Return the oldest of the directory time and payload modification times;
-  Production rechecks freshness and the daily identity. Touching old files, directories
-  or markers cannot refresh an old daily recovery point. Clock synchronization is required.
-- Require `.complete` to name exactly the selected set. A blank marker, marker for
-  another set, or oversized marker fails. The marker alone cannot pass readiness.
-- Re-hash all three nonempty regular payload files against the exact checksum manifest.
-  Missing/extra/duplicate checksum entries, unsafe paths, links, corruption, partial
-  transfers or files changing during verification fail. Standard SHA-256 lines
-  (`HASH  filename` or `HASH *filename`) are accepted.
-- Before and after hashing, `findmnt --target` on the DCMS root must resolve to the
-  exact NFS source and mount point above, using `nfs` or `nfs4`. An unmounted QNAP,
-  another export, another mount point, CIFS or a local fallback directory fails.
-  Checksum success on these actual off-host bytes establishes successful transfer;
-  a manually written marker, local-only backup or stored receipt is insufficient.
-- Return the current random challenge, fixed Production identity, daily QNAP path,
-  backup time and manifest digest over pinned SSH. Transport failure, timeout,
-  malformed/replayed evidence or an identity mismatch fails before maintenance.
-
-`documents.tar` is the existing document-vault/private-file recovery archive;
-`configuration.tar.enc` preserves encrypted recovery configuration, APP_KEY, matching
-credentials, settings and release identity. Keep the recovery key separately. The
-verifier trusts the reviewed daily scripts for archive contents and consistency;
-it does not decrypt configuration or restore SQL during routine deployment.
-
-Before installation, verify the read account can traverse and read the real mount
-without write access, confirm the pinned NFS SSH host key and port 22 route from
-NetBox, and check Python 3, `/usr/bin/findmnt` JSON support, clock synchronization,
-original payload timestamp behavior and hash runtime against the fifteen-minute bound.
-No further filename/export mapping is needed. No server-side check was performed by
-this local implementation; retain the operator's actual archive-coverage and restore
-drill evidence with the installation record.
-
-Python compatibility and execution boundary:
-
-- The NFS forced command remains exactly
-  `/usr/bin/python3 -I -B /usr/local/libexec/dcms-prd/prd-qnap-readiness.py`.
-  Install only this standalone verifier there. It does not import `deploy-prd.py`,
-  `prd-backup.py`, UAT helpers or repository test modules. Those deployment helpers
-  execute on NetBox and retain their existing Python requirements; they must not
-  be invoked with the NFS system interpreter.
-- Hashing uses a sentinel iterator rather than Python 3.8 assignment expressions.
-  Both `findmnt` and Production SSH use explicit `stdout=PIPE, stderr=PIPE`, preserving
-  captured byte output, timeouts, exit-code checks and private diagnostics without
-  Python 3.7 `capture_output`. `secrets`, `Path.resolve(strict=True)`, JSON byte input
-  and regex match indexing are available in Python 3.6; no third-party package is needed.
-  See the [Python 3.6 subprocess API](https://docs.python.org/3.6/library/subprocess.html).
-- Run the focused compatibility/safety coverage locally with
-  `python3 -B -m unittest discover -s tests -p 'test_prd_qnap_readiness.py' -v`.
-  It requests Python 3.6 grammar from `ast.parse`, with negative controls for newer
-  syntax, and exercises inspection/client behavior with a Python 3.6-compatible
-  subprocess signature. This grammar check is best effort; it does not emulate the
-  Python 3.6 standard library or prove native runtime compatibility.
-- The suite also imports the verifier using `python3.6 -I -B` when that interpreter
-  is already available in DEV, without invoking `main()` or accessing QNAP. DEV
-  currently has Python 3.14 and no Python 3.6 interpreter, so the native check is
-  explicitly skipped. Do not install/upgrade system packages to satisfy this test.
-  During a separately authorized installation, use the existing NFS 3.6.15 interpreter
-  for an isolated import/syntax check, then test the forced command as the enrolled
-  read-only account against the real mount. Record those results before deployment.
-  Existing mount-source, 36-hour freshness, checksum, evidence-change and SSH challenge
-  checks remain mandatory; compatibility changes introduce no bypass.
-
-Limitations: this is checksum/availability evidence, not a new restore drill or proof
-of business-level SQL correctness. Trust remains in the root-managed NFS verifier,
-QNAP storage, reviewed daily scripts and their timestamps; a privileged storage attacker
-could rewrite both payloads and hashes. Backup content is confidential; restrict read
-access and preserve existing encryption and separate recovery-key custody. The daily
-recovery point may be up to 36 hours old; obtain owner acceptance of that RPO. A failed
-latest transfer blocks even if an older valid set remains. A transfer/retention race
-may safely refuse deployment; retry only after inspecting evidence. There is no retention
-lock held throughout deployment, so retention must preserve the verified recovery set.
-The fresh pre-migration local dump/vault/private/configuration set is not immediately
-copied off-host; loss of NetBox before the next daily pull can lose intervening changes.
-Continue scheduled isolated restores and drills after schema/storage/encryption changes.
-No recovery key or full SQL restore is required for each routine deployment.
-
-Local deployment recovery configuration includes APP_KEY, runtime/root/migration/backup
-credentials, active release identity, QNAP read credentials/pins, registry configuration,
-Compose files and Apache tuning. Legacy receiver credentials are no longer prerequisites.
-Local archives are private plaintext recovery material; retain existing host encryption
-and access controls. TLS keys and host Nginx need the established host backup procedure.
-
-## Safe transition of the existing installed engine
-
-Do this only in a separately authorized installation window after review; nothing in
-this phase executes it. Keep the GitHub Production runner disabled and do not dispatch.
-
-1. Review/merge/publish through the normal authorized process later. Record the exact
-   approved tool revision and file hashes. Retain the verified backup layout above;
-   confirm read-account access, timestamps, archive coverage and recovery-key/drill
-   records against the existing daily/pull scripts without changing them.
-2. On NFS, install only the read-only verifier, then enroll the
-   restricted read key. This changes no backup job. Test verification as the exact
-   read account against QNAP; check permission/mount and partial-transfer refusal.
-   On NetBox, provision the two private `qnap-readiness-*` files independently of UAT.
-3. Inspect the existing `/usr/local/sbin/dcms-prd-deploy` wrapper and forced command.
-   They must resolve to `/srv/dcms-prd/release/docker/deploy-prd.py`. Downloading a new
-   workflow or deploying a new app image **does not update these installed tools**.
-   Stage `deploy-prd.py`, `prd-backup.py` and the new `prd-qnap-readiness.py` from the
-   same reviewed revision outside the active tool directory. Compare unchanged imported
-   helpers with the reviewed versions (`deploy-uat.py`, `github-uat-auth.py`,
-   `verify-uat-release.py` and their imports); do not mix incompatible versions.
-4. Hold the existing `/srv/dcms-prd/deployment.lock` exclusively for the whole tool
-   installation. Refuse unresolved `config/recovery-required.json` or an in-flight
-   deployment. Preserve root-only copies/hashes of current tools for reversal. Install
-   the three staged files using root custody, non-writable parents and atomic file
-   renames while holding the lock. Check syntax and imports against the installed
-   helpers before releasing it. If any step fails, restore the complete previous tool
-   set under the same lock. Check whether daily scripts import these helpers first;
-   coordinate a window between scheduled jobs without editing/disabling cron.
-5. Do not replace Compose files, app image, `current.json`, secrets, volumes, migration
-   history or an immutable release artifact to install control tooling. If `release`
-   is an immutable bundle rather than the documented tools directory, stop and prepare
-   a reviewed separate tools location/wrapper transition first; the current engine
-   assumes tools at the fixed release path. Never modify the selected image/manifest.
-6. Run the installed QNAP client alone (import the installed module and call `verify()`
-   through an approved administrator session); keep the result private. This reads
-   backup evidence without calling `execute()`, entering maintenance or migrating.
-   Verify continued Production/UAT health and record installed hashes and evidence.
-   Any existing failed-deployment recovery marker needs independent reconciliation;
-   never delete it merely to retry. Enabling the runner and dispatching a **new** run
-   from reviewed main remain separate authorized actions after these checks.
+Do not replace active Compose settings, app images, release manifests, database or
+volumes when updating these control tools. If `release` is an immutable application
+bundle rather than the documented control-tools directory, resolve that installation
+layout before modifying it. Preserve unresolved recovery markers for reconciliation;
+do not clear them merely to rerun deployment. No NFS installation, QNAP key enrollment
+or additional manual backup verification is part of the routine deployment process.
+No operational installation or workflow dispatch is performed by this local change.
 
 ## Controlled recovery and first installation
 
@@ -491,8 +366,7 @@ verification remains for MySQL dump grants/definers, restore with the actual sch
 data volume, startup/import timing and disk capacity, effective UID/mount ownership,
 Compose `run --env-from-file` support, registry access, SSH forced-command enrollment,
 DNS/TLS/proxy behavior, resource competition and a controlled recovery drill. Deployments
-have a one-hour bound; local backup streams have ten-minute bounds and the live QNAP
-check has a fifteen-minute bound (mount probes: fifteen seconds each). Measure
+have a one-hour bound and local backup streams have ten-minute bounds. Measure
 these against Production data before activation. No operational host was contacted here.
 
 ## Phase 12.3 operator workflow
@@ -585,7 +459,7 @@ OIDC or repository-settings permission is requested. Keep the existing protected
 and publication process. No environment/settings/key/runner changes were made here.
 The Production host still needs the Phase 12.2B engine, protected server-side GitHub read
 credential, registry access, healthy initialized stack, separate migration/backup accounts,
-live QNAP readiness verification, TLS and periodic recovery drills described above.
+automatic local pre-deployment backups, TLS and recovery protections described above.
 
 Production deployments use concurrency group `dcms-prd-xppl-deployment` with cancellation
 disabled. Backup, migrations, replacement and health checks run exclusively in the
