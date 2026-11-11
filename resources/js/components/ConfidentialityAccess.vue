@@ -1,10 +1,12 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import UiButton from './ui/UiButton.vue';
+import IconButton from './ui/IconButton.vue';
 import TextInput from './ui/TextInput.vue';
 import SelectInput from './ui/SelectInput.vue';
 import DataTable from './ui/DataTable.vue';
-import ConfirmDialog from './ui/ConfirmDialog.vue';
+import ConfirmDialog from './ui/SweetConfirmDialog.vue';
+import { showSuccess } from '../utilities/alerts.js';
 import { useLocalization } from '../localization/index.js';
 import { createJsonClient } from '../utilities/jsonClient.js';
 import { formatDateTime } from '../utilities/dates.js';
@@ -117,7 +119,7 @@ async function grant(kind) {
         await request(url(kind === 'clearance' ? 'clearances' : grantsPath()), { method: 'POST', signal, body: { ...scopeData(), user_id: Number(userId.value), expires_at: expiresAt, ...(kind === 'clearance' ? { classification: classification.value } : { operations: [...operations.value] }) } });
         if (signal.aborted) { return; }
         if (kind === 'clearance') { clearancePage.value = 1; await loadClearances(signal); } else { grantPage.value = 1; await loadGrants(signal); }
-        messageKey.value = 'confidentialitySaved';
+        messageKey.value = 'confidentialitySaved'; showSuccess(t('uiSaveSuccess'), t('confidentialitySaved'));
     } catch (error) { if (!signal.aborted) { handleError(error); } }
     finally { saving.value = false; }
 }
@@ -133,7 +135,7 @@ async function revoke() {
         await request(url(pending.value.path), { method: 'DELETE', signal, body: scopeData() });
         if (signal.aborted) { return; }
         if (pending.value.kind === 'clearance') { await loadClearances(signal); } else { await loadGrants(signal); }
-        confirmationOpen.value = false; pending.value = null; messageKey.value = 'confidentialityRevoked';
+        confirmationOpen.value = false; pending.value = null; messageKey.value = 'confidentialityRevoked'; showSuccess(t('uiSaveSuccess'), t('confidentialityRevoked'));
     } catch (error) { if (!signal.aborted) { handleError(error); } }
     finally { saving.value = false; }
 }
@@ -162,7 +164,6 @@ function changeDocumentPage({ page }) { documentPage.value = page; searchDocumen
         <h3 id="confidentiality-heading" class="text-lg font-semibold">{{ t('confidentialityTitle') }}</h3>
         <p class="text-sm leading-7 text-slate-600">{{ t('confidentialityNotice') }}</p>
         <p v-if="errorKey" role="alert" class="rounded-lg bg-red-50 p-4 text-sm text-red-800">{{ t(errorKey) }}</p>
-        <p v-if="messageKey" role="status" class="rounded-lg bg-teal-50 p-4 text-sm text-teal-800">{{ t(messageKey) }}</p>
         <SelectInput v-model="contextKey" :label="t('confidentialityScope')" :helper="t('confidentialityScopeHelp')" :options="contextOptions" :disabled="saving || loading" />
         <template v-if="current">
             <div class="flex flex-col gap-4 rounded-xl border border-slate-200 bg-white p-6">
@@ -181,7 +182,7 @@ function changeDocumentPage({ page }) { documentPage.value = page; searchDocumen
                     <UiButton type="submit" :disabled="saving || loading || !userId || !classification">{{ t('confidentialityGrantClearance') }}</UiButton>
                 </form>
                 <DataTable v-model:page="clearancePage" :rows="clearanceRows" :columns="columns" :caption="t('confidentialityClearances')" :loading="loading" server-side :total="clearanceTotal" :per-page="10" @change="changeClearancePage">
-                    <template #cell-actions="{ row }"><UiButton v-if="row.revocable" variant="danger" :disabled="saving || loading" @click="prepareRevoke('clearance', row)">{{ t('confidentialityRevoke') }}</UiButton></template>
+                    <template #cell-actions="{ row }"><IconButton v-if="row.revocable" action="delete" :label="t('confidentialityRevoke')" :disabled="saving || loading" @click="prepareRevoke('clearance', row)" /></template>
                 </DataTable>
             </section>
             <section v-if="canDocuments" class="flex flex-col gap-4" aria-labelledby="document-access-heading">
@@ -204,7 +205,7 @@ function changeDocumentPage({ page }) { documentPage.value = page; searchDocumen
                         <div><UiButton type="submit" :disabled="saving || loading || !userId || !operations.length">{{ t('confidentialityGrantDocument') }}</UiButton></div>
                     </form>
                     <DataTable v-model:page="grantPage" :rows="grantRows" :columns="columns" :caption="t('confidentialityExistingGrants')" :loading="loading" server-side :total="grantTotal" :per-page="10" @change="changeGrantPage">
-                        <template #cell-actions="{ row }"><UiButton v-if="row.revocable" variant="danger" :disabled="saving || loading" @click="prepareRevoke('document', row)">{{ t('confidentialityRevoke') }}</UiButton></template>
+                        <template #cell-actions="{ row }"><IconButton v-if="row.revocable" action="delete" :label="t('confidentialityRevoke')" :disabled="saving || loading" @click="prepareRevoke('document', row)" /></template>
                     </DataTable>
                 </template>
             </section>

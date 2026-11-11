@@ -64,7 +64,7 @@ describe('outgoing correspondence', () => {
         await show(wrapper);
         await button(wrapper, en.outgoingEdit).trigger('click');
         await wrapper.get('#outgoing-document_revision').setValue('Rev A');
-        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(wrapper.text()).toContain(lo['outgoing-document_revision']);
         await wrapper.get('#outgoing-draft-form').trigger('submit'); await flushPromises();
         const mutation = fetch.mock.calls.find(([, options]) => options?.method === 'PATCH');
@@ -79,7 +79,7 @@ describe('outgoing correspondence', () => {
         expect(wrapper.get('#outgoing-type').element.value).toBe('9');
         expect(wrapper.get('#outgoing-type option[value="9"]').text()).toBe(en.outgoingOfficialLetter);
         expect(wrapper.get('#outgoing-category').element.value).toBe('Correspondence');
-        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(wrapper.get('#outgoing-type option[value="9"]').text()).toBe(lo.outgoingOfficialLetter);
     });
     it('corrects a legacy draft only through an explicit type selection and save', async () => {
@@ -217,7 +217,7 @@ describe('outgoing correspondence', () => {
         for (const key of Object.keys(en).filter(key => key.startsWith('outgoing'))) { expect(lo[key], key).toBeTruthy(); expect(lo[key]).not.toBe(en[key]); }
         server(); const wrapper = await render({ ...scope, permissions: [] }); await show(wrapper);
         expect(wrapper.findAll('button').some(item => ['Create outgoing draft', 'Edit draft', 'Register and assign numbers'].includes(item.text()))).toBe(false);
-        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(wrapper.text()).toContain('ທະບຽນເອກະສານຂາອອກ'); expect(wrapper.text()).toContain('ຜູ້ຮັບຫຼັກ');
         expect(wrapper.text()).toContain(lo.outgoingIssuingDepartment); expect(wrapper.text()).toContain(lo.documentCategory);
         expect(wrapper.find('script').exists()).toBe(false);

@@ -3,6 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils';
 import ApprovalWorkflows from '../../resources/js/components/ApprovalWorkflows.vue';
 import AdministrationPage from '../../resources/js/pages/AdministrationPage.vue';
 import { createLocalization } from '../../resources/js/localization/index.js';
+import { settle, swalText } from './swal.js';
 import en from '../../resources/js/localization/en.js';
 import lo from '../../resources/js/localization/lo.js';
 
@@ -59,7 +60,8 @@ it('saves explicit sequential levels with scope, CSRF and an optimistic version 
     expect(url).toBe('/workflows/controlled');
     expect(options.headers['X-CSRF-TOKEN']).toBe('csrf-test');
     expect(JSON.parse(options.body)).toEqual({ scope_type: 'site', company_id: 4, site_id: 7, expected_version: 0, enabled: true, sequence: 'sequential', role_ids: [12, 13], change_reason: 'Synthetic approved configuration' });
-    expect(wrapper.text()).toContain(en.workflowSaved);
+    await settle();
+    expect(swalText()).toContain(en.workflowSaved);
     expect(wrapper.find('script').exists()).toBe(false);
     expect(wrapper.text()).toContain('<script>Reviewer</script>');
 });
@@ -97,7 +99,8 @@ it('shows a stale-version error and keeps the draft instead of silently overwrit
     await wrapper.get('[data-confirm]').trigger('click'); await flushPromises();
     expect(wrapper.text()).toContain(en.workflowStale);
     expect(wrapper.get('#workflow-reason').element.value).toBe('Stale save');
-    expect(wrapper.find('[role="dialog"]').exists()).toBe(false);
+    expect(wrapper.find('section[role="dialog"]').exists()).toBe(false);
+    expect(wrapper.find('[data-form-modal]').exists()).toBe(true);
 });
 
 it('clears settings and ignores a late response across scope changes and access revocation', async () => {

@@ -21,6 +21,8 @@ use App\Http\Controllers\OrganizationController;
 use App\Http\Controllers\OutgoingCorrespondenceController;
 use App\Http\Controllers\OutgoingOperationController;
 use App\Http\Controllers\PhysicalCustodyController;
+use App\Http\Controllers\ProfilePasswordController;
+use App\Http\Controllers\ProfilePhotoController;
 use App\Http\Controllers\RoleAssignmentController;
 use App\Http\Controllers\RoleController;
 use App\Http\Controllers\TemplateCatalogueController;
@@ -60,6 +62,9 @@ foreach ($pages as $page => $path) {
         ->middleware($middleware)->name('dcms.'.$page);
 }
 
+Route::view('/profile', 'app', ['page' => 'profile', 'pages' => $pages])
+    ->middleware(['auth:web', EnsureActiveUserSession::class])->name('dcms.profile');
+
 Route::get('/dev/ui-components', function () use ($pages): View {
     return view('app', ['page' => 'ui-preview', 'pages' => $pages]);
 })->middleware([EnsureDevelopmentEnvironment::class, 'auth:web', EnsureActiveUserSession::class])->name('dcms.ui-preview');
@@ -67,6 +72,10 @@ Route::get('/dev/ui-components', function () use ($pages): View {
 Route::middleware(['auth:web', EnsureActiveUserSession::class])->group(function (): void {
     Route::post('/logout', [AuthenticatedSessionController::class, 'destroy'])->name('logout');
     Route::get('/api/v1/user', CurrentUserController::class)->name('api.v1.user');
+    Route::get('/profile/photo', [ProfilePhotoController::class, 'show'])->name('profile.photo.show');
+    Route::post('/api/v1/profile/photo', [ProfilePhotoController::class, 'store'])->middleware('throttle:20,1')->name('api.v1.profile.photo.store');
+    Route::delete('/api/v1/profile/photo', [ProfilePhotoController::class, 'destroy'])->name('api.v1.profile.photo.destroy');
+    Route::put('/api/v1/profile/password', [ProfilePasswordController::class, 'update'])->middleware('throttle:6,1')->name('api.v1.profile.password.update');
     Route::prefix('api/v1')->name('api.v1.')->group(function (): void {
         Route::prefix('confidentiality')->name('confidentiality.')->controller(ConfidentialityAdministrationController::class)->group(function (): void {
             Route::get('contexts', 'contexts')->name('contexts');

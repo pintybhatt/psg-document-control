@@ -89,7 +89,7 @@ function columnClasses(column) {
 </script>
 
 <template>
-    <div class="overflow-hidden rounded-xl border border-slate-200 bg-white">
+    <div class="overflow-hidden rounded-2xl border border-slate-200 bg-white">
         <div role="region" :aria-label="caption" tabindex="0" class="overflow-x-auto">
             <table class="w-full text-left text-sm" :aria-busy="loading">
                 <caption class="sr-only">{{ caption }}. {{ t('uiTableHelp') }}</caption>

@@ -60,7 +60,7 @@ describe('incoming correspondence', () => {
         expect(wrapper.text()).toContain('XPPL-ADM-LTR-26-0001');
         expect(wrapper.text()).toContain('<script>Reply subject</script>');
         expect(wrapper.find('script').exists()).toBe(false);
-        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(wrapper.text()).toContain(lo.incomingRelatedOutgoing);
     });
 
@@ -76,7 +76,7 @@ describe('incoming correspondence', () => {
         await openDetail(wrapper);
         await button(wrapper, en.incomingEdit).trigger('click');
         await wrapper.get('#incoming-document_revision').setValue('Rev A');
-        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(wrapper.text()).toContain(lo['incoming-document_revision']);
         await wrapper.get('#incoming-draft-form').trigger('submit'); await flushPromises();
         const mutation = fetch.mock.calls.find(([, options]) => options?.method === 'PATCH');
@@ -163,7 +163,7 @@ describe('incoming correspondence', () => {
     it('translates all incoming labels and switches list and detail to Lao', async () => {
         for (const key of Object.keys(en).filter(key => key.startsWith('incoming'))) { expect(lo[key], key).toBeTruthy(); expect(lo[key]).not.toBe(en[key]); }
         server(); const wrapper = await render(); await openDetail(wrapper);
-        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(wrapper.text()).toContain('ທະບຽນເອກະສານຂາເຂົ້າ'); expect(wrapper.text()).toContain('ຈົດໝາຍ');
         expect(wrapper.text()).toContain(lo.incomingReceivingDepartment); expect(wrapper.text()).toContain(lo.documentCategory);
         expect(wrapper.text()).not.toContain('incomingStatus-');

@@ -1,10 +1,13 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import UiButton from './ui/UiButton.vue';
+import IconButton from './ui/IconButton.vue';
 import TextInput from './ui/TextInput.vue';
 import SelectInput from './ui/SelectInput.vue';
 import CheckboxInput from './ui/CheckboxInput.vue';
-import ConfirmDialog from './ui/ConfirmDialog.vue';
+import ConfirmDialog from './ui/SweetConfirmDialog.vue';
+import FormModal from './ui/FormModal.vue';
+import { showSuccess } from '../utilities/alerts.js';
 import { createJsonClient } from '../utilities/jsonClient.js';
 import { useLocalization } from '../localization/index.js';
 
@@ -172,6 +175,7 @@ async function save() {
         await request(updating ? `${props.endpoint}/${editing.value.id}` : props.endpoint, { method: updating ? 'PATCH' : 'POST', body });
         editing.value = null;
         saved.value = true;
+        showSuccess(t('uiSaveSuccess'), t('userSaved'));
         await load();
     } catch (exception) {
         handleError(exception);
@@ -185,9 +189,15 @@ async function revokeAccess() {
     try {
         await request(pending.value.revoke_url, { method: 'DELETE' });
         confirming.value = false; pending.value = null;
+        showSuccess(t('uiSaveSuccess'));
         await loadAccess();
     } catch (exception) { handleError(exception); }
     finally { saving.value = false; }
+}
+
+function closeEditor() {
+    if (saving.value) { return; }
+    editing.value = null; editorController?.abort(); siteController?.abort(); scopeController?.abort();
 }
 
 async function changePage(direction) {
@@ -209,27 +219,27 @@ onBeforeUnmount(() => { editorController?.abort(); siteController?.abort(); scop
             <TextInput v-model="search" :label="t('userSearch')" />
             <UiButton type="submit" variant="secondary" :loading="loading">{{ t('userFind') }}</UiButton>
         </form>
-        <p v-if="error" role="alert" class="text-sm text-red-700">{{ error }}</p>
-        <p v-if="saved" role="status" class="text-sm text-teal-700">{{ t('userSaved') }}</p>
+        <p v-if="error && !editing" role="alert" class="text-sm text-red-700">{{ error }}</p>
         <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white">
             <table class="w-full text-left text-sm">
                 <thead class="bg-slate-50"><tr><th class="p-3">{{ t('userName') }}</th><th class="p-3">{{ t('userEmail') }}</th><th class="p-3">{{ t('uiStatus') }}</th><th class="p-3">{{ t('rbacActions') }}</th></tr></thead>
-                <tbody><tr v-for="user in users" :key="user.id" class="border-t border-slate-200"><td class="p-3">{{ user.name }}</td><td class="p-3">{{ user.email }}</td><td class="p-3">{{ t(user.active ? 'rbacActive' : 'rbacInactive') }}</td><td class="p-3"><UiButton variant="secondary" :disabled="saving" @click="open(user)">{{ t('rbacEdit') }}</UiButton></td></tr></tbody>
+                <tbody><tr v-for="user in users" :key="user.id" class="border-t border-slate-200"><td class="p-3">{{ user.name }}</td><td class="p-3">{{ user.email }}</td><td class="p-3">{{ t(user.active ? 'rbacActive' : 'rbacInactive') }}</td><td class="p-3"><IconButton action="edit" :label="t('rbacEdit')" :disabled="saving" @click="open(user)" /></td></tr></tbody>
             </table>
             <p v-if="!loading && !users.length" class="p-4 text-sm text-slate-500">{{ t('userNone') }}</p>
         </div>
         <div class="flex items-center gap-3"><UiButton variant="secondary" :disabled="page <= 1 || loading" @click="changePage(-1)">{{ t('userPrevious') }}</UiButton><span class="text-sm">{{ page }} / {{ lastPage }}</span><UiButton variant="secondary" :disabled="page >= lastPage || loading" @click="changePage(1)">{{ t('userNext') }}</UiButton></div>
-        <form v-if="editing" class="rounded-xl border border-slate-200 bg-white p-5" @submit.prevent="save">
-            <h4 class="mb-4 font-semibold">{{ t(editing.id === null ? 'userCreate' : 'userEdit') }}</h4>
-            <div class="grid gap-4 sm:grid-cols-2">
+        <FormModal v-if="editing" :title="t(editing.id === null ? 'userCreate' : 'userEdit')" :subtitle="editing.id === null ? '' : editing.email" :busy="saving" @close="closeEditor">
+        <form @submit.prevent="save">
+            <p v-if="error" role="alert" class="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">{{ error }}</p>
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 <TextInput v-model="form.name" :label="t('userName')" required maxlength="255" :error="fields.name?.[0]" />
                 <TextInput v-model="form.email" :label="t('userEmail')" type="email" required maxlength="255" :error="fields.email?.[0]" />
-                <SelectInput v-model="form.preferred_language" :label="t('userLanguage')" :options="[{ value: 'en', label: 'English' }, { value: 'lo', label: 'ລາວ' }]" />
-                <div v-if="editing.id !== null && editing.id !== currentUserId"><CheckboxInput v-model="form.active" :label="t('userActive')" /></div>
+                <div :class="{ 'sm:col-span-2': editing.id === null || editing.id === currentUserId }"><SelectInput v-model="form.preferred_language" :label="t('userLanguage')" :options="[{ value: 'en', label: 'English' }, { value: 'lo', label: 'ລາວ' }]" /></div>
+                <div v-if="editing.id !== null && editing.id !== currentUserId" class="flex items-end"><div class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5"><CheckboxInput v-model="form.active" :label="t('userActive')" /></div></div>
                 <TextInput v-model="form.password" type="password" autocomplete="new-password" :label="t(editing.id === null ? 'userInitialPassword' : 'userResetPassword')" :required="editing.id === null" :error="fields.password?.[0]" />
                 <TextInput v-model="form.password_confirmation" type="password" autocomplete="new-password" :label="t('userConfirmPassword')" :required="editing.id === null || !!form.password" />
             </div>
-            <fieldset v-if="accessEnabled" :disabled="saving || optionsLoading || accessLoading" class="mt-5 grid gap-4 rounded-lg border border-slate-200 p-4 sm:grid-cols-2">
+            <fieldset v-if="accessEnabled" :disabled="saving || optionsLoading || accessLoading" class="mt-5 grid grid-cols-1 gap-4 rounded-xl border border-slate-200 bg-slate-50/60 p-4 sm:grid-cols-2">
                 <legend class="px-2 font-semibold">{{ t('userAccessAdd') }}</legend>
                 <p class="text-sm text-slate-600 sm:col-span-2">{{ t('userAccessHelp') }}</p>
                 <SelectInput v-model="accessForm.company_id" :label="t('userAccessCompany')" :options="options(companies)" :error-key="fields['access.company_id']?.[0]" />
@@ -238,7 +248,7 @@ onBeforeUnmount(() => { editorController?.abort(); siteController?.abort(); scop
                 <SelectInput v-model="accessForm.role_id" :label="t('userAccessRole')" :options="options(eligibleRoles)" :disabled="!accessForm.site_id" :required="!!accessForm.company_id" :error-key="fields['access.role_id']?.[0]" />
                 <p v-if="accessForm.department_id" class="text-sm text-slate-600 sm:col-span-2">{{ t('userAccessSiteRole') }}</p>
                 <p v-if="accessForm.site_id && !eligibleRoles.length && !optionsLoading" class="text-sm text-slate-600 sm:col-span-2">{{ t('userAccessNoRoles') }}</p>
-                <CheckboxInput v-if="editing.id !== null && accessForm.company_id" v-model="accessForm.confirm_regrant" :label="t('membershipConfirmRegrant')" />
+                <div v-if="editing.id !== null && accessForm.company_id" class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 sm:col-span-2"><CheckboxInput v-model="accessForm.confirm_regrant" :label="t('membershipConfirmRegrant')" /></div>
             </fieldset>
             <p v-if="optionsLoading || accessLoading" role="status" class="mt-3 text-sm">{{ t('uiLoading') }}</p>
             <section v-if="editing.id !== null && accessEndpoints.units" class="mt-5 flex flex-col gap-3" :aria-label="t('userAccessCurrent')">
@@ -249,13 +259,14 @@ onBeforeUnmount(() => { editorController?.abort(); siteController?.abort(); scop
                     <p v-if="!accessLoading && !existingAccess[kind].length" class="text-sm">{{ t('userAccessNone') }}</p>
                     <ul class="flex flex-col gap-2"><li v-for="row in existingAccess[kind]" :key="row.id" class="flex flex-wrap items-center justify-between gap-2 text-sm">
                         <span>{{ accessLabel(row) }} · {{ t(row.effective ? 'rbacActive' : 'rbacInactive') }}</span>
-                        <UiButton v-if="row.revoke_url" variant="danger" :disabled="saving || accessLoading" @click="confirmRevoke(row, kind)">{{ t(kind === 'memberships' ? 'membershipRevoke' : 'rbacRevoke') }}</UiButton>
+                        <IconButton v-if="row.revoke_url" action="delete" :label="t(kind === 'memberships' ? 'membershipRevoke' : 'rbacRevoke')" :disabled="saving || accessLoading" @click="confirmRevoke(row, kind)" />
                     </li></ul>
                 </div>
             </section>
             <p class="my-3 text-xs text-slate-600">{{ t('userPasswordHelp') }}</p>
-            <div class="flex gap-3"><UiButton type="submit" :loading="saving" :disabled="optionsLoading || accessLoading">{{ t('userSave') }}</UiButton><UiButton variant="secondary" :disabled="saving" @click="editing = null; editorController?.abort(); siteController?.abort(); scopeController?.abort()">{{ t('uiCancel') }}</UiButton></div>
+            <div class="flex flex-wrap justify-end gap-3 border-t border-slate-200 pt-4"><UiButton variant="secondary" :disabled="saving" @click="closeEditor">{{ t('uiCancel') }}</UiButton><UiButton type="submit" :loading="saving" :disabled="optionsLoading || accessLoading">{{ t('userSave') }}</UiButton></div>
         </form>
+        </FormModal>
         <p class="text-sm text-slate-600">{{ t('userMembershipHelp') }}</p>
         <ConfirmDialog v-if="pending" v-model="confirming" danger :title="t(pending.kind === 'memberships' ? 'membershipRevoke' : 'rbacRevoke')" :message="`${t('userAccessRevokeConfirm')} ${accessLabel(pending)}`" :loading="saving" @confirm="revokeAccess" />
     </section>

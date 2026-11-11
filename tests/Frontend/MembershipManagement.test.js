@@ -4,6 +4,7 @@ import MembershipManagement from '../../resources/js/components/MembershipManage
 import AdministrationPage from '../../resources/js/pages/AdministrationPage.vue';
 import LanguageSwitcher from '../../resources/js/components/LanguageSwitcher.vue';
 import { createLocalization } from '../../resources/js/localization/index.js';
+import { settle, swalCancel, swalConfirm, swalText } from './swal.js';
 
 const endpoints = { contexts: '/contexts', memberships: '/memberships', membershipUsers: '/membership-users', membershipUnits: '/membership-units' };
 const scope = { scope_key: 'site:7', scope_type: 'site', company_id: 4, site_id: 7, permissions: ['memberships.view', 'memberships.manage', 'users.view'] };
@@ -51,6 +52,7 @@ async function render(currentScope = scope) {
     await flushPromises();
     return wrapper;
 }
+async function openAssign(wrapper) { await wrapper.get('[data-open-assign]').trigger('click'); }
 function button(wrapper, text) { const found = wrapper.findAll('button').find(button => button.text() === text); expect(found).toBeDefined(); return found; }
 function control(wrapper, text) {
     const label = wrapper.findAll('label').find(label => label.text().trim() === text);
@@ -76,7 +78,7 @@ describe('organization membership administration', () => {
         expect(wrapper.text()).toContain('Example Department');
         expect(wrapper.text()).toContain('Effective');
         expect(wrapper.text()).toContain('Revoked');
-        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(wrapper.text()).toContain('ສະມາຊິກອົງກອນຂອງຜູ້ໃຊ້');
         expect(wrapper.text()).toContain('ພະແນກຕົວຢ່າງ');
         expect(wrapper.text()).toContain('ຖືກຖອນ');
@@ -104,22 +106,25 @@ describe('organization membership administration', () => {
     it('requires confirmation identifying the account and unit and sends explicit scoped data with CSRF', async () => {
         const fetch = server();
         const wrapper = await render();
+        await openAssign(wrapper);
         await button(wrapper, 'Find eligible accounts and units').trigger('click');
         await flushPromises();
         await control(wrapper, 'Account').setValue(9);
         await control(wrapper, 'Organizational unit').setValue(7);
         await wrapper.get('form').trigger('submit');
         await flushPromises();
-        expect(wrapper.get('dialog').text()).toContain('member@example.test');
-        expect(wrapper.get('dialog').text()).toContain('Example Company / Example Site');
+        await settle();
+        expect(swalText()).toContain('member@example.test');
+        expect(swalText()).toContain('Example Company / Example Site');
         expect(fetch.mock.calls.some(([, options]) => options.method === 'POST')).toBe(false);
-        await button(wrapper.get('dialog'), 'Confirm').trigger('click');
+        await swalConfirm();
         await flushPromises();
         const [, options] = fetch.mock.calls.find(([, options]) => options.method === 'POST');
         expect(options.headers['X-CSRF-TOKEN']).toBe('sample-csrf');
         expect(options.credentials).toBe('same-origin');
         expect(JSON.parse(options.body)).toEqual({ scope_type: 'site', company_id: 4, site_id: 7, user_id: 9, unit_type: 'site', unit_company_id: 4, unit_site_id: 7, unit_department_id: null, confirm_regrant: false });
-        expect(wrapper.text()).toContain('Organization membership updated.');
+        await settle();
+        expect(swalText()).toContain('Organization membership updated.');
     });
 
     it('updates active status and never offers mutation actions on terminal or self-protected rows', async () => {
@@ -128,7 +133,7 @@ describe('organization membership administration', () => {
         expect(wrapper.findAll('button').filter(button => button.text() === 'Deactivate')).toHaveLength(1);
         await button(wrapper, 'Deactivate').trigger('click');
         await flushPromises();
-        await button(wrapper.get('dialog'), 'Confirm').trigger('click');
+        await swalConfirm();
         await flushPromises();
         const [url, options] = fetch.mock.calls.find(([, options]) => options.method === 'PATCH');
         expect(url).toBe('/memberships/20');
@@ -140,11 +145,11 @@ describe('organization membership administration', () => {
         const wrapper = await render();
         await button(wrapper, 'Revoke membership').trigger('click');
         await flushPromises();
-        await button(wrapper.get('dialog'), 'Cancel').trigger('click');
+        await swalCancel();
         expect(fetch.mock.calls.some(([, options]) => options.method === 'DELETE')).toBe(false);
         await button(wrapper, 'Revoke membership').trigger('click');
         await flushPromises();
-        await button(wrapper.get('dialog'), 'Confirm').trigger('click');
+        await swalConfirm();
         await flushPromises();
         expect(fetch.mock.calls.some(([url, options]) => url === '/memberships/20' && options.method === 'DELETE')).toBe(true);
     });
@@ -154,7 +159,7 @@ describe('organization membership administration', () => {
         const wrapper = await render();
         await button(wrapper, 'Revoke membership').trigger('click');
         await flushPromises();
-        await button(wrapper.get('dialog'), 'Confirm').trigger('click');
+        await swalConfirm();
         await flushPromises();
         expect(wrapper.get('[role="alert"]').text()).toContain('You do not have permission');
         expect(wrapper.text()).not.toContain('Assign membership');
@@ -166,16 +171,17 @@ describe('organization membership administration', () => {
         const wrapper = await render();
         await button(wrapper, 'Revoke membership').trigger('click');
         await flushPromises();
-        await button(wrapper.get('dialog'), 'Confirm').trigger('click');
+        await swalConfirm();
         await flushPromises();
         expect(wrapper.get('[role="alert"]').text()).toContain('Explicit confirmation');
-        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(wrapper.get('[role="alert"]').text()).toContain('ຕ້ອງຢືນຢັນ');
     });
 
     it('clears candidates when changing membership level or administrative scope', async () => {
         server();
         const wrapper = await render();
+        await openAssign(wrapper);
         await button(wrapper, 'Find eligible accounts and units').trigger('click');
         await flushPromises();
         expect(wrapper.text()).toContain('member@example.test');
@@ -189,6 +195,7 @@ describe('organization membership administration', () => {
     it('sends regrant authorization only when the administrator explicitly selects it', async () => {
         const fetch = server();
         const wrapper = await render();
+        await openAssign(wrapper);
         await button(wrapper, 'Find eligible accounts and units').trigger('click');
         await flushPromises();
         await control(wrapper, 'Account').setValue(9);
@@ -196,7 +203,7 @@ describe('organization membership administration', () => {
         await wrapper.get('input[type="checkbox"]').setValue(true);
         await wrapper.get('form').trigger('submit');
         await flushPromises();
-        await button(wrapper.get('dialog'), 'Confirm').trigger('click');
+        await swalConfirm();
         await flushPromises();
 
         const [, options] = fetch.mock.calls.find(([, options]) => options.method === 'POST');
@@ -208,7 +215,7 @@ describe('organization membership administration', () => {
         const wrapper = await render();
         await button(wrapper, 'Reactivate').trigger('click');
         await flushPromises();
-        await button(wrapper.get('dialog'), 'Confirm').trigger('click');
+        await swalConfirm();
         await flushPromises();
 
         const [, options] = fetch.mock.calls.find(([, options]) => options.method === 'PATCH');
@@ -225,6 +232,7 @@ describe('organization membership administration', () => {
             return implementation(url, options);
         });
         const wrapper = await render();
+        await openAssign(wrapper);
         await button(wrapper, 'Find eligible accounts and units').trigger('click');
         await wrapper.setProps({ scope: { ...scope, scope_key: 'site:10', site_id: 10 } });
         finishLookup(response({ data: [user] }));

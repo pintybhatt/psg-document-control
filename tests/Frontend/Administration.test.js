@@ -6,6 +6,7 @@ import AdministrationPage from '../../resources/js/pages/AdministrationPage.vue'
 import LanguageSwitcher from '../../resources/js/components/LanguageSwitcher.vue';
 import App from '../../resources/js/App.vue';
 import { createLocalization } from '../../resources/js/localization/index.js';
+import { settle, swalCancel, swalConfirm, swalPopup, swalText } from './swal.js';
 
 const endpoints = { organization: '/api/v1/organization/companies', contexts: '/api/v1/authorization/contexts', roles: '/api/v1/roles', permissions: '/api/v1/permissions', users: '/api/v1/role-assignment-users', assignments: '/api/v1/role-assignments' };
 const allKeys = ['users.view', 'roles.view', 'roles.manage', 'assignments.view', 'assignments.manage'];
@@ -206,7 +207,7 @@ describe('scoped role administration', () => {
         await button(wrapper, 'Details').trigger('click');
         await button(wrapper, 'Preview recommended permissions').trigger('click');
         expect(button(wrapper, 'Use these selections').element.disabled).toBe(true);
-        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(wrapper.get('form').text()).toContain('ສິດທີ່ແນະນຳ');
         expect(wrapper.get('[data-recommendation-preview]').text()).toContain('ກວດສອບສິດທີ່ແນະນຳ');
         expect(wrapper.get('form').text()).not.toContain('rbacRecommendation');
@@ -247,7 +248,7 @@ describe('scoped role administration', () => {
         expect(panel.get('dl').text()).toContain('owned by one company');
         expect(panel.get('dl').text()).toContain('owned by one site');
         expect(wrapper.get('[data-roles-scope]').text()).toContain('Roles & Permissions — current scope: Group / Global');
-        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(panel.text()).toContain('ກວດສອບຂອບເຂດກ່ອນແກ້ໄຂ');
         expect(panel.text()).toContain('ຂອບເຂດປັດຈຸບັນ');
         expect(panel.get('dl').text()).toContain('ບໍລິສັດ');
@@ -265,7 +266,7 @@ describe('scoped role administration', () => {
         expect(control(wrapper, 'Authorization scope').element.value).toBe('global');
         expect(wrapper.get('[data-roles-scope]').text()).toContain('Group / Global');
         expect(wrapper.find('input[name="role-code"]').exists()).toBe(false);
-        expect(document.activeElement).toBe(control(wrapper, 'Authorization scope').element);
+        expect(document.activeElement).toBe(control(wrapper, 'Authorization scope').element.nextElementSibling.querySelector('.select2-selection'));
         expect(fetch.mock.calls.some(([url]) => url.startsWith(endpoints.roles) && url.includes('scope_type=global'))).toBe(true);
         expect(fetch.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
     });
@@ -280,7 +281,7 @@ describe('scoped role administration', () => {
         expect(wrapper.findAll('button').some(item => item.text().startsWith('Switch to'))).toBe(false);
         expect(control(wrapper, 'Authorization scope').element.value).toBe('site:10');
         expect(fetch.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
-        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(wrapper.get('form').text()).toContain('ທ່ານບໍ່ມີສິດແກ້ໄຂ');
     });
 
@@ -337,7 +338,7 @@ describe('scoped role administration', () => {
         const fetch = server({ contexts: [siteScope], roles: [{ ...sampleRole, editable: false }] });
         const wrapper = await render();
         await button(wrapper, 'Details').trigger('click');
-        const editor = wrapper.get('form');
+        const editor = wrapper.get('[data-form-modal]');
         expect(editor.text()).toContain('Owned by: Group / Global');
         expect(editor.text()).toContain('Select that scope above');
         expect(editor.text()).not.toContain('Save changes');
@@ -350,7 +351,7 @@ describe('scoped role administration', () => {
         server({ catalog: [...permissionRows, { key: 'reports.view', area: 'reports', name_en: 'View reports', name_lo: 'ເບິ່ງລາຍງານ', available: true, delegatable: true }] });
         const wrapper = await render();
         await button(wrapper, 'Edit').trigger('click');
-        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(wrapper.get('[data-permission-group="reports"]').text()).toContain('ຄົ້ນຫາ ແລະ ລາຍງານ');
         expect(wrapper.get('[data-permission-advanced] summary').text()).toContain('ຂັ້ນສູງ');
         expect(wrapper.get('form').text()).toContain('ບັນທຶກການປ່ຽນແປງ');
@@ -375,7 +376,7 @@ describe('scoped role administration', () => {
 
         expect(wrapper.text()).toContain('System Administrator');
         expect(wrapper.text()).toContain('Confidential and Highly Confidential documents');
-        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(wrapper.text()).toContain('ຜູ້ບໍລິຫານລະບົບ');
     });
 
@@ -384,6 +385,7 @@ describe('scoped role administration', () => {
         server({ roles: [sampleRole, systemRole] });
         const wrapper = await render();
 
+        await wrapper.get('[data-open-assign]').trigger('click');
         await button(wrapper, 'Find eligible accounts and roles').trigger('click');
         await flushPromises();
 
@@ -442,7 +444,7 @@ describe('scoped role administration', () => {
         server();
         const wrapper = await render();
         await button(wrapper, 'Edit').trigger('click');
-        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
 
         expect(wrapper.text()).toContain('ບົດບາດ ແລະ ສິດ');
         expect(wrapper.text()).toContain('ບົດບາດຕົວຢ່າງ');
@@ -455,7 +457,7 @@ describe('scoped role administration', () => {
         const wrapper = await render();
 
         expect(wrapper.findAll('td').filter(cell => cell.text() === 'Inactive')).toHaveLength(2);
-        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(wrapper.findAll('td').filter(cell => cell.text() === 'ປິດການໃຊ້ງານ')).toHaveLength(2);
     });
 
@@ -472,7 +474,8 @@ describe('scoped role administration', () => {
         expect(options.headers['X-CSRF-TOKEN']).toBe('sample-csrf');
         expect(options.credentials).toBe('same-origin');
         expect(JSON.parse(options.body)).toMatchObject({ code: 'NEW_ROLE', name_lo: 'ບົດບາດໃໝ່', permission_keys: ['roles.view'], scope_type: 'global', company_id: null, site_id: null });
-        expect(wrapper.text()).toContain('Role configuration saved.');
+        await settle();
+        expect(swalText()).toContain('Role configuration saved.');
         expect(wrapper.text()).toContain('New Role');
     });
 
@@ -512,7 +515,7 @@ describe('scoped role administration', () => {
         expect(field.attributes('aria-invalid')).toBe('true');
         const errorId = field.attributes('aria-describedby');
         expect(document.getElementById(errorId).textContent).toBe('Check the supplied value and try again.');
-        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(document.getElementById(errorId).textContent).toBe('ກະລຸນາກວດສອບຄ່າທີ່ປ້ອນ ແລະ ລອງໃໝ່.');
     });
 
@@ -522,7 +525,7 @@ describe('scoped role administration', () => {
         await button(wrapper, 'Details').trigger('click');
         await flushPromises();
 
-        expect(document.activeElement).toBe(wrapper.get('form h3').element);
+        expect(document.activeElement).toBe(wrapper.get('[data-form-modal] [role="dialog"]').element);
         expect(wrapper.get('input[name="role-name-en"]').element.readOnly).toBe(true);
         expect(wrapper.get('input[value="roles.view"]').element.disabled).toBe(true);
         expect(wrapper.text()).not.toContain('Save changes');
@@ -550,22 +553,26 @@ describe('scoped role administration', () => {
     it('requires explicit scoped confirmation before assigning a role', async () => {
         const fetch = server();
         const wrapper = await render();
+        await wrapper.get('[data-open-assign]').trigger('click');
         await button(wrapper, 'Find eligible accounts and roles').trigger('click');
         await flushPromises();
         await control(wrapper, 'Account').setValue(2);
         await control(wrapper, 'Role').setValue(10);
-        await button(wrapper, 'Assign role').trigger('click');
+        await button(wrapper.get('[data-form-modal]'), 'Assign role').trigger('click');
         await flushPromises();
-        expect(wrapper.get('dialog').text()).toContain('Group / Global');
-        expect(wrapper.get('dialog').text()).toContain('Example Account (example@example.test)');
-        expect(wrapper.get('dialog').text()).toContain('Example Role (EXAMPLE_ROLE)');
+        await settle();
+        expect(swalText()).toContain('Group / Global');
+        await settle();
+        expect(swalText()).toContain('Example Account (example@example.test)');
+        expect(swalText()).toContain('Example Role (EXAMPLE_ROLE)');
         expect(fetch.mock.calls.some(([, options]) => options.method === 'POST')).toBe(false);
-        await button(wrapper.get('dialog'), 'Confirm').trigger('click');
+        await swalConfirm();
         await flushPromises();
 
         const [, options] = fetch.mock.calls.find(([url, options]) => url === endpoints.assignments && options.method === 'POST');
         expect(JSON.parse(options.body)).toMatchObject({ user_id: 2, role_id: 10, scope_type: 'global', confirm_global: true });
-        expect(wrapper.text()).toContain('Role assignment updated.');
+        await settle();
+        expect(swalText()).toContain('Role assignment updated.');
     });
 
     it('supports revocation confirmation and does not show a revoke control for protected rows', async () => {
@@ -574,18 +581,20 @@ describe('scoped role administration', () => {
         expect(wrapper.findAll('button').filter(item => item.text() === 'Revoke role')).toHaveLength(1);
         await button(wrapper, 'Revoke role').trigger('click');
         await flushPromises();
-        expect(wrapper.get('dialog').text()).toContain('Example Account (example@example.test)');
-        expect(wrapper.get('dialog').text()).toContain('Example Role (EXAMPLE_ROLE)');
-        await wrapper.get('dialog').trigger('cancel');
+        await settle();
+        expect(swalText()).toContain('Example Account (example@example.test)');
+        expect(swalText()).toContain('Example Role (EXAMPLE_ROLE)');
+        await swalCancel();
         await flushPromises();
         expect(fetch.mock.calls.some(([, options]) => options.method === 'DELETE')).toBe(false);
         await button(wrapper, 'Revoke role').trigger('click');
         await flushPromises();
-        await button(wrapper.get('dialog'), 'Confirm').trigger('click');
+        await swalConfirm();
         await flushPromises();
 
         expect(fetch.mock.calls.some(([url, options]) => url === `${endpoints.assignments}/20` && options.method === 'DELETE')).toBe(true);
-        expect(wrapper.text()).toContain('Role assignment updated.');
+        await settle();
+        expect(swalText()).toContain('Role assignment updated.');
     });
 
     it('removes stale mutation controls when the server revokes authority', async () => {
@@ -607,7 +616,7 @@ describe('scoped role administration', () => {
         await wrapper.get('form').trigger('submit');
         await flushPromises();
         expect(wrapper.get('[role="alert"]').text()).toContain('final active security administrator');
-        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(wrapper.get('[role="alert"]').text()).toContain('ຜູ້ບໍລິຫານ');
     });
 
@@ -616,10 +625,10 @@ describe('scoped role administration', () => {
         const wrapper = await render();
         await button(wrapper, 'Revoke role').trigger('click');
         await flushPromises();
-        await button(wrapper.get('dialog'), 'Confirm').trigger('click');
+        await swalConfirm();
         await flushPromises();
 
-        expect(wrapper.get('dialog').element.open).toBe(false);
+        expect(swalPopup()).toBeNull();
         expect(wrapper.get('[role="alert"]').text()).toContain('final active security administrator');
     });
 
@@ -627,6 +636,7 @@ describe('scoped role administration', () => {
         const companyScope = { ...globalScope, scope_key: 'company:7', scope_type: 'company', company_id: 7, company: { name_en: 'Example Company', name_lo: 'ບໍລິສັດຕົວຢ່າງ' }, permissions: ['roles.view'] };
         const fetch = server({ contexts: [globalScope, companyScope] });
         const wrapper = await render();
+        await wrapper.get('[data-open-assign]').trigger('click');
         await button(wrapper, 'Find eligible accounts and roles').trigger('click');
         await flushPromises();
         await newRole(wrapper);

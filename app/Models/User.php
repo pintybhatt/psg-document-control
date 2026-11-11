@@ -15,7 +15,7 @@ use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Str;
 
 #[Fillable(['name', 'email', 'password', 'preferred_language'])]
-#[Hidden(['password', 'remember_token', 'session_version'])]
+#[Hidden(['password', 'remember_token', 'session_version', 'profile_photo_path'])]
 class User extends Authenticatable
 {
     /** @use HasFactory<UserFactory> */
@@ -39,6 +39,13 @@ class User extends Authenticatable
     protected function email(): Attribute
     {
         return Attribute::make(set: fn (string $value): string => Str::lower(trim($value)));
+    }
+
+    /** Same-origin URL for the private photo; the file name changes on every upload, so it doubles as a cache key. */
+    public function profilePhotoUrl(): ?string
+    {
+        return $this->profile_photo_path === null ? null
+            : route('profile.photo.show', ['v' => pathinfo($this->profile_photo_path, PATHINFO_FILENAME)], false);
     }
 
     public function deactivate(): void

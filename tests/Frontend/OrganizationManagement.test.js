@@ -65,7 +65,7 @@ describe('Organization structure maintenance', () => {
         await wrapper.get('form').trigger('submit'); await flushPromises();
         const [, options] = fetch.mock.calls.find(([, options]) => options.method === 'PATCH');
         expect(JSON.parse(options.body)).toEqual({ name_en: 'Renamed company', name_lo: company.name_lo, active: true });
-        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(wrapper.text()).toContain('ໂຄງສ້າງອົງກອນ');
         expect(wrapper.text()).not.toContain('org-');
     });

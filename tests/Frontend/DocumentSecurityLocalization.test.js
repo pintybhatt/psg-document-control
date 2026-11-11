@@ -22,7 +22,7 @@ describe('document security terminology', () => {
         const wrapper = render(keys);
         expect(wrapper.findAll('p').filter((_, index) => index % 2 === 0).map(item => item.text())).toEqual(['Normal', 'Confidential', 'Highly Confidential']);
         expect(wrapper.text()).toContain('operation-specific document allowlist');
-        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(wrapper.findAll('p').filter((_, index) => index % 2 === 0).map(item => item.text())).toEqual(['ປົກກະຕິ', 'ລັບ', 'ລັບສູງ']);
         expect(wrapper.findAll('p').every(item => item.text().length > 0 && !item.text().startsWith('confidentiality-'))).toBe(true);
     });
@@ -32,7 +32,7 @@ describe('document security terminology', () => {
         const wrapper = render(keys);
         expect(wrapper.text()).toContain('Download attachments');
         expect(wrapper.text()).toContain('Expired clearance');
-        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(wrapper.text()).toContain('ດາວໂຫຼດໄຟລ໌ແນບ');
         expect(wrapper.text()).toContain('ການອະນຸຍາດຖືກຖອນ');
         expect(wrapper.text()).not.toContain('Download attachments');

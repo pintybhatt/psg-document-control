@@ -1,13 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { enableAutoUnmount, mount } from '@vue/test-utils';
+import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
+import Swal from 'sweetalert2';
 import App from '../../resources/js/App.vue';
 import LoginPage from '../../resources/js/pages/LoginPage.vue';
 import LogoutButton from '../../resources/js/components/LogoutButton.vue';
 import { createLocalization } from '../../resources/js/localization/index.js';
 
+vi.mock('sweetalert2', () => ({ default: { fire: vi.fn(() => Promise.resolve({ isConfirmed: true })) } }));
+
 enableAutoUnmount(afterEach);
 afterEach(() => document.body.replaceChildren());
-beforeEach(() => localStorage.clear());
+beforeEach(() => {
+    localStorage.clear();
+    Swal.fire.mockClear();
+});
 
 const auth = { loginUrl: '/login', logoutUrl: '/logout', csrfToken: 'sample-csrf-token', email: '', errors: {} };
 
@@ -45,7 +51,7 @@ describe('bilingual browser login', () => {
         expect(event.defaultPrevented).toBe(true);
         expect(wrapper.findAll('[role="alert"]').map(error => error.text())).toEqual(['Enter your email address.', 'Enter your password.']);
         expect(document.activeElement).toBe(wrapper.get('input[name="email"]').element);
-        await wrapper.get('select').setValue('lo');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(wrapper.get('[role="alert"]').text()).toBe('ກະລຸນາປ້ອນທີ່ຢູ່ອີເມວ.');
         expect(wrapper.get('input[name="language"]').element.value).toBe('lo');
         expect(wrapper.get('button[type="submit"]').text()).toBe('ເຂົ້າສູ່ລະບົບ');
@@ -70,21 +76,38 @@ describe('bilingual browser login', () => {
         expect(Object.values(localStorage)).not.toContain('Test-only secret 123');
     });
 
-    it.each(['authInvalidCredentials', 'authThrottled'])('translates the server error %s without prepopulating a password', async (errorKey) => {
+    it.each([
+        ['authInvalidCredentials', 'error', 'Unable to sign in with these credentials.'],
+        ['authThrottled', 'warning', 'Too many sign-in attempts. Please wait a minute and try again.'],
+    ])('shows the server error %s in a SweetAlert dialog without prepopulating a password', async (errorKey, icon, text) => {
         const wrapper = renderLogin({ email: 'example@example.test', errors: { email: errorKey } });
+        await flushPromises();
+
+        expect(Swal.fire).toHaveBeenCalledOnce();
+        expect(Swal.fire).toHaveBeenCalledWith(expect.objectContaining({ icon, title: 'Sign-in failed', text, confirmButtonText: 'Try again' }));
+        expect(wrapper.findAll('[role="alert"]')).toHaveLength(0);
         expect(wrapper.get('input[name="email"]').element.value).toBe('example@example.test');
         expect(wrapper.get('input[name="password"]').element.value).toBe('');
-        const englishError = wrapper.get('[role="alert"]').text();
+        expect(document.activeElement).toBe(wrapper.get('input[name="password"]').element);
+    });
 
-        await wrapper.get('select').setValue('lo');
+    it('shows the SweetAlert dialog in the selected language', async () => {
+        renderLogin({ errors: { email: 'authInvalidCredentials' } }, 'lo');
+        await flushPromises();
 
-        expect(wrapper.get('[role="alert"]').text()).not.toBe(englishError);
-        expect(wrapper.get('[role="alert"]').text()).not.toBe(errorKey);
+        expect(Swal.fire).toHaveBeenCalledWith(expect.objectContaining({ title: 'ເຂົ້າສູ່ລະບົບບໍ່ສຳເລັດ', text: 'ບໍ່ສາມາດເຂົ້າສູ່ລະບົບດ້ວຍຂໍ້ມູນນີ້ໄດ້.' }));
+    });
+
+    it('does not open a SweetAlert dialog without a server error', async () => {
+        renderLogin();
+        await flushPromises();
+
+        expect(Swal.fire).not.toHaveBeenCalled();
     });
 
     it('preserves Lao through remounts and passes it through the logout form', async () => {
         const login = renderLogin();
-        await login.get('select').setValue('lo');
+        await login.get('[data-language-switcher] input[value="lo"]').setValue(true);
         login.unmount();
 
         const logout = mount(LogoutButton, {
@@ -98,7 +121,7 @@ describe('bilingual browser login', () => {
         logout.unmount();
 
         const refreshed = renderLogin();
-        expect(refreshed.get('select').element.value).toBe('lo');
+        expect(refreshed.get('[data-language-switcher] input:checked').element.value).toBe('lo');
         expect(localStorage.getItem('dcms.language')).toBe('lo');
     });
 
@@ -106,7 +129,7 @@ describe('bilingual browser login', () => {
         vi.spyOn(Storage.prototype, 'getItem').mockImplementation(() => { throw new Error('Storage blocked'); });
         const wrapper = renderLogin({}, 'lo');
 
-        expect(wrapper.get('select').element.value).toBe('lo');
+        expect(wrapper.get('[data-language-switcher] input:checked').element.value).toBe('lo');
         expect(document.documentElement.lang).toBe('lo');
     });
 

@@ -191,7 +191,7 @@ describe('toast notifications', () => {
 
         expect(wrapper.findAll('article').map(item => item.attributes('role'))).toEqual(['status', 'alert', 'alert', 'status']);
         expect(wrapper.findAll('article').map(item => item.get('p').text())).toEqual(['Success', 'Warning', 'Error', 'Information']);
-        await wrapper.get('select').setValue('lo');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(wrapper.get('article').text()).toContain('ສຳເລັດ');
         expect(wrapper.get('article').text()).toContain('ນີ້ແມ່ນການແຈ້ງເຕືອນຕົວຢ່າງ.');
         expect(wrapper.get('article button').attributes('aria-label')).toBe('ປິດການແຈ້ງເຕືອນ');
@@ -251,7 +251,7 @@ describe('development preview', () => {
         await wrapper.get('form').trigger('submit');
         expect(wrapper.findAll('form [role="alert"]')).toHaveLength(3);
         expect(document.activeElement).toBe(wrapper.get('input[name="sample-title"]').element);
-        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(wrapper.get('form [role="alert"]').text()).toBe('ກະລຸນາປ້ອນຂໍ້ມູນໃນຊ່ອງນີ້.');
         await wrapper.get('input[name="sample-title"]').setValue('Fictional title');
         await wrapper.get('select[name="sample-category"]').setValue('sample');

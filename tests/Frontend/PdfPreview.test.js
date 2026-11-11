@@ -43,7 +43,7 @@ it('previews PDF in the dialog with paging, zoom, direct download and translated
     await buttons().find(item => item.text() === 'Download PDF').trigger('click');
     expect(download).toHaveBeenCalledOnce();
     expect(fetch).toHaveBeenCalledOnce();
-    await wrapper.get('select[aria-label="Language"]').setValue('lo');
+    await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
     expect(wrapper.text()).toContain(lo.reportDownloadPdf); expect(wrapper.text()).toContain(lo.reportZoom);
     await wrapper.get('dialog').trigger('cancel'); await flushPromises();
     expect(wrapper.get('dialog').element.open).toBe(false);

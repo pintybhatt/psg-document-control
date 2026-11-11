@@ -4,11 +4,14 @@ import { useLocalization } from '../localization/index.js';
 import { createJsonClient } from '../utilities/jsonClient.js';
 import { formatDateTime } from '../utilities/dates.js';
 import UiButton from './ui/UiButton.vue';
+import IconButton from './ui/IconButton.vue';
 import CheckboxInput from './ui/CheckboxInput.vue';
 import SelectInput from './ui/SelectInput.vue';
 import TextareaInput from './ui/TextareaInput.vue';
 import DataTable from './ui/DataTable.vue';
-import ConfirmDialog from './ui/ConfirmDialog.vue';
+import ConfirmDialog from './ui/SweetConfirmDialog.vue';
+import FormModal from './ui/FormModal.vue';
+import { showSuccess } from '../utilities/alerts.js';
 
 const props = defineProps({ scope: { type: Object, required: true }, endpoint: { type: String, required: true }, csrfToken: { type: String, required: true } });
 const emit = defineEmits(['unauthorized']);
@@ -59,7 +62,7 @@ async function save() {
     const signal = controller.signal; busy.value = true; error.value = ''; saved.value = false;
     try {
         await request(`${props.endpoint}/${editor.value.register_key}`, { method: 'POST', signal, body: { ...scopeData(), expected_version: editor.value.version, enabled: form.enabled, sequence: 'sequential', role_ids: form.role_ids.slice(0, Number(form.count)).map(Number), change_reason: form.change_reason } });
-        if (!signal.aborted) { editor.value = null; confirming.value = false; history.value = []; historyRegister.value = ''; await load(signal); if (!signal.aborted) { saved.value = true; } }
+        if (!signal.aborted) { editor.value = null; confirming.value = false; history.value = []; historyRegister.value = ''; await load(signal); if (!signal.aborted) { saved.value = true; showSuccess(t('uiSaveSuccess'), t('workflowSaved')); } }
     } catch (failure) { if (!signal.aborted) { confirming.value = false; fail(failure); } }
     finally { if (!signal.aborted) { busy.value = false; } }
 }
@@ -80,27 +83,31 @@ onBeforeUnmount(() => controller?.abort());
     <section class="flex flex-col gap-4" aria-labelledby="workflow-title" :aria-busy="busy">
         <h3 id="workflow-title" class="font-semibold">{{ t('workflowTitle') }}</h3>
         <p class="rounded-lg bg-amber-50 p-4 text-sm text-amber-900">{{ t('workflowNotice') }}</p>
-        <p v-if="error" role="alert">{{ t(error) }}</p>
-        <p v-if="saved" role="status">{{ t('workflowSaved') }}</p>
+        <p v-if="error && !editor" role="alert" class="rounded-lg bg-red-50 p-3 text-sm text-red-800">{{ t(error) }}</p>
         <div class="grid gap-4 lg:grid-cols-3">
             <section v-for="row in rows" :key="row.register_key" class="flex flex-col gap-3 rounded-xl border border-slate-200 p-4">
                 <h4 class="font-semibold">{{ registerLabel(row.register_key) }}</h4>
                 <p>{{ t(row.enabled ? 'workflowEnabled' : 'workflowDisabled') }} · {{ t('workflowVersion') }} {{ row.version }} · {{ t('workflowSequential') }}</p>
                 <ol class="flex flex-col gap-2"><li v-for="item in row.levels" :key="item.level">{{ t('workflowLevel') }} {{ item.level }}: {{ label(item.role) }} ({{ item.role.code }})</li></ol>
-                <div class="flex flex-wrap gap-2"><UiButton v-if="canManage" variant="secondary" :disabled="busy" @click="edit(row)">{{ t('rbacEdit') }}</UiButton><UiButton variant="secondary" :disabled="busy" @click="loadHistory(row.register_key)">{{ t('workflowHistory') }}</UiButton></div>
+                <div class="flex flex-wrap gap-2"><IconButton v-if="canManage" action="edit" :label="t('rbacEdit')" :disabled="busy" @click="edit(row)" /><UiButton variant="secondary" :disabled="busy" @click="loadHistory(row.register_key)">{{ t('workflowHistory') }}</UiButton></div>
             </section>
         </div>
-        <form v-if="editor && canManage" class="flex flex-col gap-4 rounded-xl border border-slate-200 p-4" @submit.prevent="confirming = true">
-            <h4 class="font-semibold">{{ registerLabel(editor.register_key) }}</h4>
-            <fieldset :disabled="busy" class="grid gap-4 sm:grid-cols-2">
-                <CheckboxInput id="workflow-enabled" v-model="form.enabled" :label="t('workflowEnabled')" />
-                <SelectInput id="workflow-count" v-model="form.count" :label="t('workflowLevels')" :options="countOptions" />
-                <SelectInput v-for="index in Number(form.count)" :id="`workflow-role-${index}`" :key="index" v-model="form.role_ids[index - 1]" :label="`${t('workflowLevel')} ${index}`" :options="roleOptions" required />
+        <FormModal v-if="editor && canManage" :title="`${t('rbacEdit')} · ${registerLabel(editor.register_key)}`" :subtitle="t('workflowRoleHelp')" :busy="busy" @close="editor = null">
+        <form class="flex flex-col gap-4" @submit.prevent="confirming = true">
+            <p v-if="error" role="alert" class="rounded-lg bg-red-50 p-3 text-sm text-red-800">{{ t(error) }}</p>
+            <fieldset :disabled="busy" class="flex flex-col gap-5">
+                <div class="grid grid-cols-1 items-end gap-4 sm:grid-cols-2">
+                    <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5"><CheckboxInput id="workflow-enabled" v-model="form.enabled" :label="t('workflowEnabled')" /></div>
+                    <SelectInput id="workflow-count" v-model="form.count" :label="t('workflowLevels')" :options="countOptions" />
+                </div>
+                <div v-if="Number(form.count)" class="grid grid-cols-1 gap-4 rounded-xl border border-slate-200 p-4 sm:grid-cols-3">
+                    <SelectInput v-for="index in Number(form.count)" :id="`workflow-role-${index}`" :key="index" v-model="form.role_ids[index - 1]" :label="`${t('workflowLevel')} ${index}`" :options="roleOptions" required />
+                </div>
                 <TextareaInput id="workflow-reason" v-model="form.change_reason" :label="t('controlledReason')" maxlength="500" required />
             </fieldset>
-            <p class="text-sm text-slate-600">{{ t('workflowRoleHelp') }}</p>
-            <div class="flex gap-2"><UiButton type="submit" :disabled="busy">{{ t('uiConfirm') }}</UiButton><UiButton variant="secondary" :disabled="busy" @click="editor = null">{{ t('uiCancel') }}</UiButton></div>
+            <div class="flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4"><UiButton variant="secondary" :disabled="busy" @click="editor = null">{{ t('uiCancel') }}</UiButton><UiButton type="submit" :disabled="busy">{{ t('uiConfirm') }}</UiButton></div>
         </form>
+        </FormModal>
         <section v-if="historyRegister" class="flex flex-col gap-3">
             <h4 class="font-semibold">{{ t('workflowHistory') }} · {{ registerLabel(historyRegister) }}</h4>
             <DataTable v-model:page="page" :rows="historyRows" :columns="columns" :caption="t('workflowHistory')" :loading="busy" server-side :total="total" :per-page="10" @change="loadHistory()" />

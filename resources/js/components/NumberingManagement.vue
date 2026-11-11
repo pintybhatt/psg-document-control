@@ -1,13 +1,14 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue';
 import UiButton from './ui/UiButton.vue';
+import IconButton from './ui/IconButton.vue';
 import TextInput from './ui/TextInput.vue';
 import SelectInput from './ui/SelectInput.vue';
 import CheckboxInput from './ui/CheckboxInput.vue';
 import DataTable from './ui/DataTable.vue';
-import ConfirmDialog from './ui/ConfirmDialog.vue';
-import ToastNotifications from './ui/ToastNotifications.vue';
-import { useNotifications } from './ui/useNotifications.js';
+import ConfirmDialog from './ui/SweetConfirmDialog.vue';
+import FormModal from './ui/FormModal.vue';
+import { showSuccess } from '../utilities/alerts.js';
 import { useLocalization } from '../localization/index.js';
 import { formatDateTime } from '../utilities/dates.js';
 import { createJsonClient } from '../utilities/jsonClient.js';
@@ -16,7 +17,6 @@ const props = defineProps({ scope: { type: Object, required: true }, endpoint: {
 const emit = defineEmits(['unauthorized']);
 const { t, language } = useLocalization();
 const request = createJsonClient(props.csrfToken);
-const { items, notify, dismiss } = useNotifications();
 const rows = ref([]);
 const registers = ref([]);
 const page = ref(1);
@@ -75,8 +75,8 @@ async function reviewXppl(confirm = false) {
     if (xpplKind.value === 'xppl_controlled') { delete body.series_id; }
     if (confirm) { Object.assign(body, { token: reconciliation.value.token, next_sequence: reconciliation.value.next_sequence, confirm: true }); }
     try {
-        const result = await request(`${props.endpoint}/xppl/${confirm ? 'confirm' : 'review'}`, { method: 'POST', signal, body });
-        if (!signal.aborted) { reconciliation.value = result; if (confirm) { await loadXppl(); } }
+        const result = await request(`${props.endpoint}/xppl/${confirm ? 'confirm' : 'review'}`, { method: 'POST', busy: confirm, signal, body });
+        if (!signal.aborted) { reconciliation.value = result; if (confirm) { showSuccess(t('uiSaveSuccess'), t('numberingSaved')); await loadXppl(); } }
     } catch (error) { if (!signal.aborted) { reconciliation.value = null; fail(error); } }
     finally { if (!signal.aborted) { xpplBusy.value = false; } }
 }
@@ -157,7 +157,7 @@ async function showPreview(savedSeries = false) {
     const signal = previewController.signal;
     previewLoading.value = true; preview.value = ''; errorKey.value = ''; fields.value = {};
     try {
-        const result = await request(`${props.endpoint}/preview`, { method: 'POST', signal, body: savedSeries ? { ...scopeData(), series_id: editor.value.id } : { ...scopeData(), prefix: form.prefix, padding: Number(form.padding), year: Number(form.year), reset_policy: form.reset_policy, ...(form.custom_format ? { format: formatData() } : {}) } });
+        const result = await request(`${props.endpoint}/preview`, { method: 'POST', busy: false, signal, body: savedSeries ? { ...scopeData(), series_id: editor.value.id } : { ...scopeData(), prefix: form.prefix, padding: Number(form.padding), year: Number(form.year), reset_policy: form.reset_policy, ...(form.custom_format ? { format: formatData() } : {}) } });
         if (!signal.aborted) { preview.value = result.number; }
     } catch (error) { if (!signal.aborted) { fail(error); } }
     finally { if (!signal.aborted) { previewLoading.value = false; } }
@@ -173,7 +173,7 @@ async function save() {
         await request(`${props.endpoint}${id ? `/${id}` : ''}`, { method: id ? 'PATCH' : 'POST', body });
         if (originalScope !== props.scope.scope_key) { return; }
         editor.value = null; preview.value = ''; confirmationOpen.value = false; historySeries.value = null; history.value = [];
-        notify({ type: 'success', messageKey: 'numberingSaved' }); await load();
+        showSuccess(t('uiSaveSuccess'), t('numberingSaved')); await load();
     } catch (error) {
         if (originalScope === props.scope.scope_key) { confirmationOpen.value = false; fail(error); await nextTick(); editorElement.value?.querySelector('[aria-invalid="true"]')?.focus(); }
     } finally { saving.value = false; }
@@ -205,7 +205,7 @@ onBeforeUnmount(() => { controller?.abort(); previewController?.abort(); history
             <div class="flex flex-col gap-2"><dt class="text-sm font-semibold">{{ t('numberingFormat-xppl_letter') }}</dt><dd class="wrap-anywhere font-mono text-sm">COMP-DEPT-LTR-YY-0001</dd><dd class="text-sm text-slate-600">{{ t('numberingLetterHelp') }}</dd></div>
         </dl>
         <p class="text-xs leading-6 text-slate-500">{{ t('numberingCodesHelp') }}</p>
-        <p v-if="errorKey" role="alert" class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">{{ t(errorKey) }}</p>
+        <p v-if="errorKey && !editor" role="alert" class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">{{ t(errorKey) }}</p>
         <section v-if="!revoked && scope.scope_type === 'company' && xpplOptions.policy_available" class="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-5" aria-labelledby="xppl-policy-title">
             <h4 id="xppl-policy-title" class="font-semibold">{{ t('numberingAdvanced') }}</h4>
             <p role="status">{{ t('numberingPolicyStatus') }}: {{ t(xpplOptions.policy ? 'rbacActive' : 'rbacInactive') }}</p>
@@ -261,19 +261,21 @@ onBeforeUnmount(() => { controller?.abort(); previewController?.abort(); history
                 <div v-if="canManage"><UiButton :disabled="loading || saving" @click="edit()">{{ t('numberingCreate') }}</UiButton></div>
             <DataTable v-model:page="page" :rows="displayRows" :columns="columns" :caption="t('numberingTitle')" :loading="loading" server-side :total="total" :per-page="10" @change="load">
                 <template #cell-format_definition="{ row }"><pre class="whitespace-pre-wrap wrap-anywhere font-mono text-xs">{{ row.format_definition }}</pre></template>
-                <template #cell-actions="{ row }"><div class="flex flex-wrap gap-2"><UiButton variant="secondary" :disabled="saving" @click="edit(row)">{{ t(canManage ? 'rbacEdit' : 'rbacDetails') }}</UiButton><UiButton variant="secondary" :disabled="saving" @click="loadHistory(row)">{{ t('numberingHistory') }}</UiButton></div></template>
+                <template #cell-actions="{ row }"><div class="flex flex-wrap gap-2"><IconButton :action="canManage ? 'edit' : 'view'" :label="t(canManage ? 'rbacEdit' : 'rbacDetails')" :disabled="saving" @click="edit(row)" /><UiButton variant="secondary" :disabled="saving" @click="loadHistory(row)">{{ t('numberingHistory') }}</UiButton></div></template>
             </DataTable>
-            <form v-if="editor" ref="editorElement" novalidate class="flex flex-col gap-5 rounded-xl border border-slate-200 bg-white p-6" @submit.prevent="confirmationOpen = canManage">
-                <h4 tabindex="-1" class="font-semibold">{{ t(editor.id ? 'numberingEdit' : 'numberingCreate') }}</h4>
-                <p class="text-xs leading-6 text-slate-500">{{ t('numberingIdentityHelp') }}</p>
-                <div class="grid gap-5 sm:grid-cols-2">
-                    <SelectInput v-model="form.register_id" :label="t('masterRegister')" :options="options" :disabled="!!editor.id || !canManage || saving" :error-key="fields.register_id?.[0]" required />
+            <FormModal v-if="editor" :title="t(editor.id ? 'numberingEdit' : 'numberingCreate')" :subtitle="t('numberingIdentityHelp')" :busy="saving" @close="editor = null">
+            <form ref="editorElement" novalidate class="flex flex-col gap-5" @submit.prevent="confirmationOpen = canManage">
+                <p v-if="errorKey" role="alert" class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">{{ t(errorKey) }}</p>
+                <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                    <div class="sm:col-span-2"><SelectInput v-model="form.register_id" :label="t('masterRegister')" :options="options" :disabled="!!editor.id || !canManage || saving" :error-key="fields.register_id?.[0]" required /></div>
                     <SelectInput v-model="form.purpose" :label="t('numberingPurpose')" :options="purposes" :disabled="!!editor.id || !canManage || saving" :error-key="fields.purpose?.[0]" required />
                     <SelectInput v-model="form.reset_policy" :label="t('numberingPolicy')" :options="policies" :disabled="!!editor.id || !canManage || saving" :error-key="fields.reset_policy?.[0]" required />
-                    <TextInput v-model="form.prefix" :label="t('numberingPrefix')" :helper="t('numberingPrefixHelp')" :readonly="!canManage || saving" :error-key="fields.prefix?.[0]" maxlength="80" required />
-                    <TextInput v-model="form.padding" type="number" :label="t('numberingPadding')" :readonly="!canManage || saving" :error-key="fields.padding?.[0]" min="1" max="12" required />
-                    <CheckboxInput v-model="form.active" :label="t('rbacActive')" :disabled="!canManage || saving" />
-                    <TextInput v-model="form.change_reason" :label="t('numberingReason')" :readonly="!canManage || saving" :error-key="fields.change_reason?.[0]" maxlength="500" />
+                    <div class="grid grid-cols-1 gap-5 sm:col-span-2 sm:grid-cols-3">
+                        <div class="sm:col-span-2"><TextInput v-model="form.prefix" :label="t('numberingPrefix')" :helper="t('numberingPrefixHelp')" :readonly="!canManage || saving" :error-key="fields.prefix?.[0]" maxlength="80" required /></div>
+                        <TextInput v-model="form.padding" type="number" :label="t('numberingPadding')" :readonly="!canManage || saving" :error-key="fields.padding?.[0]" min="1" max="12" required />
+                    </div>
+                    <div class="sm:col-span-2"><TextInput v-model="form.change_reason" :label="t('numberingReason')" :readonly="!canManage || saving" :error-key="fields.change_reason?.[0]" maxlength="500" /></div>
+                    <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 sm:col-span-2"><CheckboxInput v-model="form.active" :label="t('rbacActive')" :disabled="!canManage || saving" /></div>
                 </div>
                 <fieldset :disabled="!canManage || saving" class="flex flex-col gap-4 rounded-xl border border-slate-200 p-4">
                     <legend class="px-2 font-semibold">{{ t('numberingFormatDefinition') }}</legend>
@@ -281,17 +283,19 @@ onBeforeUnmount(() => { controller?.abort(); previewController?.abort(); history
                     <p class="text-sm text-slate-600">{{ t(form.custom_format ? 'numberingFormatHelp' : 'numberingLegacyFormat') }}</p>
                     <template v-if="form.custom_format">
                         <TextInput v-model="form.pattern" :label="t('numberingFormatPattern')" :error-key="fields['format.pattern']?.[0] || fields.format?.[0]" maxlength="256" required />
-                        <div class="grid gap-4 sm:grid-cols-3"><TextInput v-for="code in ['company', 'department', 'document_type']" :key="code" v-model="form[code]" :label="t(`numberingComponent-${code}`)" :error-key="fields[`format.${code}`]?.[0]" maxlength="32" /></div>
+                        <div class="grid grid-cols-1 gap-4 sm:grid-cols-3"><TextInput v-for="code in ['company', 'department', 'document_type']" :key="code" v-model="form[code]" :label="t(`numberingComponent-${code}`)" :error-key="fields[`format.${code}`]?.[0]" maxlength="32" /></div>
                     </template>
                 </fieldset>
-                <div class="flex flex-wrap items-end gap-3"><TextInput v-model="form.year" type="number" :label="t('numberingPreviewYear')" :error-key="fields.year?.[0]" min="2000" max="9999" /><UiButton variant="secondary" :loading="previewLoading" :disabled="saving" @click="showPreview()">{{ t('numberingPreview') }}</UiButton><UiButton v-if="editor.id" variant="secondary" :loading="previewLoading" :disabled="saving" @click="showPreview(true)">{{ t('numberingNextPreview') }}</UiButton></div>
-                <p v-if="preview" role="status" class="wrap-anywhere font-mono text-sm">{{ preview }}</p>
-                <div class="flex flex-wrap gap-3"><UiButton v-if="canManage" type="submit" :disabled="saving">{{ t('numberingSave') }}</UiButton><UiButton variant="secondary" :disabled="saving" @click="editor = null">{{ t('uiCancel') }}</UiButton></div>
+                <div class="flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <div class="grid grid-cols-1 items-end gap-3 sm:grid-cols-[minmax(0,10rem)_auto_auto] sm:justify-start"><TextInput v-model="form.year" type="number" :label="t('numberingPreviewYear')" :error-key="fields.year?.[0]" min="2000" max="9999" /><UiButton variant="secondary" :loading="previewLoading" :disabled="saving" @click="showPreview()">{{ t('numberingPreview') }}</UiButton><UiButton v-if="editor.id" variant="secondary" :loading="previewLoading" :disabled="saving" @click="showPreview(true)">{{ t('numberingNextPreview') }}</UiButton></div>
+                    <p v-if="preview" role="status" class="rounded-lg bg-white px-3 py-2 font-mono text-sm wrap-anywhere ring-1 ring-slate-200">{{ preview }}</p>
+                </div>
+                <div class="flex flex-wrap justify-end gap-3 border-t border-slate-200 pt-4"><UiButton variant="secondary" :disabled="saving" @click="editor = null">{{ t('uiCancel') }}</UiButton><UiButton v-if="canManage" type="submit" :disabled="saving">{{ t('numberingSave') }}</UiButton></div>
             </form>
+            </FormModal>
             <section v-if="historySeries" class="flex flex-col gap-3" aria-labelledby="numbering-history"><h4 id="numbering-history" class="font-semibold">{{ t('numberingHistory') }} · {{ historySeries.configuration?.prefix }}</h4><DataTable v-model:page="historyPage" :rows="historyRows" :columns="historyColumns" :caption="t('numberingHistory')" :loading="historyLoading" server-side :total="historyTotal" :per-page="10" @change="loadHistory()"><template #cell-format_definition="{ row }"><pre class="whitespace-pre-wrap wrap-anywhere font-mono text-xs">{{ row.format_definition }}</pre></template></DataTable></section>
             </div>
         </details>
         <ConfirmDialog v-model="confirmationOpen" :title="t('numberingSave')" :message="t('numberingSaveConfirm')" :loading="saving" @confirm="save" />
-        <ToastNotifications :items="items" @dismiss="dismiss" />
     </section>
 </template>
