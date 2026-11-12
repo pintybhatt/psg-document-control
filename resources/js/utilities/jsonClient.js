@@ -1,4 +1,14 @@
+import { trackBusy } from './busy.js';
+
 export function createJsonClient(csrfToken) {
+    const send = createRequest(csrfToken);
+
+    // Data-changing requests are tracked so a mounted BusyOverlay can show a loading spinner.
+    // Read-only POSTs (previews) pass `busy: false`.
+    return (url, options = {}) => (options.method ?? 'GET') === 'GET' || options.busy === false ? send(url, options) : trackBusy(() => send(url, options));
+}
+
+function createRequest(csrfToken) {
     return async (url, { method = 'GET', body, signal, responseType = 'json' } = {}) => {
         const multipart = body instanceof FormData;
         const response = await fetch(url, {

@@ -7,6 +7,7 @@ import { formatDate, formatDateTime } from '../utilities/dates.js';
 import StatusBadge from './ui/StatusBadge.vue';
 import PdfPreviewDialog from './ui/PdfPreviewDialog.vue';
 import UiButton from './ui/UiButton.vue';
+import ExportActions from './ui/ExportActions.vue';
 import OutgoingDispatch from './OutgoingDispatch.vue';
 import TextInput from './ui/TextInput.vue';
 import TextareaInput from './ui/TextareaInput.vue';
@@ -197,7 +198,7 @@ onBeforeUnmount(() => controller?.abort());
         <UiButton v-if="editing || detail" variant="secondary" class="self-start" :disabled="saving" @click="backToList">{{ t('backToRegister') }} · {{ t('outgoingTitle') }}</UiButton>
         <p v-if="error" role="alert" class="rounded-xl bg-red-50 p-4 text-red-800">{{ t(error) }}</p>
         <form v-if="!editing && !detail" class="flex flex-wrap items-end gap-3" @submit.prevent="page = 1; load()"><TextInput id="outgoing-search" v-model="search" :label="t('outgoingSearch')" maxlength="200" class="grow" /><UiButton type="submit" variant="secondary" :disabled="loading">{{ t('incomingApplyFilters') }}</UiButton></form>
-        <div v-if="!editing && !detail" class="flex flex-wrap gap-2"><a :href="reportUrl('xlsx')" class="inline-flex min-h-10 items-center rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100">{{ t('reportDownloadXlsx') }}</a><UiButton variant="secondary" :disabled="loading || saving" @click="preview()">{{ t('reportPreviewPdf') }}</UiButton></div>
+        <ExportActions v-if="!editing && !detail" :excel-href="reportUrl('xlsx')" :disabled="loading || saving" @preview="preview()" />
         <DataTable v-if="!editing && !detail" v-model:page="page" :error="listError" :rows="displayRows" :columns="columns" :caption="t('outgoingTitle')" :loading="loading" server-side :total="total" :per-page="10" @change="load()">
             <template #cell-subject="{ row }"><button type="button" class="text-left font-semibold text-teal-800 hover:underline disabled:opacity-50" :disabled="saving || loading" @click="show(row)">{{ row.subject }}</button><span class="mt-1 block max-w-64 font-mono text-xs wrap-anywhere text-slate-500">{{ row.internal_number }}<span v-if="row.official_number !== '—'" class="block">{{ row.official_number }}</span></span></template>
             <template #cell-status_label="{ row }"><StatusBadge :status="row.operations?.status ?? row.status" :label="row.status_label" /></template>

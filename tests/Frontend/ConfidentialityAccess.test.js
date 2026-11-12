@@ -4,6 +4,7 @@ import ConfidentialityAccess from '../../resources/js/components/Confidentiality
 import AdministrationPage from '../../resources/js/pages/AdministrationPage.vue';
 import LanguageSwitcher from '../../resources/js/components/LanguageSwitcher.vue';
 import { createLocalization } from '../../resources/js/localization/index.js';
+import { settle, swalConfirm, swalText } from './swal.js';
 
 const scope = { scope_key: 'site:7', scope_type: 'site', company_id: 4, site_id: 7, company: { name_en: 'Example Company' }, site: { name_en: 'Example Site' }, permissions: [], can_manage_document_security: true };
 const permissions = ['clearances.confidential.manage', 'clearances.highly-confidential.manage', 'document-access.manage'];
@@ -98,7 +99,8 @@ describe('confidentiality administration', () => {
         expect(url).toContain('/clearances?');
         expect(JSON.parse(options.body)).toEqual({ company_id: 4, site_id: 7, department_id: null, user_id: 9, expires_at: '2027-01-02T03:30:00.000Z', classification: 'highly_confidential' });
         expect(options.headers['X-CSRF-TOKEN']).toBe('sample-csrf');
-        expect(wrapper.text()).toContain('Access granted and recorded');
+        await settle();
+        expect(swalText()).toContain('Access granted and recorded');
     });
 
     it('requires confirmation to revoke and preserves historical statuses', async () => {
@@ -108,13 +110,14 @@ describe('confidentiality administration', () => {
         expect(wrapper.text()).toContain('Revoked');
         expect(wrapper.text()).toContain('01/01/2027, 07:00');
         await button(wrapper, 'Revoke access').trigger('click'); await flushPromises();
-        expect(wrapper.get('dialog').attributes('open')).toBeDefined();
-        expect(wrapper.get('dialog').text()).toContain('Example User');
+        await settle();
+        expect(swalText()).toContain('Example User');
         expect(mutations(fetch)).toHaveLength(0);
-        await button(wrapper.get('dialog'), 'Confirm').trigger('click'); await flushPromises();
+        await swalConfirm(); await flushPromises();
         expect(mutations(fetch)).toHaveLength(1);
         expect(mutations(fetch)[0][1].method).toBe('DELETE');
-        expect(wrapper.text()).toContain('Access revoked. History is preserved.');
+        await settle();
+        expect(swalText()).toContain('Access revoked. History is preserved.');
     });
 
     it('hides unauthorized functions and only offers permitted clearance classifications', async () => {
@@ -177,7 +180,7 @@ describe('confidentiality administration', () => {
     it('translates controls, scope and statuses into Lao', async () => {
         server({ contexts: [departmentContext] });
         const wrapper = await render();
-        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(wrapper.text()).toContain('ຄວາມລັບ ແລະ ການເຂົ້າເຖິງ');
         expect(wrapper.text()).toContain('ພະແນກຕົວຢ່າງ');
         expect(wrapper.text()).toContain('ໃຫ້ສິດຂໍ້ມູນລັບ');

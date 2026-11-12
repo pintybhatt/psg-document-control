@@ -11,7 +11,8 @@ const paths = {
     reports: 'M4 3v18h17 M8 16v-5 M13 16V6 M18 16v-8',
     administration: 'M3 6h18 M3 12h18 M3 18h18 M8 3v6 M16 9v6 M10 15v6',
     organization: 'M4 21V3h12v18 M16 10h4v11 M8 7h4 M8 11h4 M8 15h4 M2 21h20',
-    arrow: 'M5 12h14 M14 7l5 5-5 5',
+    profile: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8z M4 21a8 8 0 0 1 16 0',
+    arrow:'M5 12h14 M14 7l5 5-5 5',
     menu: 'M4 6h16 M4 12h16 M4 18h16',
     close: 'M6 6l12 12 M6 18 18 6',
 };

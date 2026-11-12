@@ -1,11 +1,14 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="{{ in_array($language = session('language', auth()->user()?->preferred_language ?? 'en'), ['en', 'lo'], true) ? $language : 'en' }}">
     <head>
         <meta charset="utf-8">
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <meta name="color-scheme" content="light">
         <title>DCMS · Phonesack Group</title>
-        @fonts
+        <link rel="preconnect" href="https://fonts.googleapis.com">
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,100..900;1,100..900&display=swap" rel="stylesheet">
+        <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Lao+Looped:wght@100..900&display=swap" rel="stylesheet">
         @vite(['resources/css/app.css', 'resources/js/app.js'])
     </head>
     <body>
@@ -24,12 +27,17 @@
             'workspace' => ['contexts' => route('api.v1.incoming.contexts', [], false), 'dashboard' => route('api.v1.dashboard', [], false)],
             'auth' => [
                 'userId' => auth()->id(),
+                'user' => auth()->check() ? ['name' => auth()->user()->name, 'email' => auth()->user()->email, 'photoUrl' => auth()->user()->profilePhotoUrl()] : null,
+                'profilePhotoEndpoint' => route('api.v1.profile.photo.store', [], false),
+                'profilePasswordEndpoint' => route('api.v1.profile.password.update', [], false),
+                'profileUrl' => route('dcms.profile', [], false),
                 'loginUrl' => route('login.store', [], false),
                 'logoutUrl' => route('logout', [], false),
                 'csrfToken' => csrf_token(),
                 'email' => old('email', ''),
                 'errors' => collect($errors->messages())->map(fn (array $messages): string => $messages[0]),
             ],
+            'profile' => $page === 'profile' && auth()->check() ? app(\App\Authorization\UserProfile::class)->for(auth()->user()) : null,
             'reports' => ['endpoint' => route('api.v1.reports.index', [], false)],
             'search' => ['endpoint' => route('api.v1.document-search', [], false)],
             'controlled' => ['endpoint' => route('api.v1.controlled.index', [], false), 'contexts' => route('api.v1.controlled.contexts', [], false)],

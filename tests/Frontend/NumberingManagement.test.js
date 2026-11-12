@@ -6,6 +6,7 @@ import NumberingManagement from '../../resources/js/components/NumberingManageme
 import AdministrationPage from '../../resources/js/pages/AdministrationPage.vue';
 import LanguageSwitcher from '../../resources/js/components/LanguageSwitcher.vue';
 import { createLocalization } from '../../resources/js/localization/index.js';
+import { settle, swalConfirm, swalPopup, swalText } from './swal.js';
 
 const endpoint = '/numbering-series';
 const scope = { scope_key: 'site:7', scope_type: 'site', company_id: 4, site_id: 7, permissions: ['numbering.view', 'numbering.manage'] };
@@ -75,7 +76,7 @@ async function expand(wrapper, selector) { wrapper.get(selector).element.open = 
 async function confirmSave(wrapper) {
     await wrapper.get('form').trigger('submit');
     await flushPromises();
-    await button(wrapper.get('dialog'), 'Confirm').trigger('click');
+    await swalConfirm();
     await flushPromises();
 }
 
@@ -94,7 +95,7 @@ describe('numbering administration', () => {
         expect(JSON.parse(calls[0][1].body)).toEqual({ scope_type: 'company', company_id: 4, site_id: null, confirm: true, register_kind: kind });
         expect(panel.text()).toContain(en.rbacActive);
         expect(wrapper.get('section[aria-labelledby="xppl-policy-title"]').text()).toContain(en.rbacInactive);
-        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(panel.text()).toContain(lo[`numberingPolicy-${kind}`]);
         expect(panel.text()).toContain(lo.rbacActive);
     });
@@ -113,7 +114,7 @@ describe('numbering administration', () => {
         expect(JSON.parse(calls[0][1].body)).toEqual({ scope_type: 'company', company_id: 4, site_id: null, confirm: true });
         expect(policyPanel.text()).toContain(en.rbacActive);
         expect(wrapper.findAll('button').some(item => item.text() === en.numberingPolicyActivate)).toBe(false);
-        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(policyPanel.text()).toContain(lo.numberingPolicyStatus);
         expect(policyPanel.text()).toContain(lo.rbacActive);
     });
@@ -129,7 +130,7 @@ describe('numbering administration', () => {
         expect(wrapper.findAll('label').some(item => item.text().includes(en.numberingXpplSeries))).toBe(false);
         await expand(wrapper, '[data-numbering-advanced]');
         expect(wrapper.findAll('label').some(item => item.text().includes(en.numberingSetupType))).toBe(true);
-        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(wrapper.text()).toContain(lo.numberingAutomaticHelp);
         expect(wrapper.get('[data-numbering-advanced] > summary').text()).toBe(lo.numberingAdvancedDetails);
         expect(wrapper.get('[data-numbering-legacy] > summary').text()).toBe(lo.numberingLegacySettings);
@@ -195,7 +196,7 @@ describe('numbering administration', () => {
         expect(wrapper.text()).not.toContain('Document Master Data');
         wrapper.unmount();
         const bilingual = await render();
-        await bilingual.get('select[aria-label="Language"]').setValue('lo');
+        await bilingual.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(bilingual.text()).toContain('ການອອກເລກເອກະສານ');
         expect(bilingual.text()).toContain('ເລກທະບຽນພາຍໃນ');
         expect(bilingual.text()).toContain('ເລີ່ມເລກໃໝ່ປະຈຳປີ');
@@ -254,7 +255,7 @@ describe('numbering administration', () => {
         expect(JSON.parse(options.body)).not.toHaveProperty('series_id');
         expect(JSON.parse(options.body)).toMatchObject({ token: 'review-token', next_sequence: 43, confirm: true, format: 'xppl_controlled', department_id: 21, type_id: 31 });
         expect(confirm.element.disabled).toBe(true);
-        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(wrapper.text()).toContain(lo.numberingAdvanced);
     });
 
@@ -284,15 +285,17 @@ describe('numbering administration', () => {
         await control(wrapper, 'Prefix').setValue('EXAMPLE/OFFICIAL');
         await wrapper.get('form').trigger('submit');
         await flushPromises();
-        expect(wrapper.get('dialog').element.open).toBe(true);
+        await settle();
+        expect(swalPopup()).not.toBeNull();
         expect(fetch.mock.calls.some(([url, options]) => url === endpoint && options.method === 'POST')).toBe(false);
-        await button(wrapper.get('dialog'), 'Confirm').trigger('click');
+        await swalConfirm();
         await flushPromises();
         const [, options] = fetch.mock.calls.find(([url, options]) => url === endpoint && options.method === 'POST');
         expect(options.headers['X-CSRF-TOKEN']).toBe('sample-csrf');
         expect(options.credentials).toBe('same-origin');
         expect(JSON.parse(options.body)).toMatchObject({ register_id: 11, purpose: 'official_outgoing', reset_policy: 'continuous', prefix: 'EXAMPLE/OFFICIAL', company_id: 4, site_id: 7 });
-        expect(wrapper.text()).toContain('No number was allocated.');
+        await settle();
+        expect(swalText()).toContain('No number was allocated.');
     });
 
     it('locks permanent identity fields while allowing audited formatting and inactive-state edits', async () => {
@@ -326,7 +329,7 @@ describe('numbering administration', () => {
         await button(wrapper, 'Details').trigger('click');
         expect(control(wrapper, 'Prefix').element.readOnly).toBe(true);
         expect(wrapper.find('button[type="submit"]').exists()).toBe(false);
-        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(wrapper.text()).toContain('27/10/2026, 01:35');
         expect(wrapper.text()).not.toMatch(/\bUTC\b/);
     });
@@ -350,7 +353,7 @@ describe('numbering administration', () => {
         await button(wrapper, 'Edit').trigger('click');
         await confirmSave(wrapper);
         expect(wrapper.findAll('[role="alert"]').some(item => item.text().includes('already reserved'))).toBe(true);
-        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(wrapper.findAll('[role="alert"]').some(item => item.text().includes('ຖືກສະຫງວນ'))).toBe(true);
         wrapper.unmount(); localStorage.clear();
         server({ error: { status: 403, body: { message: 'rbacForbidden' } } });
@@ -422,6 +425,6 @@ it('allows an explicit return to the legacy format and leaves custom definitions
     expect(editor.text()).toContain('Legacy format: PREFIX/YYYY/SEQUENCE');
     await confirmSave(editor);
     expect(JSON.parse(fetch.mock.calls.find(([, options]) => options.method === 'PATCH')[1].body).format).toBeNull();
-    await editor.get('select[aria-label="Language"]').setValue('lo');
+    await editor.get('[data-language-switcher] input[value="lo"]').setValue(true);
     expect(editor.text()).toContain('ຮູບແບບເດີມ: PREFIX/YYYY/SEQUENCE');
 });

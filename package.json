@@ -23,6 +23,14 @@
         "@laravel/multiplex": "^0.4.1"
     },
     "dependencies": {
-        "vue": "^3.5.44"
+        "@iconify-icons/circle-flags": "^2.0.4",
+        "@iconify-icons/flowbite": "^2.0.0",
+        "@iconify/vue": "^5.0.5",
+        "glightbox": "^3.3.1",
+        "jquery": "^3.7.1",
+        "select2": "^4.1.0",
+        "sweetalert2": "^11.26.25",
+        "vue": "^3.5.44",
+        "vue-spinner": "^3.0.2"
     }
 }

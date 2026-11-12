@@ -37,7 +37,7 @@ it('loads only on expansion and renders escaped names, bilingual custody and dis
     await expand(wrapper);
     expect(wrapper.text()).toContain(copy.location); expect(wrapper.find('script').exists()).toBe(false);
     expect(wrapper.text()).toContain('27/10/2026, 01:35'); expect(wrapper.text()).toContain('27/10/2026, 03:00'); expect(wrapper.text()).not.toContain('UTC');
-    await wrapper.get('select[aria-label="Language"]').setValue('lo');
+    await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
     expect(wrapper.text()).toContain(lo.storageTitle); expect(wrapper.text()).toContain(lo['storageAction-checkout']);
     expect(wrapper.text()).not.toMatch(/storage[A-Z-]|uiSave/);
     expect(wrapper.text()).toContain('27/10/2026, 01:35'); expect(wrapper.text()).toContain('27/10/2026, 03:00');

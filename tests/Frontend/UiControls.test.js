@@ -101,7 +101,7 @@ describe('form controls', () => {
             template: '<div><LanguageSwitcher /><TextInput label="Title" error-key="uiValidationRequired" /></div>',
         });
 
-        await wrapper.get('select').setValue('lo');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(wrapper.get('[role="alert"]').text()).toBe('ກະລຸນາປ້ອນຂໍ້ມູນໃນຊ່ອງນີ້.');
 
         const field = render(FormField, { props: { label: 'Sample', error: '<img src=x onerror=alert(1)>' } });
@@ -126,7 +126,7 @@ describe('status badges', () => {
             template: '<div><LanguageSwitcher /><StatusBadge status="effective" /></div>',
         });
 
-        await wrapper.get('select').setValue('lo');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(wrapper.text()).toContain('ມີຜົນບັງຄັບໃຊ້');
     });
 });

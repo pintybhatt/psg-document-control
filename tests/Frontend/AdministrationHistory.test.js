@@ -23,7 +23,7 @@ describe('Administration configuration history', () => {
         expect(wrapper.text()).toContain('Inactive');
         expect(wrapper.find('script').exists()).toBe(false);
         expect(wrapper.findAll('select').at(-1).findAll('option').map(item => item.element.value)).toEqual(['master-data', 'numbering']);
-        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(wrapper.text()).toContain('ປະຫວັດການຕັ້ງຄ່າ');
         expect(wrapper.text()).toContain('ປິດການໃຊ້ງານ');
         expect(wrapper.text()).not.toContain('adminSubject-');
@@ -56,7 +56,7 @@ it('uses bilingual review-policy descriptions and translates the recorded calcul
     expect(wrapper.text()).toContain('Document review policy changed');
     expect(wrapper.text()).toContain('Review completion date');
     expect(wrapper.text()).not.toContain('completion_date');
-    await wrapper.get('select[aria-label="Language"]').setValue('lo');
+    await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
     expect(wrapper.text()).toContain('ປ່ຽນນະໂຍບາຍທົບທວນເອກະສານ');
     expect(wrapper.text()).toContain('ວັນສຳເລັດການທົບທວນ');
 });

@@ -2,10 +2,11 @@ import { defineConfig } from 'vitest/config';
 import vue from '@vitejs/plugin-vue';
 
 export default defineConfig({
-    plugins: [vue()],
+    plugins: [vue({ template: { transformAssetUrls: { base: null, includeAbsolute: false } } })],
     test: {
         environment: 'jsdom',
         include: ['tests/Frontend/**/*.test.js'],
+        setupFiles: ['tests/Frontend/setup.js'],
         restoreMocks: true,
     },
 });

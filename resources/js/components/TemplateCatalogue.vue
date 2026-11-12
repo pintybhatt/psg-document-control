@@ -4,11 +4,14 @@ import { createJsonClient } from '../utilities/jsonClient.js';
 import { formatDateTime } from '../utilities/dates.js';
 import { useLocalization } from '../localization/index.js';
 import UiButton from './ui/UiButton.vue';
+import IconButton from './ui/IconButton.vue';
 import TextInput from './ui/TextInput.vue';
 import TextareaInput from './ui/TextareaInput.vue';
 import SelectInput from './ui/SelectInput.vue';
 import DataTable from './ui/DataTable.vue';
-import ConfirmDialog from './ui/ConfirmDialog.vue';
+import ConfirmDialog from './ui/SweetConfirmDialog.vue';
+import FormModal from './ui/FormModal.vue';
+import { showSuccess } from '../utilities/alerts.js';
 
 const props = defineProps({ scope: { type: Object, required: true }, endpoint: { type: String, required: true }, csrfToken: { type: String, required: true } });
 const emit = defineEmits(['unauthorized']);
@@ -69,7 +72,7 @@ async function save(action = 'create') {
     try {
         const body = action !== 'create' ? { reason: reason.value } : { ...form, attachment_version_id: form.attachment_version_id || null };
         const result = await request(url(action !== 'create' ? `/${selected.value.id}/${action}` : ''), { method: 'POST', signal, body: { ...scopeData(), ...body } });
-        if (!signal.aborted) { editing.value = false; confirming.value = false; await details(result.data); if (!signal.aborted) { await load(); } }
+        if (!signal.aborted) { editing.value = false; confirming.value = false; showSuccess(t('uiSaveSuccess')); await details(result.data); if (!signal.aborted) { await load(); } }
     } catch (failure) { if (!signal.aborted) { confirming.value = false; fail(failure); } }
     finally { if (!signal.aborted) { busy.value = false; } }
 }
@@ -81,20 +84,26 @@ onBeforeUnmount(() => controller?.abort());
     <section class="flex flex-col gap-4" aria-labelledby="template-title">
         <div class="flex flex-wrap items-center justify-between gap-3"><h3 id="template-title" class="font-semibold">{{ t('templateTitle') }}</h3><UiButton v-if="canManage" :disabled="busy" @click="create">{{ t('templateCreate') }}</UiButton></div>
         <p class="rounded-lg bg-amber-50 p-4 text-sm text-amber-900">{{ t('templateInactiveNotice') }}</p>
-        <p v-if="error" role="alert">{{ t(error) }}</p>
-        <DataTable v-model:page="page" :rows="displayRows" :columns="columns" :caption="t('templateTitle')" server-side :total="total" :per-page="10" :loading="busy" @change="load"><template #cell-actions="{ row }"><UiButton variant="secondary" :disabled="busy" @click="details(row)">{{ t('rbacDetails') }}</UiButton></template></DataTable>
-        <form v-if="editing" class="flex flex-col gap-3 rounded-xl border border-slate-200 p-4" @submit.prevent="save()">
-            <TextInput id="template-name-en" v-model="form.name_en" :label="t('rbacNameEn')" required maxlength="255" :disabled="busy" />
-            <TextInput id="template-name-lo" v-model="form.name_lo" :label="t('rbacNameLo')" required maxlength="255" :disabled="busy" />
-            <TextareaInput id="template-description-en" v-model="form.description_en" :label="t('masterDescriptionEn')" maxlength="2000" :disabled="busy" />
-            <TextareaInput id="template-description-lo" v-model="form.description_lo" :label="t('masterDescriptionLo')" maxlength="2000" :disabled="busy" />
-            <TextInput id="template-purpose" v-model="form.purpose" :label="t('templatePurpose')" :helper="t('templatePurposeHelp')" required maxlength="100" :disabled="busy" />
-            <TextInput id="template-source-search" v-model="search" :label="t('templateSourceSearch')" :helper="t('templateSourceHelp')" maxlength="100" :disabled="busy" />
-            <UiButton variant="secondary" :disabled="busy || !search.trim()" @click="findSources">{{ t('templateFindSource') }}</UiButton>
-            <SelectInput id="template-source" v-model="form.attachment_version_id" :label="t('templateSource')" :options="sourceOptions" :disabled="busy" />
-            <p class="text-sm text-slate-600">{{ t('templateImmutableHelp') }}</p>
-            <div class="flex gap-2"><UiButton type="submit" :loading="busy">{{ t('uiConfirm') }}</UiButton><UiButton variant="secondary" :disabled="busy" @click="editing = false">{{ t('uiCancel') }}</UiButton></div>
+        <p v-if="error && !editing" role="alert" class="rounded-lg bg-red-50 p-3 text-sm text-red-800">{{ t(error) }}</p>
+        <DataTable v-model:page="page" :rows="displayRows" :columns="columns" :caption="t('templateTitle')" server-side :total="total" :per-page="10" :loading="busy" @change="load"><template #cell-actions="{ row }"><IconButton action="view" :label="t('rbacDetails')" :disabled="busy" @click="details(row)" /></template></DataTable>
+        <FormModal v-if="editing" :title="t('templateCreate')" :subtitle="t('templateImmutableHelp')" :busy="busy" @close="editing = false">
+        <form class="flex flex-col gap-4" @submit.prevent="save()">
+            <p v-if="error" role="alert" class="rounded-lg bg-red-50 p-3 text-sm text-red-800">{{ t(error) }}</p>
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <TextInput id="template-name-en" v-model="form.name_en" :label="t('rbacNameEn')" required maxlength="255" :disabled="busy" />
+                <TextInput id="template-name-lo" v-model="form.name_lo" :label="t('rbacNameLo')" required maxlength="255" :disabled="busy" />
+                <TextareaInput id="template-description-en" v-model="form.description_en" :label="t('masterDescriptionEn')" maxlength="2000" :disabled="busy" />
+                <TextareaInput id="template-description-lo" v-model="form.description_lo" :label="t('masterDescriptionLo')" maxlength="2000" :disabled="busy" />
+                <div class="sm:col-span-2"><TextInput id="template-purpose" v-model="form.purpose" :label="t('templatePurpose')" :helper="t('templatePurposeHelp')" required maxlength="100" :disabled="busy" /></div>
+            </div>
+            <div class="grid grid-cols-1 items-start gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-[minmax(0,1fr)_auto]">
+                <TextInput id="template-source-search" v-model="search" :label="t('templateSourceSearch')" :helper="t('templateSourceHelp')" maxlength="100" :disabled="busy" />
+                <UiButton variant="secondary" class="sm:mt-7" :disabled="busy || !search.trim()" @click="findSources">{{ t('templateFindSource') }}</UiButton>
+                <div class="sm:col-span-2"><SelectInput id="template-source" v-model="form.attachment_version_id" :label="t('templateSource')" :options="sourceOptions" :disabled="busy" /></div>
+            </div>
+            <div class="flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4"><UiButton variant="secondary" :disabled="busy" @click="editing = false">{{ t('uiCancel') }}</UiButton><UiButton type="submit" :loading="busy">{{ t('uiConfirm') }}</UiButton></div>
         </form>
+        </FormModal>
         <section v-if="selected" class="flex flex-col gap-3 rounded-xl border border-slate-200 p-4">
             <h4 class="font-semibold">{{ selected[language === 'lo' ? 'name_lo' : 'name_en'] }}</h4>
             <p>{{ selected.purpose }} · {{ t(`templateStatus-${selected.status}`) }}</p>

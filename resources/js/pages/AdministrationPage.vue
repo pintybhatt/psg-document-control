@@ -1,13 +1,15 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import UiButton from '../components/ui/UiButton.vue';
+import IconButton from '../components/ui/IconButton.vue';
 import TextInput from '../components/ui/TextInput.vue';
 import TextareaInput from '../components/ui/TextareaInput.vue';
 import SelectInput from '../components/ui/SelectInput.vue';
 import CheckboxInput from '../components/ui/CheckboxInput.vue';
 import DataTable from '../components/ui/DataTable.vue';
-import ConfirmDialog from '../components/ui/ConfirmDialog.vue';
-import ToastNotifications from '../components/ui/ToastNotifications.vue';
+import ConfirmDialog from '../components/ui/SweetConfirmDialog.vue';
+import FormModal from '../components/ui/FormModal.vue';
+import BusyOverlay from '../components/ui/BusyOverlay.vue';
 import ConfidentialityAccess from '../components/ConfidentialityAccess.vue';
 import MembershipManagement from '../components/MembershipManagement.vue';
 import UserManagement from '../components/UserManagement.vue';
@@ -18,14 +20,24 @@ import { useWorkspace } from '../utilities/workspace.js';
 import NumberingManagement from '../components/NumberingManagement.vue';
 import TemplateCatalogue from '../components/TemplateCatalogue.vue';
 import ApprovalWorkflows from '../components/ApprovalWorkflows.vue';
-import { useNotifications } from '../components/ui/useNotifications.js';
+import { showSuccess } from '../utilities/alerts.js';
 import { useLocalization } from '../localization/index.js';
 import { createJsonClient } from '../utilities/jsonClient.js';
+import { Icon } from '@iconify/vue';
+import buildingIcon from '@iconify-icons/flowbite/building-outline';
+import usersGroupIcon from '@iconify-icons/flowbite/users-group-outline';
+import userSettingsIcon from '@iconify-icons/flowbite/user-settings-outline';
+import filePenIcon from '@iconify-icons/flowbite/file-pen-outline';
+import listIcon from '@iconify-icons/flowbite/list-outline';
+import lockIcon from '@iconify-icons/flowbite/lock-outline';
+import bookIcon from '@iconify-icons/flowbite/book-open-outline';
+import clipboardCheckIcon from '@iconify-icons/flowbite/clipboard-check-outline';
+import clockArrowIcon from '@iconify-icons/flowbite/clock-arrow-outline';
+import shieldCheckIcon from '@iconify-icons/flowbite/shield-check-outline';
 
 const props = defineProps({ endpoints: { type: Object, required: true }, csrfToken: { type: String, required: true } });
 const { t, language } = useLocalization();
 const request = createJsonClient(props.csrfToken);
-const { items, notify, dismiss } = useNotifications();
 const workspace = useWorkspace();
 const contexts = ref([]);
 const canManageOrganization = ref(false);
@@ -35,16 +47,16 @@ const selected = computed(() => contexts.value.find(scope => scope.scope_key ===
 const can = permission => selected.value?.permissions.includes(permission) ?? false;
 const canManageUsers = computed(() => canManageOrganization.value && contexts.value.some(scope => scope.scope_type === 'global' && scope.permissions.includes('users.manage')));
 const sections = computed(() => [
-    { key: 'organization', label: 'orgTitle', available: !!props.endpoints.organization && canManageOrganization.value && selected.value?.scope_type === 'global' },
-    { key: 'people', label: 'adminPeople', available: can('memberships.view') },
-    { key: 'users', label: 'userManagementTitle', available: !!props.endpoints.userManagement && canManageUsers.value },
-    { key: 'documents', label: 'adminDocuments', available: selected.value?.scope_type !== 'global' && can('master-data.view') },
-    { key: 'numbering', label: 'adminNumbering', available: selected.value?.scope_type !== 'global' && can('numbering.view') },
-    { key: 'confidentiality', label: 'confidentialityTitle', available: !!props.endpoints.confidentiality && selected.value?.can_manage_document_security === true },
-    { key: 'templates', label: 'templateTitle', available: !!props.endpoints.templates && selected.value?.scope_type === 'site' && can('templates.view') },
-    { key: 'approvalWorkflows', label: 'workflowTitle', available: !!props.endpoints.approvalWorkflows && selected.value?.scope_type !== 'global' && can('master-data.view') },
-    { key: 'history', label: 'adminHistory', available: !!props.endpoints.history && can('security.audit.view') },
-    { key: 'roles', label: 'adminRoles', available: can('roles.view') || can('assignments.view') },
+    { key: 'organization', label: 'orgTitle', icon: buildingIcon, available: !!props.endpoints.organization && canManageOrganization.value && selected.value?.scope_type === 'global' },
+    { key: 'people', label: 'adminPeople', icon: usersGroupIcon, available: can('memberships.view') },
+    { key: 'users', label: 'userManagementTitle', icon: userSettingsIcon, available: !!props.endpoints.userManagement && canManageUsers.value },
+    { key: 'documents', label: 'adminDocuments', icon: filePenIcon, available: selected.value?.scope_type !== 'global' && can('master-data.view') },
+    { key: 'numbering', label: 'adminNumbering', icon: listIcon, available: selected.value?.scope_type !== 'global' && can('numbering.view') },
+    { key: 'confidentiality', label: 'confidentialityTitle', icon: lockIcon, available: !!props.endpoints.confidentiality && selected.value?.can_manage_document_security === true },
+    { key: 'templates', label: 'templateTitle', icon: bookIcon, available: !!props.endpoints.templates && selected.value?.scope_type === 'site' && can('templates.view') },
+    { key: 'approvalWorkflows', label: 'workflowTitle', icon: clipboardCheckIcon, available: !!props.endpoints.approvalWorkflows && selected.value?.scope_type !== 'global' && can('master-data.view') },
+    { key: 'history', label: 'adminHistory', icon: clockArrowIcon, available: !!props.endpoints.history && can('security.audit.view') },
+    { key: 'roles', label: 'adminRoles', icon: shieldCheckIcon, available: can('roles.view') || can('assignments.view') },
 ].filter(item => item.available));
 watch(sections, values => { if (!values.some(item => item.key === section.value)) { section.value = values[0]?.key ?? ''; } });
 
@@ -69,6 +81,7 @@ const roleOptions = ref([]);
 const targetUser = ref('');
 const targetRole = ref('');
 const editorOpen = ref(false);
+const assignOpen = ref(false);
 const roleEditor = ref(null);
 const scopePanel = ref(null);
 const editingRole = ref(null);
@@ -177,7 +190,7 @@ function handleError(error) {
         roles.value = []; assignments.value = []; users.value = []; permissions.value = []; roleOptions.value = [];
         recommendations.value = {}; recommendationPreview.value = false; recommendationApplied.value = false;
         if (selected.value) { selected.value.permissions = []; selected.value.can_manage_document_security = false; }
-        editorOpen.value = false;
+        editorOpen.value = false; assignOpen.value = false;
         confirmationOpen.value = false;
     }
 }
@@ -202,7 +215,7 @@ async function loadScope() {
     recommendations.value = {}; recommendationPreview.value = false; recommendationApplied.value = false;
     roleTotal.value = 0; assignmentTotal.value = 0; rolePage.value = 1; assignmentPage.value = 1;
     targetUser.value = ''; targetRole.value = ''; userSearch.value = ''; roleSearch.value = '';
-    editorOpen.value = false; confirmationOpen.value = false; fields.value = {}; errorKey.value = '';
+    editorOpen.value = false; assignOpen.value = false; confirmationOpen.value = false; fields.value = {}; errorKey.value = '';
     searchLoading.value = false;
     if (!selected.value) { loading.value = false; return; }
     loading.value = true;
@@ -274,7 +287,7 @@ async function saveRole() {
         const data = { ...scopeData(), ...roleForm, permission_keys: [...roleForm.permission_keys] };
         if (editingRole.value) { delete data.code; }
         await request(editingRole.value ? `${props.endpoints.roles}/${editingRole.value.id}` : props.endpoints.roles, { method: editingRole.value ? 'PATCH' : 'POST', body: data });
-        notify({ type: 'success', messageKey: 'rbacRoleSaved' });
+        showSuccess(t('uiSaveSuccess'), t('rbacRoleSaved'));
         await loadScope();
     } catch (error) { handleError(error); await focusInvalidRoleField(); }
     finally { saving.value = false; }
@@ -318,7 +331,8 @@ async function confirmAction() {
             await request(`${props.endpoints.assignments}/${pending.value.id}`, { method: 'DELETE', body: scopeData() });
         }
         confirmationOpen.value = false;
-        notify({ type: 'success', messageKey: 'rbacAssignmentSaved' });
+        if (pending.value.kind === 'assign') { assignOpen.value = false; }
+        showSuccess(t('uiSaveSuccess'), t('rbacAssignmentSaved'));
         await loadScope();
     } catch (error) { confirmationOpen.value = false; handleError(error); }
     finally { saving.value = false; }
@@ -338,7 +352,7 @@ async function changeAssignmentPage() {
 }
 
 async function organizationSaved() {
-    notify({ type: 'success', messageKey: 'orgSaved' });
+    showSuccess(t('uiSaveSuccess'), t('orgSaved'));
     try {
         const response = await request(props.endpoints.contexts);
         if (disposed) { return; }
@@ -350,7 +364,7 @@ async function organizationSaved() {
 
 function selectWorkspaceScope() {
     const unit = workspace?.selected.value;
-    if (section.value === 'organization' || !unit || saving.value || confirmationOpen.value || editorOpen.value) { return; }
+    if (section.value === 'organization' || !unit || saving.value || confirmationOpen.value || editorOpen.value || assignOpen.value) { return; }
     const match = contexts.value.find(scope => scope.scope_type === 'site' && scope.company_id === unit.company_id && scope.site_id === unit.site_id);
     if (match) { selectedKey.value = match.scope_key; }
 }
@@ -364,11 +378,11 @@ onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
     <section class="flex flex-col gap-6" aria-labelledby="rbac-heading">
         <h2 id="rbac-heading" class="sr-only">{{ t('rbacTitle') }}</h2>
         <details class="text-sm text-slate-600"><summary class="cursor-pointer font-medium">{{ t('rbacTitle') }}</summary><p class="mt-2 leading-7">{{ t('rbacInheritance') }}</p></details>
-        <p v-if="errorKey" role="alert" class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">{{ t(errorKey) }}</p>
+        <p v-if="errorKey && !assignOpen && !editorOpen" role="alert" class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">{{ t(errorKey) }}</p>
         <p v-if="loading && !contexts.length" role="status">{{ t('uiLoading') }}</p>
         <p v-else-if="!contexts.length" class="rounded-xl border border-slate-200 bg-white p-6 text-sm text-slate-600">{{ t('rbacNoAccess') }}</p>
         <template v-if="contexts.length">
-            <div ref="scopePanel" data-administration-scope class="rounded-xl border-2 border-teal-600 bg-white p-4 shadow-sm lg:sticky lg:top-3 lg:z-20">
+            <div ref="scopePanel" data-administration-scope class="rounded-xl border-2 border-teal-600 bg-white p-4 shadow-sm lg:sticky lg:top-20 lg:z-20">
                 <div class="grid items-center gap-3 sm:grid-cols-2">
                     <div><p class="text-sm font-semibold text-teal-800">{{ t('rbacScopeHeading') }}</p><p v-if="selected" class="mt-1 font-semibold wrap-anywhere" aria-live="polite">{{ t('rbacCurrentScope', { scope: scopeLabel(selected) }) }}</p></div>
                     <SelectInput v-model="selectedKey" :label="t('rbacScope')" :options="scopeOptions" :disabled="saving || confirmationOpen" />
@@ -379,7 +393,14 @@ onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
                 </details>
             </div>
 
-            <nav :aria-label="t('administration')" class="flex flex-wrap gap-2 border-b border-slate-200 pb-3"><UiButton v-for="item in sections" :key="item.key" :variant="section === item.key ? 'primary' : 'secondary'" :aria-pressed="section === item.key" @click="section = item.key">{{ t(item.label) }}</UiButton></nav>
+            <nav :aria-label="t('administration')" data-admin-tabs class="-mx-1 overflow-x-auto px-1 pb-1 [scrollbar-width:thin]">
+                <div class="flex w-max gap-1 rounded-2xl border border-slate-200/80 bg-white/70 p-1.5 shadow-sm shadow-slate-900/5 backdrop-blur-md sm:w-auto sm:flex-wrap">
+                    <button v-for="item in sections" :key="item.key" type="button" :data-admin-tab="item.key" :aria-pressed="section === item.key" class="group inline-flex shrink-0 items-center gap-2 rounded-xl py-2 pr-3.5 pl-2 text-sm font-medium whitespace-nowrap transition-all duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600 motion-reduce:transition-none" :class="section === item.key ? 'bg-linear-to-br from-teal-600 to-sky-700 text-white shadow-md shadow-teal-700/25' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'" @click="section = item.key">
+                        <span aria-hidden="true" class="inline-flex size-7 items-center justify-center rounded-lg transition-colors" :class="section === item.key ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500 group-hover:bg-white group-hover:text-teal-700'"><Icon :icon="item.icon" class="size-4" /></span>
+                        <span>{{ t(item.label) }}</span>
+                    </button>
+                </div>
+            </nav>
             <OrganizationManagement v-if="section === 'organization' && canManageOrganization && selected?.scope_type === 'global'" :endpoint="endpoints.organization" :csrf-token="csrfToken" @saved="organizationSaved" @unauthorized="handleError" />
             <ConfidentialityAccess v-if="section === 'confidentiality' && selected?.can_manage_document_security" :key="selectedKey" :scope="selected" :endpoint="endpoints.confidentiality" :csrf-token="csrfToken" @unauthorized="handleError" />
             <AdministrationHistory v-if="section === 'history' && selected && can('security.audit.view')" :scope="selected" :endpoint="endpoints.history" :can-manage-organization="canManageOrganization" :csrf-token="csrfToken" @unauthorized="handleError" />
@@ -395,25 +416,25 @@ onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
                 <p v-if="selected" data-roles-scope class="rounded-lg border border-teal-200 bg-teal-50 px-4 py-3 text-sm font-semibold text-teal-900">{{ t('rbacRolesScope', { scope: scopeLabel(selected) }) }}</p>
                 <DataTable v-model:page="rolePage" :rows="roleRows" :columns="roleColumns" :caption="t('rbacRoles')" :loading="loading" server-side :total="roleTotal" :per-page="10" @change="changeRolePage">
                     <template #cell-display_name="{ row }"><span class="font-semibold">{{ row.display_name }}</span><span v-if="row.code !== 'SECURITY_ADMINISTRATOR' && missingWorkspacePermissions(row)" class="block text-xs text-amber-800">{{ t('rbacWorkspaceSetupNeeded') }}</span></template>
-                    <template #cell-actions="{ row }"><UiButton variant="secondary" :disabled="saving" @click="showRole(row)">{{ t(row.editable ? 'rbacEdit' : 'rbacDetails') }}</UiButton></template>
+                    <template #cell-actions="{ row }"><IconButton :action="row.editable ? 'edit' : 'view'" :label="t(row.editable ? 'rbacEdit' : 'rbacDetails')" :disabled="saving" @click="showRole(row)" /></template>
                 </DataTable>
             </section>
 
-            <form v-show="section === 'roles'" v-if="editorOpen" ref="roleEditor" novalidate class="flex flex-col gap-5 rounded-xl border border-slate-200 bg-white p-6" @submit.prevent="saveRole">
-                <h3 tabindex="-1" class="font-semibold">{{ t(editingRole ? 'rbacRoleDetails' : 'rbacCreateRole') }}</h3>
-                <p v-if="editingRole" class="text-sm font-medium">{{ label(editingRole) }} · {{ t('rbacRoleOwner', { scope: roleScopeLabel(editingRole) }) }}</p>
+            <FormModal v-if="editorOpen && section === 'roles'" size="xl" :title="t(editingRole ? 'rbacRoleDetails' : 'rbacCreateRole')" :subtitle="editingRole ? `${label(editingRole)} · ${t('rbacRoleOwner', { scope: roleScopeLabel(editingRole) })}` : ''" :busy="saving" @close="editorOpen = false">
+            <form ref="roleEditor" novalidate class="flex flex-col gap-5" @submit.prevent="saveRole">
+                <p v-if="errorKey" role="alert" class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">{{ t(errorKey) }}</p>
                 <p v-if="readOnly || securityReadOnly" class="text-sm text-slate-500">{{ t(readOnly ? 'rbacInheritedReadOnly' : 'rbacSelfRoleReadOnly', { scope: roleScopeLabel(editingRole) }) }}</p>
                 <div v-if="readOnly && editingRole?.scope_key !== selectedKey" class="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
                     <UiButton v-if="owningScope" :disabled="loading || saving || confirmationOpen" @click="switchToOwningScope">{{ t('rbacSwitchOwnerScope', { scope: scopeLabel(owningScope) }) }}</UiButton>
                     <p v-else>{{ t('rbacOwnerScopeNoEdit') }}</p>
                 </div>
-                <div class="grid gap-5 sm:grid-cols-2">
-                    <TextInput v-model="roleForm.code" name="role-code" :label="t('rbacCode')" :helper="t('rbacCodeHelp')" :readonly="!!editingRole || readOnly" :error-key="fieldError('code')" required maxlength="64" />
+                <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
+                    <div class="sm:col-span-2"><TextInput v-model="roleForm.code" name="role-code" :label="t('rbacCode')" :helper="t('rbacCodeHelp')" :readonly="!!editingRole || readOnly" :error-key="fieldError('code')" required maxlength="64" /></div>
                     <TextInput v-model="roleForm.name_en" name="role-name-en" :label="t('rbacNameEn')" :readonly="readOnly" :error-key="fieldError('name_en')" required lang="en" maxlength="255" />
                     <TextInput v-model="roleForm.name_lo" name="role-name-lo" :label="t('rbacNameLo')" :readonly="readOnly" :error-key="fieldError('name_lo')" required lang="lo" maxlength="255" />
-                    <CheckboxInput v-model="roleForm.active" :label="t('rbacActive')" :disabled="securityReadOnly" />
+                    <div class="sm:col-span-2"><TextareaInput v-model="roleForm.description" :label="t('rbacDescription')" :readonly="readOnly" maxlength="2000" /></div>
+                    <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 sm:col-span-2"><CheckboxInput v-model="roleForm.active" :label="t('rbacActive')" :disabled="securityReadOnly" /></div>
                 </div>
-                <TextareaInput v-model="roleForm.description" :label="t('rbacDescription')" :readonly="readOnly" maxlength="2000" />
                 <p v-if="!editingRole" class="text-sm text-slate-600">{{ t('rbacStandardRoleHelp') }}</p>
                 <section v-if="roleRecommendation" class="flex flex-col gap-3 rounded-lg border border-teal-200 bg-teal-50 p-4" :aria-label="t('rbacRecommendedPermissions')">
                     <h4 class="font-semibold">{{ t('rbacRecommendedPermissions') }}</h4>
@@ -462,27 +483,33 @@ onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
                     </fieldset>
                 </details>
                 <p v-if="fieldError('permission_keys')" role="alert" class="text-sm text-red-700">{{ t(fieldError('permission_keys')) }}</p>
-                <div class="flex flex-wrap gap-3"><UiButton v-if="can('roles.manage') && !readOnly" type="submit" :loading="saving">{{ t('rbacSaveRole') }}</UiButton><UiButton variant="secondary" :disabled="saving" @click="editorOpen = false">{{ t('uiCancel') }}</UiButton></div>
+                <div class="sticky -bottom-5 -mx-6 -mb-5 flex flex-wrap justify-end gap-3 border-t border-slate-200 bg-white px-6 py-4"><UiButton variant="secondary" :disabled="saving" @click="editorOpen = false">{{ t('uiCancel') }}</UiButton><UiButton v-if="can('roles.manage') && !readOnly" type="submit" :loading="saving">{{ t('rbacSaveRole') }}</UiButton></div>
             </form>
+            </FormModal>
 
             <section v-show="section === 'roles'" v-if="can('assignments.view')" class="flex flex-col gap-4" aria-labelledby="assignments-heading">
-                <h3 id="assignments-heading" class="font-semibold">{{ t('rbacAssignments') }}</h3>
+                <div class="flex flex-wrap items-center justify-between gap-3"><h3 id="assignments-heading" class="font-semibold">{{ t('rbacAssignments') }}</h3><UiButton v-if="can('assignments.manage') && can('users.view') && can('roles.view')" data-open-assign :disabled="loading || saving" @click="errorKey = ''; assignOpen = true">{{ t('rbacAssignRole') }}</UiButton></div>
                 <DataTable v-model:page="assignmentPage" :rows="assignmentRows" :columns="assignmentColumns" :caption="t('rbacAssignments')" :loading="loading" server-side :total="assignmentTotal" :per-page="10" @change="changeAssignmentPage">
-                    <template #cell-actions="{ row }"><UiButton v-if="can('assignments.manage') && row.active && row.revocable" variant="danger" :disabled="saving" @click="prepareRevoke(row)">{{ t('rbacRevoke') }}</UiButton></template>
+                    <template #cell-actions="{ row }"><IconButton v-if="can('assignments.manage') && row.active && row.revocable" action="delete" :label="t('rbacRevoke')" :disabled="saving" @click="prepareRevoke(row)" /></template>
                 </DataTable>
             </section>
 
-            <section v-show="section === 'roles'" v-if="can('assignments.manage') && can('users.view') && can('roles.view')" class="flex flex-col gap-5 rounded-xl border border-slate-200 bg-white p-6" aria-labelledby="grant-heading">
-                <h3 id="grant-heading" class="font-semibold">{{ t('rbacAssignRole') }}</h3>
-                <p class="text-sm leading-7 text-slate-500">{{ t('rbacEligibleNotice') }}</p>
-                <div class="grid gap-5 sm:grid-cols-2"><TextInput v-model="userSearch" :label="t('rbacAccountSearch')" /><TextInput v-model="roleSearch" :label="t('rbacRoleSearch')" /></div>
-                <div><UiButton variant="secondary" :loading="searchLoading" :disabled="saving || loading" @click="searchCandidates">{{ t('rbacFindCandidates') }}</UiButton></div>
-                <div class="grid gap-5 sm:grid-cols-2"><SelectInput v-model="targetUser" :label="t('rbacAccount')" :options="candidateUsers" :disabled="saving || searchLoading" /><SelectInput v-model="targetRole" :label="t('rbacRole')" :options="candidateRoles" :disabled="saving || searchLoading" /></div>
+            <FormModal v-if="assignOpen && section === 'roles' && can('assignments.manage') && can('users.view') && can('roles.view')" :title="t('rbacAssignRole')" :subtitle="t('rbacEligibleNotice')" :busy="saving" @close="assignOpen = false">
+            <section class="flex flex-col gap-5" aria-labelledby="grant-heading">
+                <h4 id="grant-heading" class="sr-only">{{ t('rbacAssignRole') }}</h4>
+                <p v-if="errorKey" role="alert" class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">{{ t(errorKey) }}</p>
+                <div class="grid grid-cols-1 items-end gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2">
+                    <TextInput v-model="userSearch" :label="t('rbacAccountSearch')" />
+                    <TextInput v-model="roleSearch" :label="t('rbacRoleSearch')" />
+                    <div class="flex justify-end sm:col-span-2"><UiButton variant="secondary" :loading="searchLoading" :disabled="saving || loading" @click="searchCandidates">{{ t('rbacFindCandidates') }}</UiButton></div>
+                </div>
+                <div class="grid grid-cols-1 gap-5 sm:grid-cols-2"><SelectInput v-model="targetUser" :label="t('rbacAccount')" :options="candidateUsers" :disabled="saving || searchLoading" /><SelectInput v-model="targetRole" :label="t('rbacRole')" :options="candidateRoles" :disabled="saving || searchLoading" /></div>
                 <p v-if="!searchLoading && users.length === 0" class="text-xs text-slate-500">{{ t('rbacNoCandidates') }}</p>
-                <div><UiButton :disabled="saving || loading || !targetUser || !targetRole" @click="prepareAssignment">{{ t('rbacAssignRole') }}</UiButton></div>
+                <div class="flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4"><UiButton variant="secondary" :disabled="saving" @click="assignOpen = false">{{ t('uiCancel') }}</UiButton><UiButton :disabled="saving || loading || !targetUser || !targetRole" @click="prepareAssignment">{{ t('rbacAssignRole') }}</UiButton></div>
             </section>
+            </FormModal>
         </template>
         <ConfirmDialog v-model="confirmationOpen" :danger="pending?.kind === 'revoke'" :title="t(pending?.kind === 'assign' ? 'rbacAssignRole' : 'rbacRevoke')" :message="confirmationMessage" :loading="saving" @confirm="confirmAction" />
-        <ToastNotifications :items="items" @dismiss="dismiss" />
+        <BusyOverlay />
     </section>
 </template>

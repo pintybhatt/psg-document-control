@@ -4,6 +4,7 @@ import DocumentMasterDataManagement from '../../resources/js/components/Document
 import AdministrationPage from '../../resources/js/pages/AdministrationPage.vue';
 import LanguageSwitcher from '../../resources/js/components/LanguageSwitcher.vue';
 import { createLocalization } from '../../resources/js/localization/index.js';
+import { settle, swalCancel, swalConfirm, swalText } from './swal.js';
 
 const endpoints = { categories: '/md/categories', types: '/md/types', registers: '/md/registers', classifications: '/md/classifications' };
 const scope = { scope_key: 'site:7', scope_type: 'site', company_id: 4, site_id: 7, permissions: ['master-data.view', 'master-data.manage'] };
@@ -89,7 +90,7 @@ describe('document master-data administration', () => {
         server();
         const wrapper = await render();
         expect(wrapper.text()).toContain('Incoming Correspondence');
-        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(wrapper.text()).toContain('ຂໍ້ມູນຫຼັກເອກະສານ');
         expect(wrapper.text()).toContain('ທົ່ວໄປ');
         expect(wrapper.text()).toContain('ໜັງສືເຂົ້າ');
@@ -111,7 +112,8 @@ describe('document master-data administration', () => {
         expect(options.headers['X-CSRF-TOKEN']).toBe('sample-csrf');
         expect(options.credentials).toBe('same-origin');
         expect(JSON.parse(options.body)).toMatchObject({ scope_type: 'site', company_id: 4, site_id: 7, code: 'NEW_RECORD', name_en: 'Example', name_lo: 'ຕົວຢ່າງ', description_lo: 'ຄຳອະທິບາຍ', active: true });
-        expect(wrapper.text()).toContain('Document master data saved.');
+        await settle();
+        expect(swalText()).toContain('Document master data saved.');
     });
 
     it('creates a type with an explicit category and applicable registers and protects category ownership during edits', async () => {
@@ -159,13 +161,14 @@ describe('document master-data administration', () => {
         const wrapper = await render();
         await button(section(wrapper, 'categories'), active ? 'Deactivate' : 'Reactivate').trigger('click');
         await flushPromises();
-        expect(wrapper.get('dialog').text()).toContain('General');
+        await settle();
+        expect(swalText()).toContain('General');
         expect(fetch.mock.calls.some(([, options]) => options.method === 'PATCH')).toBe(false);
-        await button(wrapper.get('dialog'), 'Cancel').trigger('click');
+        await swalCancel();
         expect(fetch.mock.calls.some(([, options]) => options.method === 'PATCH')).toBe(false);
         await button(section(wrapper, 'categories'), active ? 'Deactivate' : 'Reactivate').trigger('click');
         await flushPromises();
-        await button(wrapper.get('dialog'), 'Confirm').trigger('click');
+        await swalConfirm();
         await flushPromises();
         const [, options] = fetch.mock.calls.find(([, options]) => options.method === 'PATCH');
         expect(JSON.parse(options.body)).toEqual({ scope_type: 'site', company_id: 4, site_id: 7, active: !active });
@@ -207,7 +210,7 @@ describe('document master-data administration', () => {
         const field = control(wrapper, 'Lao display name');
         expect(document.activeElement).toBe(field.element);
         expect(field.attributes('aria-invalid')).toBe('true');
-        await wrapper.get('select[aria-label="Language"]').setValue('lo');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(wrapper.findAll('[role="alert"]').some(item => item.text().includes('ກະລຸນາກວດສອບ'))).toBe(true);
     });
 
@@ -216,7 +219,7 @@ describe('document master-data administration', () => {
         const wrapper = await render();
         await button(section(wrapper, 'categories'), 'Deactivate').trigger('click');
         await flushPromises();
-        await button(wrapper.get('dialog'), 'Confirm').trigger('click');
+        await swalConfirm();
         await flushPromises();
         expect(wrapper.text()).toContain('You do not have permission');
         expect(wrapper.text()).not.toContain('Create ·');

@@ -88,7 +88,7 @@ it('explains missing custodian membership and never defaults to an ineligible us
     expect(wrapper.get('#controlled-custodian_id').element.value).toBe('');
     expect(wrapper.text()).toContain(en.controlledNoCustodian);
     expect(wrapper.get('#controlled-custodian_id').attributes('required')).toBeDefined();
-    await wrapper.get('select[aria-label="Language"]').setValue('lo');
+    await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
     expect(wrapper.text()).toContain(lo.controlledNoCustodian);
 });
 
@@ -215,7 +215,7 @@ it('preserves ambiguous stored codes and displays the revision label separately'
 });
 it('renders Lao status, history and dd/mm/yyyy dates without untranslated keys', async () => {
     server({ released: true }); const wrapper = await render(); await show(wrapper);
-    await wrapper.get('select[aria-label="Language"]').setValue('lo');
+    await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
     expect(wrapper.text()).toContain(lo.controlledHistory);
     expect(wrapper.text()).toContain(lo['controlledStatus-current']);
     expect(wrapper.text()).toContain(lo.controlledOwnerDepartment); expect(wrapper.text()).toContain(lo.documentCategory);
@@ -434,7 +434,7 @@ it('automatically targets draft R01 while keeping the released R00 attachment re
     const upload = fetch.mock.calls.find(([url, options]) => options.method === 'POST' && url.includes('/attachments?'));
     expect(upload[0]).toContain('revision_id=12');
     expect(upload[1].body.has('attachment_id')).toBe(false);
-    await wrapper.get('select[aria-label="Language"]').setValue('lo');
+    await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
     expect(wrapper.text()).toContain(lo.controlledAttachment);
     expect(wrapper.text()).not.toContain('controlledDraftAttachment');
 });
