@@ -35,8 +35,10 @@ use Illuminate\Contracts\View\View;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/', function () {
-    return view('welcome');
-});
+    return auth('web')->check()
+        ? redirect()->route('dcms.dashboard')
+        : redirect()->route('login');
+})->name('home');
 
 Route::middleware('guest:web')->group(function (): void {
     Route::get('/login', [AuthenticatedSessionController::class, 'create'])->name('login');

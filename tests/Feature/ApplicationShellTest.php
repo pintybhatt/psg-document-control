@@ -42,8 +42,8 @@ class ApplicationShellTest extends TestCase
         $this->get('/unknown-section')->assertNotFound();
     }
 
-    public function test_existing_welcome_page_remains_available(): void
+    public function test_root_redirects_guests_to_login(): void
     {
-        $this->get('/')->assertOk()->assertViewIs('welcome');
+        $this->get('/')->assertRedirect(route('login'));
     }
 }
