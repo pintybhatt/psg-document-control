@@ -271,9 +271,11 @@ class MySqlNumberingConcurrencyTest extends TestCase
         $this->assertFalse(Schema::hasTable('document_types'));
         $this->assertModelExists($actor);
         $this->assertDatabaseCount('organization_memberships', 1);
-        $this->assertSame($actorAttributes, $actor->refresh()->getAttributes());
+        // Later user columns (e.g. profile_photo_path) are rolled back too; compare only the phase-two columns.
+        $phaseTwoActorAttributes = array_intersect_key($actorAttributes, array_flip(Schema::getColumnListing('users')));
+        $this->assertSame($phaseTwoActorAttributes, $actor->refresh()->getAttributes());
         $this->assertSame($membershipAttributes, OrganizationMembership::query()->sole()->getAttributes());
-        $this->artisan('migrate', ['--force' => true, '--no-interaction' => true])->assertExitCode(0);
+        $this->artisan('migrate',['--force' => true, '--no-interaction' => true])->assertExitCode(0);
         $this->assertSame($appliedMigrations, DB::table('migrations')->orderBy('migration')->pluck('migration')->all());
         $this->assertTrue(Schema::hasTable('numbering_series'));
         $this->assertTrue(Schema::hasTable('document_types'));
