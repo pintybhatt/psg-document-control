@@ -7,6 +7,7 @@ import TextareaInput from './ui/TextareaInput.vue';
 import SelectInput from './ui/SelectInput.vue';
 import CheckboxInput from './ui/CheckboxInput.vue';
 import DataTable from './ui/DataTable.vue';
+import StatusBadge from './ui/StatusBadge.vue';
 import ConfirmDialog from './ui/SweetConfirmDialog.vue';
 import FormModal from './ui/FormModal.vue';
 import { showSuccess } from '../utilities/alerts.js';
@@ -43,7 +44,7 @@ const columns = kind => [
     ...(kind === 'types' ? [{ key: 'category_name', label: t('masterCategory') }, { key: 'register_names', label: t('masterRegisters') }] : []),
     { key: 'status', label: t('uiStatus') }, { key: 'actions', label: t('rbacActions') },
 ];
-const displayRows = kind => lists[kind].rows.map(row => ({ ...row, display_code: row.code ?? row.register_key, display_name: recordLabel(kind, row), category_name: label(row.category), register_names: lists.registers.rows.filter(register => row.register_ids?.includes(register.id)).map(register => registerLabel(register.register_key)).join(', '), status: t(!row.active ? 'rbacInactive' : row.effective ? 'rbacActive' : 'masterBlocked') }));
+const displayRows = kind => lists[kind].rows.map(row => ({ ...row, display_code: row.code ?? row.register_key, display_name: recordLabel(kind, row), category_name: label(row.category), register_names: lists.registers.rows.filter(register => row.register_ids?.includes(register.id)).map(register => registerLabel(register.register_key)).join(', '), status_key: !row.active ? 'inactive' : row.effective ? 'active' : 'blocked', status: t(!row.active ? 'rbacInactive' : row.effective ? 'rbacActive' : 'masterBlocked') }));
 const categories = computed(() => [{ value: '', label: t('uiChoose') }, ...categoryOptions.value.map(row => ({ value: row.id, label: label(row), disabled: !row.active }))]);
 const registers = computed(() => identities.map(key => ({ value: key, label: registerLabel(key), disabled: lists.registers.rows.some(row => row.register_key === key) })));
 const confirmationMessage = computed(() => pending.value ? `${t(pending.value.row.active ? 'masterDeactivateConfirm' : 'masterActivateConfirm')} ${recordLabel(pending.value.kind, pending.value.row)}` : '');
@@ -167,6 +168,7 @@ onBeforeUnmount(() => controller?.abort());
                 <UiButton v-if="canManage && (kind !== 'registers' || lists.registers.total < 3)" :disabled="saving || lists[kind].loading || optionsLoading" @click="openEditor(kind)">{{ t('masterCreate') }} · {{ t(`master-${kind}`) }}</UiButton>
             </div>
             <DataTable v-model:page="lists[kind].page" :rows="displayRows(kind)" :columns="columns(kind)" :caption="t(`master-${kind}`)" :loading="lists[kind].loading" server-side :total="lists[kind].total" :per-page="10" @change="loadList(kind)">
+                <template #cell-status="{ row }"><StatusBadge :status="row.status_key" :label="row.status" /></template>
                 <template #cell-actions="{ row }"><div class="flex flex-wrap gap-2">
                     <IconButton :action="canManage ? 'edit' : 'view'" :label="t(canManage ? 'rbacEdit' : 'rbacDetails')" :disabled="saving || optionsLoading" @click="openEditor(kind, row)" />
                     <IconButton v-if="canManage" :action="row.active ? 'deactivate' : 'activate'" :label="t(row.active ? 'membershipSuspend' : 'membershipActivate')" :disabled="saving" @click="prepareToggle(kind, row)" />

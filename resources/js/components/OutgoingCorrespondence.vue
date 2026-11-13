@@ -7,6 +7,7 @@ import { formatDate, formatDateTime } from '../utilities/dates.js';
 import StatusBadge from './ui/StatusBadge.vue';
 import PdfPreviewDialog from './ui/PdfPreviewDialog.vue';
 import UiButton from './ui/UiButton.vue';
+import PageBackButton from './ui/PageBackButton.vue';
 import ExportActions from './ui/ExportActions.vue';
 import OutgoingDispatch from './OutgoingDispatch.vue';
 import TextInput from './ui/TextInput.vue';
@@ -15,6 +16,15 @@ import SelectInput from './ui/SelectInput.vue';
 import DataTable from './ui/DataTable.vue';
 import ConfirmDialog from './ui/ConfirmDialog.vue';
 import ToastNotifications from './ui/ToastNotifications.vue';
+import { Icon } from '@iconify/vue';
+import FormHeader from './ui/FormHeader.vue';
+import FormSection from './ui/FormSection.vue';
+import FormActions from './ui/FormActions.vue';
+import fileExportIcon from '@iconify-icons/flowbite/file-export-outline';
+import tagIcon from '@iconify-icons/flowbite/tag-outline';
+import penIcon from '@iconify-icons/flowbite/pen-nib-outline';
+import usersIcon from '@iconify-icons/flowbite/users-group-outline';
+import infoIcon from '@iconify-icons/flowbite/info-circle-outline';
 import { useNotifications } from './ui/useNotifications.js';
 import { useLocalization } from '../localization/index.js';
 import { createJsonClient } from '../utilities/jsonClient.js';
@@ -58,6 +68,19 @@ const recipientFields = ['organization', 'contact_name', 'email', 'phone', 'addr
 const recipientKinds = computed(() => ['primary', 'copy'].map(value => ({ value, label: t(`outgoingRecipient-${value}`) })));
 function emptyRecipient(kind = 'primary') { return { kind, organization: '', contact_name: '', email: '', phone: '', address: '' }; }
 const descriptionFields = ['description_en', 'description_lo'];
+const additionalFields = ['document_revision', 'signatory_title'];
+const additionalOpen = computed(() => [...additionalFields, ...descriptionFields].some(field => fields.value[field]));
+function fieldProps(field) {
+    return {
+        id: `outgoing-${field}`,
+        label: t(`outgoing-${field}`),
+        type: field.endsWith('_date') ? 'date' : 'text',
+        helper: field.endsWith('_date') ? t('correspondenceDocumentDateHelp') : '',
+        errorKey: fields.value[field]?.[0],
+        required: ['signatory_name', 'subject', 'document_date'].includes(field),
+        maxlength: field === 'subject' ? 500 : field === 'document_revision' ? 30 : 255,
+    };
+}
 const canManage = computed(() => props.scope.permissions.includes('outgoing.drafts.manage'));
 const canRegister = computed(() => props.scope.permissions.includes('outgoing.register') && props.scope.permissions.includes('numbering.issue'));
 const label = item => item?.[language.value === 'lo' ? 'name_lo' : 'name_en'] ?? '';
@@ -195,46 +218,60 @@ onBeforeUnmount(() => controller?.abort());
     <section class="flex flex-col gap-5">
         <SelectInput v-if="!editing && !detail && authorizedDepartmentOptions.length > 1" id="outgoing-context" v-model="departmentContext" :label="t('outgoingIssuingDepartment')" :options="authorizedDepartmentOptions" :disabled="loading || saving" class="max-w-sm" />
         <div v-if="!editing && !detail" class="flex flex-wrap items-center justify-between gap-3"><h2 id="outgoing-list-title" tabindex="-1" class="text-lg font-semibold">{{ t('outgoingTitle') }}</h2><UiButton v-if="canManage" :disabled="saving || loading" @click="edit(true)">{{ t('outgoingCreate') }}</UiButton></div>
-        <UiButton v-if="editing || detail" variant="secondary" class="self-start" :disabled="saving" @click="backToList">{{ t('backToRegister') }} · {{ t('outgoingTitle') }}</UiButton>
+        <PageBackButton v-if="editing || detail" :title="`${t('backToRegister')} · ${t('outgoingTitle')}`" :disabled="saving" @click="backToList" />
         <p v-if="error" role="alert" class="rounded-xl bg-red-50 p-4 text-red-800">{{ t(error) }}</p>
-        <form v-if="!editing && !detail" class="flex flex-wrap items-end gap-3" @submit.prevent="page = 1; load()"><TextInput id="outgoing-search" v-model="search" :label="t('outgoingSearch')" maxlength="200" class="grow" /><UiButton type="submit" variant="secondary" :disabled="loading">{{ t('incomingApplyFilters') }}</UiButton></form>
+        <form v-if="!editing && !detail" class="flex flex-wrap items-end gap-3" @submit.prevent="page = 1; load()"><TextInput id="outgoing-search" v-model="search" :label="t('outgoingSearch')" maxlength="200" class="grow" /><UiButton type="submit" :disabled="loading">{{ t('incomingApplyFilters') }}</UiButton></form>
         <ExportActions v-if="!editing && !detail" :excel-href="reportUrl('xlsx')" :disabled="loading || saving" @preview="preview()" />
         <DataTable v-if="!editing && !detail" v-model:page="page" :error="listError" :rows="displayRows" :columns="columns" :caption="t('outgoingTitle')" :loading="loading" server-side :total="total" :per-page="10" @change="load()">
-            <template #cell-subject="{ row }"><button type="button" class="text-left font-semibold text-teal-800 hover:underline disabled:opacity-50" :disabled="saving || loading" @click="show(row)">{{ row.subject }}</button><span class="mt-1 block max-w-64 font-mono text-xs wrap-anywhere text-slate-500">{{ row.internal_number }}<span v-if="row.official_number !== '—'" class="block">{{ row.official_number }}</span></span></template>
+            <template #cell-subject="{ row }"><button type="button" :title="row.subject" class="text-left font-semibold text-teal-800 hover:underline disabled:opacity-50" :disabled="saving || loading" @click="show(row)">{{ row.subject }}</button><span class="mt-1 block max-w-64 font-mono text-xs wrap-anywhere text-slate-500">{{ row.internal_number }}<span v-if="row.official_number !== '—'" class="block">{{ row.official_number }}</span></span></template>
             <template #cell-status_label="{ row }"><StatusBadge :status="row.operations?.status ?? row.status" :label="row.status_label" /></template>
             <template #cell-actions="{ row }"><UiButton variant="secondary" :disabled="saving || loading" @click="show(row)">{{ t('rbacDetails') }}</UiButton></template>
         </DataTable>
-        <form id="outgoing-draft-form" v-if="editing" ref="editorElement" class="flex flex-col gap-5 rounded-2xl border border-slate-200 bg-white p-5" @submit.prevent="save">
-            <h2 tabindex="-1" class="text-lg font-semibold">{{ t(detail ? 'outgoingEdit' : 'outgoingCreate') }}</h2>
-            <p class="text-sm text-slate-600">{{ t('outgoingDraftRules') }}</p>
-            <p v-if="scope.permissions.includes('documents.attachments.manage')" class="text-sm text-slate-600">{{ t('storageDraftHelp') }}</p>
-            <fieldset :disabled="saving" class="grid gap-4 md:grid-cols-2"><legend class="mb-3 font-semibold">{{ t('documentInformation') }}</legend>
+        <form id="outgoing-draft-form" v-if="editing" ref="editorElement" class="flex flex-col gap-5" @submit.prevent="save">
+            <FormHeader :icon="fileExportIcon" :eyebrow="t('overview-outgoing')" :title="t(detail ? 'outgoingEdit' : 'outgoingCreate')" :description="t('outgoingDraftRules')">
+                <p v-if="scope.permissions.includes('documents.attachments.manage')" class="flex items-start gap-2 text-sm text-slate-600"><Icon :icon="infoIcon" aria-hidden="true" class="mt-0.5 size-4 shrink-0 text-teal-700" />{{ t('storageDraftHelp') }}</p>
+            </FormHeader>
+            <FormSection :icon="tagIcon" :title="t('formSectionClassification')" :description="t('formSectionClassificationHelp')" :disabled="saving">
                 <SelectInput id="outgoing-department" v-model="departmentContext" :label="t('outgoingIssuingDepartment')" :options="authorizedDepartmentOptions" :helper="t('documentDepartmentHelp')" :disabled="!!detail || saving" required />
                 <SelectInput id="outgoing-type" v-model="form.type_id" :label="t('documentType')" :options="typeOptions" :helper="automaticOfficial ? t('outgoingOfficialTypeHelp') : undefined" :error-key="fields.type_id?.[0]" required />
                 <p v-if="needsTypeCorrection" class="text-sm text-slate-600">{{ t('outgoingCorrectDraftType') }}</p>
                 <p v-if="automaticOfficial && !eligibleTypes.length" role="status" class="text-sm text-slate-600">{{ t('outgoingOfficialTypeMissing') }}</p>
-                <TextInput id="outgoing-category" :model-value="selectedCategoryLabel" :label="t('documentCategory')" :helper="t('documentCategoryHelp')" readonly />
-                <SelectInput v-if="!detail" id="outgoing-classification" v-model="form.classification" :label="t('outgoingClassification')" :options="classificationOptions" :helper="t(`confidentiality-${form.classification}-description`)" :error-key="fields.classification?.[0]" required />
-                <SelectInput id="outgoing-priority" v-model="form.priority" :label="t('outgoingPriority')" :options="priorityOptions" :error-key="fields.priority?.[0]" required />
-                <TextInput v-for="field in textFields.filter(field => !['document_revision', 'sender_contact', 'sender_email', 'sender_phone', 'signatory_title'].includes(field))" :id="`outgoing-${field}`" :key="field" v-model="form[field]" :label="t(`outgoing-${field}`)" :class="field === 'subject' ? 'md:col-span-2' : ''" :type="field.endsWith('_date') ? 'date' : 'text'" :helper="field === 'received_date' ? t('correspondenceReceivedDateHelp') : field.endsWith('_date') ? t('correspondenceDocumentDateHelp') : ''" :error-key="fields[field]?.[0]" :required="['signatory_name', 'subject', 'document_date'].includes(field)" :maxlength="field === 'subject' ? 500 : 255" />
-            </fieldset>
-            <details :open="['document_revision', 'sender_contact', 'sender_email', 'sender_phone', 'signatory_title', ...descriptionFields].some(field => fields[field])" class="rounded-xl border border-slate-200 p-4"><summary class="cursor-pointer text-sm font-semibold">{{ t('additionalInformation') }}</summary><div class="mt-4 grid gap-4 md:grid-cols-2">
-                <TextInput v-for="field in textFields.filter(field => ['document_revision', 'sender_contact', 'sender_email', 'sender_phone', 'signatory_title'].includes(field))" :id="`outgoing-${field}`" :key="field" v-model="form[field]" :label="t(`outgoing-${field}`)" :type="field.endsWith('email') ? 'email' : 'text'" :error-key="fields[field]?.[0]" :maxlength="field === 'document_revision' ? 30 : field.endsWith('phone') ? 64 : 255" />
+                <div class="grid gap-x-5 gap-y-4 md:col-span-2" :class="detail ? 'md:grid-cols-2' : 'md:grid-cols-3'">
+                    <TextInput id="outgoing-category" :model-value="selectedCategoryLabel" :label="t('documentCategory')" :helper="t('documentCategoryHelp')" readonly />
+                    <SelectInput v-if="!detail" id="outgoing-classification" v-model="form.classification" :label="t('outgoingClassification')" :options="classificationOptions" :helper="t(`confidentiality-${form.classification}-description`)" :error-key="fields.classification?.[0]" required />
+                    <SelectInput id="outgoing-priority" v-model="form.priority" :label="t('outgoingPriority')" :options="priorityOptions" :error-key="fields.priority?.[0]" required />
+                </div>
+            </FormSection>
+            <FormSection :icon="penIcon" :title="t('formSectionSignatory')" :description="t('formSectionSignatoryHelp')" :disabled="saving">
+                <div class="md:col-span-2"><TextInput v-model="form.subject" v-bind="fieldProps('subject')" /></div>
+                <TextInput v-for="field in ['signatory_name', 'document_date']" :key="field" v-model="form[field]" v-bind="fieldProps(field)" />
+            </FormSection>
+            <FormSection :icon="usersIcon" :title="t('outgoingRecipients')" :description="t('outgoingRecipientsHelp')" :columns="1">
+                <div v-for="(recipient, index) in form.recipients" :key="index" class="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                    <fieldset :disabled="saving" class="min-w-0">
+                        <legend class="sr-only">{{ t('outgoingRecipient') }} {{ index + 1 }}</legend>
+                        <div class="mb-4 flex flex-wrap items-center justify-between gap-3">
+                            <div class="flex items-center gap-2" aria-hidden="true">
+                                <span class="grid size-7 place-items-center rounded-full bg-teal-700 text-xs font-semibold text-white">{{ index + 1 }}</span>
+                                <span class="font-medium text-slate-800">{{ t('outgoingRecipient') }} {{ index + 1 }}</span>
+                                <span class="rounded-full px-2.5 py-0.5 text-xs font-semibold" :class="recipient.kind === 'copy' ? 'bg-slate-200 text-slate-700' : 'bg-teal-100 text-teal-800'">{{ t(`outgoingRecipient-${recipient.kind}`) }}</span>
+                            </div>
+                            <UiButton variant="secondary" :disabled="saving" @click="form.recipients.splice(index, 1)">{{ t('outgoingRemoveRecipient') }}</UiButton>
+                        </div>
+                        <div class="grid gap-x-5 gap-y-4 md:grid-cols-2">
+                            <SelectInput :id="`outgoing-recipient-${index}-kind`" v-model="recipient.kind" :label="t('outgoingRecipientKind')" :options="recipientKinds" :error-key="fields[`recipients.${index}.kind`]?.[0]" required />
+                            <div v-for="field in recipientFields" :key="field"><TextInput :id="`outgoing-recipient-${index}-${field}`" v-model="recipient[field]" :label="t(`outgoingRecipient-${field}`)" :type="field === 'email' ? 'email' : 'text'" :required="field === 'organization'" :maxlength="field === 'address' ? 500 : field === 'phone' ? 64 : 255" :error-key="fields[`recipients.${index}.${field}`]?.[0]" /></div>
+                        </div>
+                    </fieldset>
+                </div>
+                <div class="flex flex-wrap items-center gap-2 rounded-xl border border-dashed border-slate-300 p-3"><UiButton variant="secondary" :disabled="saving || form.recipients.length >= 50" @click="form.recipients.push(emptyRecipient())">{{ t('outgoingAddPrimary') }}</UiButton><UiButton variant="secondary" :disabled="saving || form.recipients.length >= 50" @click="form.recipients.push(emptyRecipient('copy'))">{{ t('outgoingAddCopy') }}</UiButton></div>
+            </FormSection>
+            <FormSection collapsible :open="additionalOpen" :icon="infoIcon" :title="t('additionalInformation')" :description="t('formSectionAdditionalHelp')">
+                <TextInput v-for="field in additionalFields" :key="field" v-model="form[field]" v-bind="fieldProps(field)" />
                 <TextareaInput v-for="field in descriptionFields" :id="`outgoing-${field}`" :key="field" v-model="form[field]" :label="t(`outgoing-${field}`)" :error-key="fields[field]?.[0]" maxlength="5000" />
-            </div></details>
-            <section class="flex flex-col gap-4" aria-labelledby="outgoing-recipients-title">
-                <h3 id="outgoing-recipients-title" class="font-semibold">{{ t('outgoingRecipients') }}</h3>
-                <p class="text-sm text-slate-600">{{ t('outgoingRecipientsHelp') }}</p>
-                <fieldset v-for="(recipient, index) in form.recipients" :key="index" :disabled="saving" class="grid gap-4 rounded-xl border border-slate-200 p-4 md:grid-cols-2">
-                    <legend class="px-2 font-medium">{{ t('outgoingRecipient') }} {{ index + 1 }}</legend>
-                    <SelectInput :id="`outgoing-recipient-${index}-kind`" v-model="recipient.kind" :label="t('outgoingRecipientKind')" :options="recipientKinds" :error-key="fields[`recipients.${index}.kind`]?.[0]" required />
-                    <TextInput v-for="field in recipientFields" :id="`outgoing-recipient-${index}-${field}`" :key="field" v-model="recipient[field]" :label="t(`outgoingRecipient-${field}`)" :type="field === 'email' ? 'email' : 'text'" :required="field === 'organization'" :maxlength="field === 'address' ? 500 : field === 'phone' ? 64 : 255" :error-key="fields[`recipients.${index}.${field}`]?.[0]" />
-                    <UiButton variant="secondary" :disabled="saving" @click="form.recipients.splice(index, 1)">{{ t('outgoingRemoveRecipient') }}</UiButton>
-                </fieldset>
-                <div class="flex flex-wrap gap-2"><UiButton variant="secondary" :disabled="saving || form.recipients.length >= 50" @click="form.recipients.push(emptyRecipient())">{{ t('outgoingAddPrimary') }}</UiButton><UiButton variant="secondary" :disabled="saving || form.recipients.length >= 50" @click="form.recipients.push(emptyRecipient('copy'))">{{ t('outgoingAddCopy') }}</UiButton></div>
-            </section>
+            </FormSection>
             <p v-if="contextLoading" role="status" class="text-sm text-slate-600">{{ t('documentDepartmentLoading') }}</p>
-            <div class="sticky bottom-0 flex flex-wrap gap-3 border-t border-slate-200 bg-white py-3"><UiButton type="submit" :loading="saving" :disabled="contextLoading || !contextValid">{{ t('outgoingSave') }}</UiButton><UiButton variant="secondary" :disabled="saving" @click="editing = false">{{ t('uiCancel') }}</UiButton></div>
+            <FormActions><UiButton variant="secondary" :disabled="saving" @click="editing = false">{{ t('uiCancel') }}</UiButton><UiButton type="submit" :loading="saving" :disabled="contextLoading || !contextValid">{{ t('outgoingSave') }}</UiButton></FormActions>
         </form>
         <section v-else-if="detail" class="flex flex-col gap-5 rounded-2xl border border-slate-200 bg-white p-5" aria-labelledby="outgoing-detail-title">
                 <SelectInput v-if="!automaticOfficial && !detail.registered_at && detail.xppl_namespaces?.length" v-model="namespaceId" :label="t('numberingSelection')" :options="namespaceOptions" :disabled="saving || loading" />

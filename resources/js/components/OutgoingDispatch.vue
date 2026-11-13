@@ -8,6 +8,7 @@ import SelectInput from './ui/SelectInput.vue';
 import TextareaInput from './ui/TextareaInput.vue';
 import { useLocalization } from '../localization/index.js';
 import { createJsonClient } from '../utilities/jsonClient.js';
+import { showSuccess } from '../utilities/alerts.js';
 
 const props = defineProps({ record: { type: Object, required: true }, scope: { type: Object, required: true }, endpoint: { type: String, required: true }, incomingEndpoint: { type: String, default: '' }, csrfToken: { type: String, required: true }, history: { type: Array, default: () => [] }, relatedIncoming: { type: Array, default: () => [] } });
 const emit = defineEmits(['saved', 'failure']);
@@ -75,7 +76,7 @@ async function save(action = mode.value, incomingId = null) {
     saving.value = true; error.value = ''; fields.value = {};
     try {
         const result = await request(url('/operations'), { method: 'POST', body, signal: controller.signal });
-        if (!controller.signal.aborted) { mode.value = ''; emit('saved', result.data); }
+        if (!controller.signal.aborted) { mode.value = ''; showSuccess(t('uiSaveSuccess')); emit('saved', result.data); }
     } catch (caught) { failure(caught); await nextTick(); editor.value?.querySelector('[aria-invalid="true"]')?.focus(); }
     finally { if (!controller.signal.aborted) { saving.value = false; } }
 }
@@ -123,7 +124,7 @@ onBeforeUnmount(() => controller.abort());
             </fieldset>
             <fieldset v-if="mode === 'delivery'" :disabled="saving" class="grid gap-4 md:grid-cols-2">
                 <SelectInput id="outgoing-delivery-recipient" v-model="form.recipient_id" :label="t('outgoingRecipient')" :options="recipients" :error-key="fields.recipient_id?.[0]" required />
-                <TextInput id="outgoing-delivery-date" v-model="form.delivery_date" type="date" :label="t('outgoingField-delivery_date')" :helper="t('outgoingDeliveryHelp')" :error-key="fields.delivery_date?.[0]" />
+                <TextInput id="outgoing-delivery-date" v-model="form.delivery_date" type="date" allow-future :label="t('outgoingField-delivery_date')" :helper="t('outgoingDeliveryHelp')" :error-key="fields.delivery_date?.[0]" />
                 <TextInput id="outgoing-acknowledged-by" v-model="form.acknowledged_by" :label="t('outgoingField-acknowledged_by')" :error-key="fields.acknowledged_by?.[0]" maxlength="255" />
                 <TextInput id="outgoing-acknowledgment-date" v-model="form.acknowledgment_date" type="date" :label="t('outgoingField-acknowledgment_date')" :error-key="fields.acknowledgment_date?.[0]" />
                 <TextInput id="outgoing-acknowledgment-reference" v-model="form.acknowledgment_reference" :label="t('outgoingField-acknowledgment_reference')" :error-key="fields.acknowledgment_reference?.[0]" maxlength="255" />

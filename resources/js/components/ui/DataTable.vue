@@ -96,7 +96,7 @@ function columnClasses(column) {
                 <thead class="border-b border-slate-200 bg-slate-100 text-xs text-slate-600">
                     <tr>
                         <th v-for="column in columns" :key="column.key" scope="col" :aria-sort="sort.key === column.key && column.sortable ? (sort.direction === 'desc' ? 'descending' : 'ascending') : undefined" :style="{ width: column.width }" class="px-4 py-3 font-semibold" :class="columnClasses(column)">
-                            <button v-if="column.sortable" type="button" :disabled="loading" :aria-label="t(sort.key === column.key && sort.direction === 'asc' ? 'uiSortDescending' : 'uiSortAscending', { column: column.label })" class="flex min-h-8 w-full items-center gap-2 rounded text-left disabled:opacity-50" @click="sortBy(column)">
+                            <button v-if="column.sortable" type="button" :disabled="loading" :aria-label="t(sort.key === column.key && sort.direction === 'asc' ? 'uiSortDescending' : 'uiSortAscending', { column: column.label })" :title="t(sort.key === column.key && sort.direction === 'asc' ? 'uiSortDescending' : 'uiSortAscending', { column: column.label })" class="flex min-h-8 w-full items-center gap-2 rounded text-left disabled:opacity-50" @click="sortBy(column)">
                                 {{ column.label }} <span aria-hidden="true">{{ sort.key === column.key ? (sort.direction === 'desc' ? '↓' : '↑') : '↕' }}</span>
                             </button>
                             <span v-else>{{ column.label }}</span>

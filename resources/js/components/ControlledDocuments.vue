@@ -9,9 +9,23 @@ import TextInput from './ui/TextInput.vue';
 import TextareaInput from './ui/TextareaInput.vue';
 import SelectInput from './ui/SelectInput.vue';
 import UiButton from './ui/UiButton.vue';
+import PageBackButton from './ui/PageBackButton.vue';
 import StatusBadge from './ui/StatusBadge.vue';
 import DataTable from './ui/DataTable.vue';
 import ToastNotifications from './ui/ToastNotifications.vue';
+import { Icon } from '@iconify/vue';
+import FormHeader from './ui/FormHeader.vue';
+import FormSection from './ui/FormSection.vue';
+import FormActions from './ui/FormActions.vue';
+import fileLinesIcon from '@iconify-icons/flowbite/file-lines-outline';
+import tagIcon from '@iconify-icons/flowbite/tag-outline';
+import bookIcon from '@iconify-icons/flowbite/book-open-outline';
+import usersIcon from '@iconify-icons/flowbite/users-outline';
+import calendarIcon from '@iconify-icons/flowbite/calendar-month-outline';
+import filePenIcon from '@iconify-icons/flowbite/file-pen-outline';
+import paperClipIcon from '@iconify-icons/flowbite/paper-clip-outline';
+import uploadIcon from '@iconify-icons/flowbite/cloud-arrow-up-outline';
+import infoIcon from '@iconify-icons/flowbite/info-circle-outline';
 import { useNotifications } from './ui/useNotifications.js';
 
 const props = defineProps({
@@ -53,6 +67,7 @@ const contextLoading = ref(false);
 const contextValid = ref(true);
 const textFields = ['title_en', 'title_lo'];
 const dateFields = ['issue_date', 'effective_date', 'review_date'];
+const additionalOpen = computed(() => ['description_en', 'description_lo'].some(field => fields.value[field]));
 const detailFields = [...textFields, 'description_en', 'description_lo', 'owner_name', 'custodian_name', ...dateFields, 'revision_reason', 'change_description'];
 const statuses = ['draft', 'current', 'superseded', 'obsolete', 'archived'];
 const label = item => item?.[language.value === 'lo' ? 'name_lo' : 'name_en'] || item?.name_en || '';
@@ -258,25 +273,24 @@ onBeforeUnmount(() => controller?.abort());
     <section class="flex flex-col gap-5">
         <SelectInput v-if="!detail && !editing && authorizedDepartmentOptions.length > 1" id="controlled-context" v-model="departmentContext" :label="t('controlledOwnerDepartment')" :options="authorizedDepartmentOptions" :disabled="loading || saving" class="max-w-sm" />
         <div v-if="!detail && !editing" class="flex flex-wrap items-center justify-between gap-3"><h2 class="text-lg font-semibold">{{ t('controlledTitle') }}</h2><UiButton v-if="can('controlled.drafts.manage')" :disabled="loading || saving" @click="edit(true)">{{ t('controlledCreate') }}</UiButton></div>
-        <UiButton v-if="detail || editing" variant="secondary" class="self-start" :disabled="saving || loading || attachmentBusy" @click="back">{{ t('backToRegister') }}</UiButton>
+        <PageBackButton v-if="detail || editing" :disabled="saving || loading || attachmentBusy" @click="back" />
         <p v-if="error" role="alert" class="rounded-xl bg-red-50 p-4 text-red-800">{{ t(error) }}</p>
         <template v-if="!detail && !editing">
-            <form class="flex flex-wrap items-end gap-3" @submit.prevent="page = 1; error = ''; load()">
-                <TextInput id="controlled-search" v-model="search" :label="t('controlledSearch')" maxlength="200" class="grow" />
+            <form class="grid grid-cols-1 items-end gap-3 md:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_auto]" @submit.prevent="page = 1; error = ''; load()">
+                <TextInput id="controlled-search" v-model="search" :label="t('controlledSearch')" maxlength="200" />
                 <SelectInput id="controlled-status-filter" v-model="status" :label="t('uiStatus')" :options="statusOptions" />
                 <SelectInput id="controlled-type-filter" v-model="typeFilter" :label="t('documentType')" :options="typeOptions" />
-                <UiButton type="submit" variant="secondary" :disabled="loading">{{ t('incomingApplyFilters') }}</UiButton>
+                <UiButton type="submit" :disabled="loading">{{ t('incomingApplyFilters') }}</UiButton>
             </form>
             <DataTable v-model:page="page" :rows="displayRows" :columns="columns" :caption="t('controlledTitle')" :loading="loading" :error="error" server-side :total="total" :per-page="10" @change="load()">
-                <template #cell-document_code="{ row }"><button type="button" :disabled="loading" class="text-left font-semibold text-teal-800 hover:underline" @click="show(row)">{{ row.display_identifier || t('controlledUnnumbered') }}</button><span class="block font-mono text-xs text-slate-500">{{ row.internal_number || '—' }}</span></template>
+                <template #cell-document_code="{ row }"><button type="button" :title="row.display_identifier || t('controlledUnnumbered')" :disabled="loading" class="text-left font-semibold text-teal-800 hover:underline" @click="show(row)">{{ row.display_identifier || t('controlledUnnumbered') }}</button><span class="block font-mono text-xs text-slate-500">{{ row.internal_number || '—' }}</span></template>
                 <template #cell-status="{ row }"><StatusBadge :status="row.status" :label="t(`controlledStatus-${row.status}`)" /></template>
                 <template #cell-actions="{ row }"><UiButton variant="secondary" :disabled="loading" @click="show(row)">{{ t('rbacDetails') }}</UiButton></template>
             </DataTable>
         </template>
-        <form v-if="editing" id="controlled-draft-form" ref="editor" class="flex flex-col gap-5 rounded-2xl border border-slate-200 bg-white p-5" @submit.prevent="save">
-            <h2 tabindex="-1" class="text-lg font-semibold">{{ t(detail ? 'controlledEdit' : 'controlledCreate') }}</h2>
-            <p class="text-sm text-slate-600">{{ t('controlledDraftHelp') }}</p>
-            <fieldset :disabled="saving || pendingUpload || attachmentBusy" class="grid gap-4 md:grid-cols-2"><legend class="mb-3 font-semibold">{{ t('documentInformation') }}</legend>
+        <form v-if="editing" id="controlled-draft-form" ref="editor" class="flex flex-col gap-5" @submit.prevent="save">
+            <FormHeader :icon="fileLinesIcon" :eyebrow="t('controlledTitle')" :title="t(detail ? 'controlledEdit' : 'controlledCreate')" :description="t('controlledDraftHelp')" />
+            <FormSection :icon="tagIcon" :title="t('formSectionIdentification')" :description="t('formSectionIdentificationHelp')" :disabled="saving || pendingUpload || attachmentBusy">
                 <SelectInput id="controlled-department" v-model="departmentContext" :label="t('controlledOwnerDepartment')" :options="authorizedDepartmentOptions" :helper="t('documentDepartmentHelp')" :disabled="!!detail || saving" required />
                 <template v-if="!detail?.registered_at"><TextInput v-if="!automaticDraft" id="controlled-document_code" v-model="form.document_code" :label="t('controlled-document_code')" :error-key="fields.document_code?.[0]" maxlength="100" required /><SelectInput id="controlled-type" v-model="form.type_id" :label="t('documentType')" :options="typeOptions" :error-key="fields.type_id?.[0]" required /></template>
                 <template v-if="automaticDraft">
@@ -286,32 +300,49 @@ onBeforeUnmount(() => controller?.abort());
                 <TextInput v-if="detail?.registered_at" id="controlled-type" :model-value="label(detail.type)" :label="t('documentType')" readonly />
                 <TextInput id="controlled-category" :model-value="selectedCategoryLabel" :label="t('documentCategory')" :helper="t('documentCategoryHelp')" readonly />
                 <SelectInput v-if="!detail" id="controlled-classification" v-model="form.classification" :label="t('outgoingClassification')" :options="classificationOptions" :error-key="fields.classification?.[0]" required />
+            </FormSection>
+            <FormSection :icon="bookIcon" :title="t('formSectionTitles')" :description="t('formSectionTitlesHelp')" :disabled="saving || pendingUpload || attachmentBusy">
                 <TextInput v-for="field in textFields" :id="`controlled-${field}`" :key="field" v-model="form[field]" :label="t(`controlled-${field}`)" :required="field === 'title_en'" :error-key="fields[field]?.[0]" maxlength="500" />
+            </FormSection>
+            <FormSection :icon="usersIcon" :title="t('formSectionResponsibility')" :description="t('formSectionResponsibilityHelp')" :disabled="saving || pendingUpload || attachmentBusy">
                 <SelectInput v-for="field in ['owner_id', 'custodian_id']" :id="`controlled-${field}`" :key="field" v-model="form[field]" :label="t(`controlled-${field}`)" :options="peopleOptions" :error-key="fields[field]?.[0]" :required="field === 'custodian_id'" :helper="field === 'owner_id' ? t('controlledOwnerHelp') : t('controlledCustodianHelp')" />
-                <p v-if="!contextLoading && !people.length" role="status" class="text-sm text-slate-600">{{ t('controlledNoCustodian') }}</p>
-                <TextInput v-for="field in dateFields" :id="`controlled-${field}`" :key="field" v-model="form[field]" :label="t(`controlled-${field}`)" type="date" :required="field !== 'review_date'" :error-key="fields[field]?.[0]" />
+                <p v-if="!contextLoading && !people.length" role="status" class="flex items-start gap-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-900 md:col-span-2"><Icon :icon="infoIcon" aria-hidden="true" class="mt-0.5 size-4 shrink-0" />{{ t('controlledNoCustodian') }}</p>
+            </FormSection>
+            <FormSection :icon="calendarIcon" :title="t('formSectionDates')" :description="t('formSectionDatesHelp')" :columns="3" :disabled="saving || pendingUpload || attachmentBusy">
+                <TextInput v-for="field in dateFields" :id="`controlled-${field}`" :key="field" v-model="form[field]" :label="t(`controlled-${field}`)" type="date" :allow-future="field !== 'issue_date'" :required="field !== 'review_date'" :error-key="fields[field]?.[0]" />
+            </FormSection>
+            <FormSection :icon="filePenIcon" :title="t('formSectionRevision')" :description="t('formSectionRevisionHelp')" :disabled="saving || pendingUpload || attachmentBusy">
                 <TextareaInput v-for="field in ['revision_reason', 'change_description']" :id="`controlled-${field}`" :key="field" v-model="form[field]" :label="t(`controlled-${field}`)" :error-key="fields[field]?.[0]" maxlength="5000" required />
-            </fieldset>
-            <details class="rounded-xl border border-slate-200 p-4"><summary class="cursor-pointer text-sm font-semibold">{{ t('additionalInformation') }}</summary><div class="mt-4 grid gap-4 md:grid-cols-2"><TextareaInput v-for="field in ['description_en', 'description_lo']" :id="`controlled-${field}`" :key="field" v-model="form[field]" :label="t(`controlled-${field}`)" :error-key="fields[field]?.[0]" maxlength="5000" :disabled="saving || pendingUpload || attachmentBusy" /></div></details>
-            <section v-if="!detail?.storage_url || pendingUpload" class="flex flex-col gap-3 rounded-xl border border-teal-300 bg-teal-50 p-4" aria-labelledby="controlled-attachment-title">
-                <h3 id="controlled-attachment-title" class="font-semibold text-teal-900">{{ t('controlledAttachment') }} · {{ revisionLabel(draft) }}</h3>
-                <p class="text-sm text-slate-700">{{ t('controlledAttachmentHelp') }}</p>
+            </FormSection>
+            <FormSection collapsible :open="additionalOpen" :icon="infoIcon" :title="t('additionalInformation')" :description="t('formSectionAdditionalHelp')">
+                <TextareaInput v-for="field in ['description_en', 'description_lo']" :id="`controlled-${field}`" :key="field" v-model="form[field]" :label="t(`controlled-${field}`)" :error-key="fields[field]?.[0]" maxlength="5000" :disabled="saving || pendingUpload || attachmentBusy" />
+            </FormSection>
+            <section v-if="!detail?.storage_url || pendingUpload" class="flex flex-col gap-4 rounded-2xl border border-teal-200 bg-white p-4 sm:p-5" aria-labelledby="controlled-attachment-title">
+                <div class="flex items-start gap-3">
+                    <span class="grid size-9 shrink-0 place-items-center rounded-xl bg-teal-50 text-teal-700 ring-1 ring-teal-100" aria-hidden="true"><Icon :icon="paperClipIcon" class="size-5" /></span>
+                    <div class="flex min-w-0 flex-col gap-0.5"><h3 id="controlled-attachment-title" class="font-semibold text-slate-900">{{ t('controlledAttachment') }} · {{ revisionLabel(draft) }}</h3><p class="text-sm text-slate-500">{{ t('controlledAttachmentHelp') }}</p></div>
+                </div>
                 <template v-if="can('documents.attachments.manage')">
-                    <label class="flex flex-col gap-2 text-sm" for="controlled-attachment-file">{{ t('storageFile') }}<input id="controlled-attachment-file" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp,.tif,.tiff,.dwg,.dxf" :disabled="saving" class="ui-control max-w-full" @change="selectedFile = $event.target.files[0] ?? null" /></label>
-                    <p v-if="selectedFile" class="text-sm wrap-anywhere">{{ selectedFile.name }}</p>
+                    <label for="controlled-attachment-file" class="flex cursor-pointer flex-col items-center gap-2 rounded-xl border-2 border-dashed border-teal-300 bg-teal-50 px-4 py-8 text-center transition-colors hover:border-teal-500 has-focus-visible:border-teal-600 has-focus-visible:ring-2 has-focus-visible:ring-teal-600/30 has-disabled:cursor-not-allowed has-disabled:opacity-60 motion-reduce:transition-none">
+                        <Icon :icon="uploadIcon" aria-hidden="true" class="size-8 text-teal-700" />
+                        <span class="text-sm font-semibold text-teal-900">{{ t('storageFile') }}</span>
+                        <span v-if="selectedFile" class="max-w-full text-sm font-medium wrap-anywhere text-slate-800">{{ selectedFile.name }}</span>
+                        <span v-else class="text-xs text-slate-500" aria-hidden="true">PDF · DOC · DOCX · XLS · XLSX · JPG · PNG · WEBP · TIF · DWG · DXF</span>
+                        <input id="controlled-attachment-file" type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png,.webp,.tif,.tiff,.dwg,.dxf" :disabled="saving" class="sr-only" @change="selectedFile = $event.target.files[0] ?? null" />
+                    </label>
                     <TextInput v-if="selectedFile" id="controlled-attachment-reason" v-model="attachmentReason" :label="t('controlledAttachmentNote')" maxlength="2000" :disabled="saving" />
                 </template>
                 <p v-else class="text-sm text-slate-600">{{ t('controlledAttachmentPermission') }}</p>
-                <p v-if="pendingUpload" role="status" class="text-sm font-semibold text-teal-900">{{ t('controlledDraftSavedUploadPending') }}</p>
-                <p v-if="uploadError" role="alert" class="text-sm text-red-800">{{ t(uploadError) }}</p>
+                <p v-if="pendingUpload" role="status" class="rounded-lg bg-teal-50 p-3 text-sm font-semibold text-teal-900">{{ t('controlledDraftSavedUploadPending') }}</p>
+                <p v-if="uploadError" role="alert" class="rounded-lg bg-red-50 p-3 text-sm text-red-800">{{ t(uploadError) }}</p>
             </section>
-            <template v-else-if="draft">
+            <section v-else-if="draft" class="flex flex-col gap-3 rounded-2xl border border-teal-200 bg-white p-4 sm:p-5">
                 <p v-if="authoritative" class="text-sm text-slate-600">{{ t('controlledReleasedAttachment', { revision: revisionLabel(authoritative) }) }} · {{ t('controlledDraftFileHelp') }}</p>
                 <p class="text-sm font-semibold text-teal-900">{{ t('controlledDraftAttachment', { revision: revisionLabel(draft) }) }}</p>
                 <DocumentStorage mode="attachments" embedded :fixed-revision="draft.id" :endpoint="detail.storage_url" :scope="scope" :csrf-token="csrfToken" :disabled="saving" @failure="fail" @busy="attachmentBusy = $event" @changed="execution && show(detail)" />
-            </template>
+            </section>
             <p v-if="contextLoading" role="status" class="text-sm text-slate-600">{{ t('documentDepartmentLoading') }}</p>
-            <div class="flex gap-3"><UiButton type="submit" :loading="saving" :disabled="contextLoading || !contextValid || attachmentBusy">{{ t(pendingUpload ? 'controlledRetryAttachment' : 'controlledSave') }}</UiButton><UiButton variant="secondary" :disabled="saving || attachmentBusy" @click="cancelEdit">{{ t(pendingUpload ? 'controlledContinueWithoutAttachment' : 'uiCancel') }}</UiButton></div>
+            <FormActions><UiButton variant="secondary" :disabled="saving || attachmentBusy" @click="cancelEdit">{{ t(pendingUpload ? 'controlledContinueWithoutAttachment' : 'uiCancel') }}</UiButton><UiButton type="submit" :loading="saving" :disabled="contextLoading || !contextValid || attachmentBusy">{{ t(pendingUpload ? 'controlledRetryAttachment' : 'controlledSave') }}</UiButton></FormActions>
         </form>
         <section v-else-if="detail" class="flex flex-col gap-5 rounded-2xl border border-slate-200 bg-white p-5" aria-labelledby="controlled-detail-title">
             <div class="flex flex-wrap items-center justify-between gap-3"><h2 id="controlled-detail-title" tabindex="-1" class="text-lg font-semibold">{{ authoritative?.full_identifier || draft?.full_identifier || detail.document_code || t('controlledUnnumbered') }}</h2><StatusBadge :status="detail.status" :label="t(`controlledStatus-${detail.status}`)" /></div>
@@ -367,7 +398,7 @@ onBeforeUnmount(() => controller?.abort());
                 <section class="mt-4 flex flex-col gap-2"><h4 class="font-semibold">{{ t('controlledReviewHistory') }}</h4><p v-if="!reviews.some(item => item.revision_id === revision.id)" class="text-sm text-slate-600">{{ t('controlledReviewEmpty') }}</p><article v-for="entry in reviews.filter(item => item.revision_id === revision.id)" :key="entry.id" class="rounded-lg border border-slate-200 p-3 text-sm"><p>{{ t(`controlledReview-${entry.outcome}`) }} · {{ formatDateTime(entry.recorded_at) }} · {{ t('controlledActor') }} {{ entry.actor_id }}</p><p class="whitespace-pre-wrap wrap-anywhere">{{ entry.comments || '—' }}</p><p>{{ t('controlledNextReview') }}: {{ formatDate(entry.next_review_date?.slice(0, 10)) }}</p></article></section>
                 <section class="mt-4 flex flex-col gap-2"><h4 class="font-semibold">{{ t('controlledApprovalHistory') }}</h4><p v-if="!approvals.some(item => item.revision_id === revision.id)" class="text-sm text-slate-600">{{ t('controlledApprovalEmpty') }}</p><article v-for="entry in approvals.filter(item => item.revision_id === revision.id)" :key="entry.id" class="rounded-lg border border-slate-200 p-3 text-sm"><p>{{ t(`controlledApproval-${entry.decision}`) }} · {{ formatDateTime(entry.recorded_at) }} · {{ t('controlledActor') }} {{ entry.actor_id }}</p><p v-if="entry.snapshot?.workflow">{{ t('workflowVersion') }} {{ entry.snapshot.workflow.configuration_version }} · {{ t('workflowLevel') }} {{ entry.snapshot.workflow.level }}</p><p class="whitespace-pre-wrap wrap-anywhere">{{ entry.comments || '—' }}</p><p class="text-slate-600">{{ entry.snapshot?.revision?.title_en }}</p></article></section>
             </details>
-            <section v-if="related.length" class="flex flex-col gap-2"><h3 class="font-semibold">{{ t('controlledRelationships') }}</h3><p v-for="item in related" :key="item.id">{{ t(`controlledRelation-${item.relationship}`) }}: <button class="font-semibold text-teal-800 hover:underline" :disabled="loading || saving" @click="show(item)">{{ item.document_code }}</button></p></section>
+            <section v-if="related.length" class="flex flex-col gap-2"><h3 class="font-semibold">{{ t('controlledRelationships') }}</h3><p v-for="item in related" :key="item.id">{{ t(`controlledRelation-${item.relationship}`) }}: <button type="button" :title="item.document_code" class="font-semibold text-teal-800 hover:underline" :disabled="loading || saving" @click="show(item)">{{ item.document_code }}</button></p></section>
             <details class="rounded-xl border border-slate-200 p-4"><summary class="cursor-pointer font-semibold">{{ t('controlledAudit') }}</summary><ul class="mt-3 flex flex-col gap-3"><li v-for="audit in audits" :key="audit.id" class="text-sm"><p>{{ t(`controlledAudit-${audit.action}`) }} · {{ formatDateTime(audit.created_at) }} · {{ t('controlledActor') }} {{ audit.actor_id }}</p><p v-if="audit.reason" class="whitespace-pre-wrap wrap-anywhere text-slate-600">{{ audit.reason }}</p></li></ul></details>
         </section>
         <ToastNotifications :items="items" @dismiss="dismiss" />

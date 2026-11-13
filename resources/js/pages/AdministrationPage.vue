@@ -7,6 +7,7 @@ import TextareaInput from '../components/ui/TextareaInput.vue';
 import SelectInput from '../components/ui/SelectInput.vue';
 import CheckboxInput from '../components/ui/CheckboxInput.vue';
 import DataTable from '../components/ui/DataTable.vue';
+import StatusBadge from '../components/ui/StatusBadge.vue';
 import ConfirmDialog from '../components/ui/SweetConfirmDialog.vue';
 import FormModal from '../components/ui/FormModal.vue';
 import BusyOverlay from '../components/ui/BusyOverlay.vue';
@@ -108,12 +109,12 @@ const label = record => record?.[language.value === 'lo' ? 'name_lo' : 'name_en'
 const scopeLabel = scope => scope.scope_type === 'global' ? t('rbacGlobal')
     : `${t(scope.scope_type === 'company' ? 'company' : 'site')}: ${label(scope.company)}${scope.site ? ` / ${label(scope.site)}` : ''}`;
 const scopeOptions = computed(() => contexts.value.map(scope => ({ value: scope.scope_key, label: scopeLabel(scope) })));
-const roleRows = computed(() => roles.value.map(role => ({ ...role, display_name: label(role), display_scope: roleScopeLabel(role), status: t(role.active ? 'rbacActive' : 'rbacInactive') })));
+const roleRows = computed(() => roles.value.map(role => ({ ...role, display_name: label(role), display_scope: roleScopeLabel(role), status_key: role.active ? 'active' : 'inactive', status: t(role.active ? 'rbacActive' : 'rbacInactive') })));
 const roleColumns = computed(() => [
     { key: 'display_name', label: t('rbacRole') }, { key: 'display_scope', label: t('rbacScope') },
     { key: 'status', label: t('uiStatus') }, { key: 'actions', label: t('rbacActions') },
 ]);
-const assignmentRows = computed(() => assignments.value.map(assignment => ({ ...assignment, user_name: assignment.user.name, role_name: label(assignment.role), status: t(assignment.active ? 'rbacActive' : 'rbacInactive') })));
+const assignmentRows = computed(() => assignments.value.map(assignment => ({ ...assignment, user_name: assignment.user.name, role_name: label(assignment.role), status_key: assignment.active ? 'active' : 'inactive', status: t(assignment.active ? 'rbacActive' : 'rbacInactive') })));
 const assignmentColumns = computed(() => [
     { key: 'user_name', label: t('rbacAccount') }, { key: 'role_name', label: t('rbacRole') },
     { key: 'scope_key', label: t('rbacScope') }, { key: 'status', label: t('uiStatus') }, { key: 'actions', label: t('rbacActions') },
@@ -395,7 +396,7 @@ onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
 
             <nav :aria-label="t('administration')" data-admin-tabs class="-mx-1 overflow-x-auto px-1 pb-1 [scrollbar-width:thin]">
                 <div class="flex w-max gap-1 rounded-2xl border border-slate-200/80 bg-white/70 p-1.5 shadow-sm shadow-slate-900/5 backdrop-blur-md sm:w-auto sm:flex-wrap">
-                    <button v-for="item in sections" :key="item.key" type="button" :data-admin-tab="item.key" :aria-pressed="section === item.key" class="group inline-flex shrink-0 items-center gap-2 rounded-xl py-2 pr-3.5 pl-2 text-sm font-medium whitespace-nowrap transition-all duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600 motion-reduce:transition-none" :class="section === item.key ? 'bg-linear-to-br from-teal-600 to-sky-700 text-white shadow-md shadow-teal-700/25' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'" @click="section = item.key">
+                    <button v-for="item in sections" :key="item.key" type="button" :data-admin-tab="item.key" :title="t(item.label)" :aria-pressed="section === item.key" class="group inline-flex shrink-0 items-center gap-2 rounded-xl py-2 pr-3.5 pl-2 text-sm font-medium whitespace-nowrap transition-all duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600 motion-reduce:transition-none" :class="section === item.key ? 'bg-linear-to-br from-teal-600 to-sky-700 text-white shadow-md shadow-teal-700/25' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'" @click="section = item.key">
                         <span aria-hidden="true" class="inline-flex size-7 items-center justify-center rounded-lg transition-colors" :class="section === item.key ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500 group-hover:bg-white group-hover:text-teal-700'"><Icon :icon="item.icon" class="size-4" /></span>
                         <span>{{ t(item.label) }}</span>
                     </button>
@@ -416,6 +417,7 @@ onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
                 <p v-if="selected" data-roles-scope class="rounded-lg border border-teal-200 bg-teal-50 px-4 py-3 text-sm font-semibold text-teal-900">{{ t('rbacRolesScope', { scope: scopeLabel(selected) }) }}</p>
                 <DataTable v-model:page="rolePage" :rows="roleRows" :columns="roleColumns" :caption="t('rbacRoles')" :loading="loading" server-side :total="roleTotal" :per-page="10" @change="changeRolePage">
                     <template #cell-display_name="{ row }"><span class="font-semibold">{{ row.display_name }}</span><span v-if="row.code !== 'SECURITY_ADMINISTRATOR' && missingWorkspacePermissions(row)" class="block text-xs text-amber-800">{{ t('rbacWorkspaceSetupNeeded') }}</span></template>
+                    <template #cell-status="{ row }"><StatusBadge :status="row.status_key" :label="row.status" /></template>
                     <template #cell-actions="{ row }"><IconButton :action="row.editable ? 'edit' : 'view'" :label="t(row.editable ? 'rbacEdit' : 'rbacDetails')" :disabled="saving" @click="showRole(row)" /></template>
                 </DataTable>
             </section>
@@ -490,6 +492,7 @@ onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
             <section v-show="section === 'roles'" v-if="can('assignments.view')" class="flex flex-col gap-4" aria-labelledby="assignments-heading">
                 <div class="flex flex-wrap items-center justify-between gap-3"><h3 id="assignments-heading" class="font-semibold">{{ t('rbacAssignments') }}</h3><UiButton v-if="can('assignments.manage') && can('users.view') && can('roles.view')" data-open-assign :disabled="loading || saving" @click="errorKey = ''; assignOpen = true">{{ t('rbacAssignRole') }}</UiButton></div>
                 <DataTable v-model:page="assignmentPage" :rows="assignmentRows" :columns="assignmentColumns" :caption="t('rbacAssignments')" :loading="loading" server-side :total="assignmentTotal" :per-page="10" @change="changeAssignmentPage">
+                    <template #cell-status="{ row }"><StatusBadge :status="row.status_key" :label="row.status" /></template>
                     <template #cell-actions="{ row }"><IconButton v-if="can('assignments.manage') && row.active && row.revocable" action="delete" :label="t('rbacRevoke')" :disabled="saving" @click="prepareRevoke(row)" /></template>
                 </DataTable>
             </section>

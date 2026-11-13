@@ -6,6 +6,7 @@ import TextInput from './ui/TextInput.vue';
 import SelectInput from './ui/SelectInput.vue';
 import CheckboxInput from './ui/CheckboxInput.vue';
 import DataTable from './ui/DataTable.vue';
+import StatusBadge from './ui/StatusBadge.vue';
 import ConfirmDialog from './ui/SweetConfirmDialog.vue';
 import FormModal from './ui/FormModal.vue';
 import { showSuccess } from '../utilities/alerts.js';
@@ -98,9 +99,9 @@ const options = computed(() => [{ value: '', label: t('uiChoose') }, ...register
 const purposes = computed(() => ['internal_register', 'official_outgoing'].map(value => ({ value, label: t(`numberingPurpose-${value}`), disabled: value === 'official_outgoing' && registers.value.find(row => row.id === Number(form.register_id))?.register_key !== 'outgoing' })));
 const policies = computed(() => ['annual', 'continuous'].map(value => ({ value, label: t(`numberingPolicy-${value}`) })));
 const columns = computed(() => [{ key: 'register_label', label: t('masterRegister') }, { key: 'purpose_label', label: t('numberingPurpose') }, { key: 'prefix', label: t('numberingPrefix') }, { key: 'format_definition', label: t('numberingFormatDefinition') }, { key: 'policy_label', label: t('numberingPolicy') }, { key: 'status', label: t('uiStatus') }, { key: 'actions', label: t('rbacActions') }]);
-const displayRows = computed(() => rows.value.map(row => ({ ...row, register_label: t(`masterRegister-${row.register_key}`), purpose_label: t(`numberingPurpose-${row.purpose}`), prefix: row.configuration?.prefix ?? '—', format_definition: formatDefinition(row.configuration?.format), policy_label: t(`numberingPolicy-${row.reset_policy}`), status: t(!row.configuration?.active ? 'rbacInactive' : row.effective ? 'rbacActive' : 'masterBlocked') })));
+const displayRows = computed(() => rows.value.map(row => ({ ...row, register_label: t(`masterRegister-${row.register_key}`), purpose_label: t(`numberingPurpose-${row.purpose}`), prefix: row.configuration?.prefix ?? '—', format_definition: formatDefinition(row.configuration?.format), policy_label: t(`numberingPolicy-${row.reset_policy}`), status_key: !row.configuration?.active ? 'inactive' : row.effective ? 'active' : 'blocked', status: t(!row.configuration?.active ? 'rbacInactive' : row.effective ? 'rbacActive' : 'masterBlocked') })));
 const historyColumns = computed(() => [{ key: 'version', label: t('numberingVersion') }, { key: 'prefix', label: t('numberingPrefix') }, { key: 'format_definition', label: t('numberingFormatDefinition') }, { key: 'padding', label: t('numberingPadding') }, { key: 'status', label: t('uiStatus') }, { key: 'effective_at', label: t('numberingEffective') }, { key: 'created_by', label: t('numberingActor') }, { key: 'change_reason', label: t('numberingReason') }]);
-const historyRows = computed(() => history.value.map(row => ({ ...row, format_definition: formatDefinition(row.format), effective_at: formatDateTime(row.effective_at), status: t(row.active ? 'rbacActive' : 'rbacInactive') })));
+const historyRows = computed(() => history.value.map(row => ({ ...row, format_definition: formatDefinition(row.format), effective_at: formatDateTime(row.effective_at), status_key: row.active ? 'active' : 'inactive', status: t(row.active ? 'rbacActive' : 'rbacInactive') })));
 function formatDefinition(format) { return format ? JSON.stringify(format, null, 2) : t('numberingLegacyFormat'); }
 function formatData() { return form.custom_format ? { pattern: form.pattern, ...Object.fromEntries(['company', 'department', 'document_type'].filter(key => form[key] !== '').map(key => [key, form[key]])) } : null; }
 function scopeData() { return { scope_type: props.scope.scope_type, company_id: props.scope.company_id, site_id: props.scope.site_id }; }
@@ -261,6 +262,7 @@ onBeforeUnmount(() => { controller?.abort(); previewController?.abort(); history
                 <div v-if="canManage"><UiButton :disabled="loading || saving" @click="edit()">{{ t('numberingCreate') }}</UiButton></div>
             <DataTable v-model:page="page" :rows="displayRows" :columns="columns" :caption="t('numberingTitle')" :loading="loading" server-side :total="total" :per-page="10" @change="load">
                 <template #cell-format_definition="{ row }"><pre class="whitespace-pre-wrap wrap-anywhere font-mono text-xs">{{ row.format_definition }}</pre></template>
+                <template #cell-status="{ row }"><StatusBadge :status="row.status_key" :label="row.status" /></template>
                 <template #cell-actions="{ row }"><div class="flex flex-wrap gap-2"><IconButton :action="canManage ? 'edit' : 'view'" :label="t(canManage ? 'rbacEdit' : 'rbacDetails')" :disabled="saving" @click="edit(row)" /><UiButton variant="secondary" :disabled="saving" @click="loadHistory(row)">{{ t('numberingHistory') }}</UiButton></div></template>
             </DataTable>
             <FormModal v-if="editor" :title="t(editor.id ? 'numberingEdit' : 'numberingCreate')" :subtitle="t('numberingIdentityHelp')" :busy="saving" @close="editor = null">
@@ -293,7 +295,7 @@ onBeforeUnmount(() => { controller?.abort(); previewController?.abort(); history
                 <div class="flex flex-wrap justify-end gap-3 border-t border-slate-200 pt-4"><UiButton variant="secondary" :disabled="saving" @click="editor = null">{{ t('uiCancel') }}</UiButton><UiButton v-if="canManage" type="submit" :disabled="saving">{{ t('numberingSave') }}</UiButton></div>
             </form>
             </FormModal>
-            <section v-if="historySeries" class="flex flex-col gap-3" aria-labelledby="numbering-history"><h4 id="numbering-history" class="font-semibold">{{ t('numberingHistory') }} · {{ historySeries.configuration?.prefix }}</h4><DataTable v-model:page="historyPage" :rows="historyRows" :columns="historyColumns" :caption="t('numberingHistory')" :loading="historyLoading" server-side :total="historyTotal" :per-page="10" @change="loadHistory()"><template #cell-format_definition="{ row }"><pre class="whitespace-pre-wrap wrap-anywhere font-mono text-xs">{{ row.format_definition }}</pre></template></DataTable></section>
+            <section v-if="historySeries" class="flex flex-col gap-3" aria-labelledby="numbering-history"><h4 id="numbering-history" class="font-semibold">{{ t('numberingHistory') }} · {{ historySeries.configuration?.prefix }}</h4><DataTable v-model:page="historyPage" :rows="historyRows" :columns="historyColumns" :caption="t('numberingHistory')" :loading="historyLoading" server-side :total="historyTotal" :per-page="10" @change="loadHistory()"><template #cell-format_definition="{ row }"><pre class="whitespace-pre-wrap wrap-anywhere font-mono text-xs">{{ row.format_definition }}</pre></template><template #cell-status="{ row }"><StatusBadge :status="row.status_key" :label="row.status" /></template></DataTable></section>
             </div>
         </details>
         <ConfirmDialog v-model="confirmationOpen" :title="t('numberingSave')" :message="t('numberingSaveConfirm')" :loading="saving" @confirm="save" />

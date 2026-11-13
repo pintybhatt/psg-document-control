@@ -34,7 +34,7 @@ async function dismiss(id, event) {
                 <p class="text-sm font-semibold">{{ t(`uiToast-${Object.hasOwn(styles, item.type) ? item.type : 'info'}`) }}</p>
                 <p class="mt-1 text-sm leading-6 wrap-break-word">{{ item.messageKey ? t(item.messageKey, item.params) : item.message }}</p>
             </div>
-            <button type="button" :aria-label="t('uiDismissNotification')" class="rounded px-2 py-1 text-lg leading-none hover:bg-white/50" @click="dismiss(item.id, $event)"><span aria-hidden="true">×</span></button>
+            <button type="button" :aria-label="t('uiDismissNotification')" :title="t('uiDismissNotification')" class="rounded px-2 py-1 text-lg leading-none hover:bg-white/50" @click="dismiss(item.id, $event)"><span aria-hidden="true">×</span></button>
         </article>
     </section>
 </template>

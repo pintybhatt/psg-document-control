@@ -2,6 +2,7 @@
 import { onBeforeUnmount, ref, watch } from 'vue';
 import { useLocalization } from '../localization/index.js';
 import { createJsonClient } from '../utilities/jsonClient.js';
+import { showSuccess } from '../utilities/alerts.js';
 import { formatDateTime } from '../utilities/dates.js';
 import UiButton from './ui/UiButton.vue';
 import TextareaInput from './ui/TextareaInput.vue';
@@ -32,7 +33,7 @@ async function decide(decision) {
     if (props.kind === 'controlled') { body.lock_version = state.value.lock_version; }
     try {
         await request(props.execution.url, { method: 'POST', signal, body });
-        if (!signal.aborted) { emit('saved'); }
+        if (!signal.aborted) { showSuccess(t('uiSaveSuccess')); emit('saved'); }
     } catch (failure) { if (!signal.aborted) { fail(failure); } }
     finally { if (!signal.aborted) { busy.value = false; } }
 }

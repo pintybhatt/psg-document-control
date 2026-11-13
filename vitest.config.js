@@ -8,5 +8,7 @@ export default defineConfig({
         include: ['tests/Frontend/**/*.test.js'],
         setupFiles: ['tests/Frontend/setup.js'],
         restoreMocks: true,
+        // vanillajs-datepicker ships untranspiled ESM that touches `window`; inline it so it runs against jsdom.
+        server: { deps: { inline: ['vanillajs-datepicker'] } },
     },
 });

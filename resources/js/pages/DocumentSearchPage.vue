@@ -63,16 +63,16 @@ onBeforeUnmount(() => controller?.abort());
 
 <template>
     <section class="flex flex-col gap-5">
-        <SelectInput v-if="units.length > 1" id="search-unit" v-model="unitKey" :label="t('department')" :options="unitOptions" class="max-w-sm" />
         <p v-if="error || workspace.error.value" role="alert" class="rounded-xl bg-red-50 p-4 text-red-800">{{ t(error || workspace.error.value) }}</p>
         <p v-if="workspace.loading.value" role="status">{{ t('uiLoading') }}</p>
         <p v-else-if="!selected" role="status">{{ t('incomingNoContexts') }}</p>
         <template v-else>
-            <form class="flex flex-wrap items-end gap-3" @submit.prevent="load(true)">
-                <TextInput id="document-search" v-model="search" :label="t('searchQuery')" maxlength="200" class="min-w-56 grow" />
+            <form class="grid grid-cols-1 items-end gap-3 sm:grid-cols-2" :class="units.length > 1 ? 'xl:grid-cols-[minmax(0,1.5fr)_minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_auto_auto]' : 'xl:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)_auto_auto]'" @submit.prevent="load(true)">
+                <SelectInput v-if="units.length > 1" id="search-unit" v-model="unitKey" :label="t('department')" :options="unitOptions" />
+                <TextInput id="document-search" v-model="search" :label="t('searchQuery')" maxlength="200" />
                 <SelectInput id="search-register" v-model="register" :label="t('searchRegister')" :options="registerOptions" />
                 <SelectInput id="search-sort" v-model="sort" :label="t('searchSort')" :options="sortOptions" />
-                <CheckboxInput id="search-exact" v-model="exact" :label="t('searchExact')" />
+                <div class="flex min-h-10 items-center"><CheckboxInput id="search-exact" v-model="exact" :label="t('searchExact')" /></div>
                 <UiButton type="submit" :disabled="loading">{{ t('document-search') }}</UiButton>
             </form>
             <details class="rounded-xl border border-slate-200 bg-white p-4">
@@ -95,7 +95,7 @@ onBeforeUnmount(() => controller?.abort());
                     <SelectInput id="search-custody" v-model="filters.custody_status" :label="t('searchCustody')" :options="custodyOptions" />
                     <p class="self-center text-xs text-slate-600">{{ t('searchDateHelp') }}</p>
                     <p v-if="!register || register === 'controlled'" class="self-center text-xs text-slate-600">{{ t('searchHistoryHelp') }}</p>
-                    <UiButton type="submit" variant="secondary" :disabled="loading" class="self-end">{{ t('incomingApplyFilters') }}</UiButton>
+                    <UiButton type="submit" :disabled="loading" class="self-end">{{ t('incomingApplyFilters') }}</UiButton>
                 </form>
             </details>
             <DataTable v-model:page="page" :rows="rows" :columns="columns" row-key="key" :caption="t('document-search')" :loading="loading" :error="error" server-side :total="total" :per-page="10" @change="load()">

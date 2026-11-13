@@ -9,6 +9,7 @@ import TextareaInput from './ui/TextareaInput.vue';
 import CheckboxInput from './ui/CheckboxInput.vue';
 import { useLocalization } from '../localization/index.js';
 import { createJsonClient } from '../utilities/jsonClient.js';
+import { showSuccess } from '../utilities/alerts.js';
 
 const props = defineProps({ record: { type: Object, required: true }, scope: { type: Object, required: true }, endpoint: { type: String, required: true }, csrfToken: { type: String, required: true }, history: { type: Array, default: () => [] }, related: { type: Array, default: () => [] }, responsibleUser: { type: Object, default: null }, responsibleDepartment: { type: Object, default: null } });
 const emit = defineEmits(['saved', 'failure', 'open-related']);
@@ -63,7 +64,7 @@ async function save(action = mode.value, relatedId = null) {
     saving.value = true; error.value = ''; fields.value = {};
     try {
         const result = await request(url('/operations'), { method: 'POST', body, signal: controller.signal });
-        if (!controller.signal.aborted) { mode.value = ''; emit('saved', result.data); }
+        if (!controller.signal.aborted) { mode.value = ''; showSuccess(t('uiSaveSuccess')); emit('saved', result.data); }
     } catch (caught) { failure(caught); await nextTick(); editor.value?.querySelector('[aria-invalid="true"]')?.focus(); }
     finally { if (!controller.signal.aborted) { saving.value = false; } }
 }
@@ -107,7 +108,7 @@ onBeforeUnmount(() => controller.abort());
                 <SelectInput id="incoming-responsible-user" v-model="form.responsible_user_id" :label="t('incomingResponsibleUser')" :options="userOptions" :error-key="fields.responsible_user_id?.[0]" :disabled="loading || saving" />
                 <SelectInput id="incoming-responsible-department" v-model="form.responsible_department_id" :label="t('incomingResponsibleDepartment')" :options="departmentOptions" :error-key="fields.responsible_department_id?.[0]" :disabled="loading || saving" />
                 <SelectInput id="incoming-progress" v-model="form.status" :label="t('uiStatus')" :options="statusOptions" :error-key="fields.status?.[0]" :disabled="saving" />
-                <TextInput id="incoming-due-date" v-model="form.due_date" type="date" :label="t('incomingDueDate')" :error-key="fields.due_date?.[0]" :disabled="saving" />
+                <TextInput id="incoming-due-date" v-model="form.due_date" type="date" allow-future :label="t('incomingDueDate')" :error-key="fields.due_date?.[0]" :disabled="saving" />
                 <CheckboxInput id="incoming-response-required" v-model="form.response_required" :label="t('incomingResponseRequired')" :disabled="saving" />
                 <CheckboxInput id="incoming-response-completed" v-model="form.response_completed" :label="t('incomingResponseCompleted')" :disabled="saving || !form.response_required" />
             </div>

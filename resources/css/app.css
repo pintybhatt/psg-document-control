@@ -247,6 +247,63 @@ select[aria-invalid='true'] + .select2-container .select2-selection--single.dcms
 }
 
 /*
+ * Bootstrap 5 datepicker (vanillajs-datepicker, datepicker-bs5.css) in the app's teal palette.
+ * The picker is attached to <body>, so it is always solid white and sits above modals.
+ */
+.datepicker.dcms-datepicker {
+    z-index: 2000;
+    font-family: inherit;
+}
+
+.dcms-datepicker .datepicker-picker {
+    border: 1px solid var(--color-slate-300);
+    border-radius: 0.75rem;
+    background-color: #fff;
+    opacity: 1;
+    padding: 0.5rem;
+    box-shadow: 0 12px 32px -12px rgb(15 23 42 / 0.35);
+    color: var(--color-slate-800);
+}
+
+.dcms-datepicker .datepicker-header .datepicker-controls .btn,
+.dcms-datepicker .datepicker-footer .datepicker-controls .btn {
+    border-radius: 0.5rem;
+    font-weight: 600;
+    color: var(--color-slate-700);
+}
+
+.dcms-datepicker .datepicker-footer {
+    background-color: #fff;
+    border-top: 1px solid var(--color-slate-100);
+}
+
+.dcms-datepicker .datepicker-footer .today-button {
+    color: var(--color-teal-800);
+}
+
+.dcms-datepicker .datepicker-cell {
+    border-radius: 0.375rem;
+}
+
+.dcms-datepicker .datepicker-cell.selected,
+.dcms-datepicker .datepicker-cell.selected:hover {
+    background-color: var(--color-teal-700);
+    color: #fff;
+}
+
+.dcms-datepicker .datepicker-cell.today:not(.selected) {
+    background-color: var(--color-teal-50);
+    color: var(--color-teal-900);
+    box-shadow: inset 0 0 0 1px var(--color-teal-600);
+}
+
+.dcms-datepicker .datepicker-cell.disabled {
+    color: var(--color-slate-300);
+    cursor: not-allowed;
+    text-decoration: line-through;
+}
+
+/*
  * Glass theme for page content (AppShell <main class="dcms-glass">).
  * White cards become frosted glass over the app backdrop. Modals, inputs and buttons stay solid for legibility.
  */
