@@ -1,0 +1,889 @@
+{
+    "schema_version": 1,
+    "company": {
+        "code": "XPPL",
+        "name_en": "Xekong Power Plant Co., Ltd.",
+        "name_lo": "Xekong Power Plant Co., Ltd.",
+        "active": true
+    },
+    "sites": [
+        {
+            "code": "XPPL",
+            "name_en": "Xekong Power Plant Co., Ltd.",
+            "name_lo": "Xekong Power Plant Co., Ltd.",
+            "active": true
+        }
+    ],
+    "departments": [
+        {
+            "site_code": "XPPL",
+            "code": "ADM",
+            "name_en": "Administration",
+            "name_lo": "Administration",
+            "active": true
+        },
+        {
+            "site_code": "XPPL",
+            "code": "COM",
+            "name_en": "Community Relations",
+            "name_lo": "[DEV-UNTRANSLATED] Community Relations",
+            "active": true
+        },
+        {
+            "site_code": "XPPL",
+            "code": "ENG",
+            "name_en": "Engineering",
+            "name_lo": "[DEV-UNTRANSLATED] Engineering",
+            "active": true
+        },
+        {
+            "site_code": "XPPL",
+            "code": "FIN",
+            "name_en": "Finance",
+            "name_lo": "[DEV-UNTRANSLATED] Finance",
+            "active": true
+        },
+        {
+            "site_code": "XPPL",
+            "code": "GEO",
+            "name_en": "Geology",
+            "name_lo": "[DEV-UNTRANSLATED] Geology",
+            "active": true
+        },
+        {
+            "site_code": "XPPL",
+            "code": "HR",
+            "name_en": "Human Resources",
+            "name_lo": "[DEV-UNTRANSLATED] Human Resources",
+            "active": true
+        },
+        {
+            "site_code": "XPPL",
+            "code": "HSE",
+            "name_en": "HSE",
+            "name_lo": "[DEV-UNTRANSLATED] HSE",
+            "active": true
+        },
+        {
+            "site_code": "XPPL",
+            "code": "IT",
+            "name_en": "Information Technology",
+            "name_lo": "[DEV-UNTRANSLATED] Information Technology",
+            "active": true
+        },
+        {
+            "site_code": "XPPL",
+            "code": "LEG",
+            "name_en": "Legal",
+            "name_lo": "[DEV-UNTRANSLATED] Legal",
+            "active": true
+        },
+        {
+            "site_code": "XPPL",
+            "code": "LOG",
+            "name_en": "Logistics",
+            "name_lo": "[DEV-UNTRANSLATED] Logistics",
+            "active": true
+        },
+        {
+            "site_code": "XPPL",
+            "code": "MGT",
+            "name_en": "Management",
+            "name_lo": "[DEV-UNTRANSLATED] Management",
+            "active": true
+        },
+        {
+            "site_code": "XPPL",
+            "code": "MIN",
+            "name_en": "Mining Operation",
+            "name_lo": "[DEV-UNTRANSLATED] Mining Operation",
+            "active": true
+        },
+        {
+            "site_code": "XPPL",
+            "code": "MKT",
+            "name_en": "Marketing",
+            "name_lo": "[DEV-UNTRANSLATED] Marketing",
+            "active": true
+        },
+        {
+            "site_code": "XPPL",
+            "code": "MTN",
+            "name_en": "Maintenance",
+            "name_lo": "[DEV-UNTRANSLATED] Maintenance",
+            "active": true
+        },
+        {
+            "site_code": "XPPL",
+            "code": "PRD",
+            "name_en": "Production",
+            "name_lo": "[DEV-UNTRANSLATED] Production",
+            "active": true
+        },
+        {
+            "site_code": "XPPL",
+            "code": "PRO",
+            "name_en": "Procurement",
+            "name_lo": "[DEV-UNTRANSLATED] Procurement",
+            "active": true
+        },
+        {
+            "site_code": "XPPL",
+            "code": "QC",
+            "name_en": "Quality Control",
+            "name_lo": "[DEV-UNTRANSLATED] Quality Control",
+            "active": true
+        },
+        {
+            "site_code": "XPPL",
+            "code": "SEC",
+            "name_en": "Security",
+            "name_lo": "[DEV-UNTRANSLATED] Security",
+            "active": true
+        },
+        {
+            "site_code": "XPPL",
+            "code": "WH",
+            "name_en": "Warehouse",
+            "name_lo": "[DEV-UNTRANSLATED] Warehouse",
+            "active": true
+        }
+    ],
+    "scopes": [
+        "site:XPPL"
+    ],
+    "categories": [
+        {
+            "scope": "site:XPPL",
+            "code": "CAT01",
+            "name_en": "Corporate Governance Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Corporate Governance Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT02",
+            "name_en": "Legal Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Legal Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT03",
+            "name_en": "Policies & Procedures",
+            "name_lo": "[DEV-UNTRANSLATED] Policies & Procedures",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT04",
+            "name_en": "Management System Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Management System Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT05",
+            "name_en": "Human Resources Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Human Resources Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT06",
+            "name_en": "Recruitment Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Recruitment Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT07",
+            "name_en": "Performance Management Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Performance Management Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT08",
+            "name_en": "Training Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Training Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT09",
+            "name_en": "Finance Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Finance Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT10",
+            "name_en": "Accounting Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Accounting Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT11",
+            "name_en": "Procurement Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Procurement Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT12",
+            "name_en": "Contract Management Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Contract Management Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT13",
+            "name_en": "Asset Management Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Asset Management Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT14",
+            "name_en": "Equipment Management Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Equipment Management Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT15",
+            "name_en": "Inventory & Warehouse Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Inventory & Warehouse Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT16",
+            "name_en": "Administration Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Administration Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT17",
+            "name_en": "Facilities Maintenance Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Facilities Maintenance Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT18",
+            "name_en": "Document Control Records",
+            "name_lo": "[DEV-UNTRANSLATED] Document Control Records",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT19",
+            "name_en": "Vehicle Management Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Vehicle Management Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT20",
+            "name_en": "Correspondence Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Correspondence Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT21",
+            "name_en": "Meeting Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Meeting Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT22",
+            "name_en": "Project Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Project Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT23",
+            "name_en": "Engineering Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Engineering Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT24",
+            "name_en": "Construction Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Construction Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT25",
+            "name_en": "Mining Operation Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Mining Operation Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT26",
+            "name_en": "Geological Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Geological Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT27",
+            "name_en": "Survey Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Survey Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT28",
+            "name_en": "HSE Documents",
+            "name_lo": "[DEV-UNTRANSLATED] HSE Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT29",
+            "name_en": "Emergency Response Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Emergency Response Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT30",
+            "name_en": "Environmental Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Environmental Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT31",
+            "name_en": "Security Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Security Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT32",
+            "name_en": "Medical & Occupational Health Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Medical & Occupational Health Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT33",
+            "name_en": "Information Technology Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Information Technology Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT34",
+            "name_en": "Communication & Public Relations Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Communication & Public Relations Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT35",
+            "name_en": "Compliance Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Compliance Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT36",
+            "name_en": "Marketing & Sales Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Marketing & Sales Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT37",
+            "name_en": "Logistics Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Logistics Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT38",
+            "name_en": "Customs & Export Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Customs & Export Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CAT39",
+            "name_en": "Insurance Documents",
+            "name_lo": "[DEV-UNTRANSLATED] Insurance Documents",
+            "description_en": null,
+            "description_lo": null,
+            "active": true
+        }
+    ],
+    "registers": [
+        {
+            "scope": "site:XPPL",
+            "description_en": null,
+            "description_lo": null,
+            "active": true,
+            "register_key": "controlled"
+        },
+        {
+            "scope": "site:XPPL",
+            "description_en": null,
+            "description_lo": null,
+            "active": true,
+            "register_key": "incoming"
+        },
+        {
+            "scope": "site:XPPL",
+            "description_en": null,
+            "description_lo": null,
+            "active": true,
+            "register_key": "outgoing"
+        }
+    ],
+    "types": [
+        {
+            "scope": "site:XPPL",
+            "code": "AGR",
+            "name_en": "Agreement",
+            "name_lo": "[DEV-UNTRANSLATED] Agreement",
+            "description_en": null,
+            "description_lo": null,
+            "active": true,
+            "review_enabled": false,
+            "review_interval_months": null,
+            "review_baseline": null,
+            "category_code": "CAT02",
+            "register_keys": [
+                "controlled"
+            ]
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CHK",
+            "name_en": "Checklist",
+            "name_lo": "[DEV-UNTRANSLATED] Checklist",
+            "description_en": null,
+            "description_lo": null,
+            "active": true,
+            "review_enabled": false,
+            "review_interval_months": null,
+            "review_baseline": null,
+            "category_code": "CAT04",
+            "register_keys": [
+                "controlled"
+            ]
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "CNT",
+            "name_en": "Contract",
+            "name_lo": "[DEV-UNTRANSLATED] Contract",
+            "description_en": null,
+            "description_lo": null,
+            "active": true,
+            "review_enabled": false,
+            "review_interval_months": null,
+            "review_baseline": null,
+            "category_code": "CAT12",
+            "register_keys": [
+                "controlled"
+            ]
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "DRW",
+            "name_en": "Drawing",
+            "name_lo": "[DEV-UNTRANSLATED] Drawing",
+            "description_en": null,
+            "description_lo": null,
+            "active": true,
+            "review_enabled": false,
+            "review_interval_months": null,
+            "review_baseline": null,
+            "category_code": "CAT23",
+            "register_keys": [
+                "controlled",
+                "incoming",
+                "outgoing"
+            ]
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "GDL",
+            "name_en": "Guideline",
+            "name_lo": "[DEV-UNTRANSLATED] Guideline",
+            "description_en": null,
+            "description_lo": null,
+            "active": true,
+            "review_enabled": false,
+            "review_interval_months": null,
+            "review_baseline": null,
+            "category_code": "CAT03",
+            "register_keys": [
+                "controlled"
+            ]
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "LIN",
+            "name_en": "Letter Incoming",
+            "name_lo": "[DEV-UNTRANSLATED] Letter Incoming",
+            "description_en": null,
+            "description_lo": null,
+            "active": true,
+            "review_enabled": false,
+            "review_interval_months": null,
+            "review_baseline": null,
+            "category_code": "CAT20",
+            "register_keys": [
+                "incoming"
+            ]
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "LOT",
+            "name_en": "Letter Outgoing",
+            "name_lo": "[DEV-UNTRANSLATED] Letter Outgoing",
+            "description_en": null,
+            "description_lo": null,
+            "active": true,
+            "review_enabled": false,
+            "review_interval_months": null,
+            "review_baseline": null,
+            "category_code": "CAT20",
+            "register_keys": [
+                "outgoing"
+            ]
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "LTR",
+            "name_en": "Letter",
+            "name_lo": "[DEV-UNTRANSLATED] Letter",
+            "description_en": null,
+            "description_lo": null,
+            "active": true,
+            "review_enabled": false,
+            "review_interval_months": null,
+            "review_baseline": null,
+            "category_code": "CAT20",
+            "register_keys": [
+                "outgoing"
+            ]
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "MAN",
+            "name_en": "Manual",
+            "name_lo": "[DEV-UNTRANSLATED] Manual",
+            "description_en": null,
+            "description_lo": null,
+            "active": true,
+            "review_enabled": false,
+            "review_interval_months": null,
+            "review_baseline": null,
+            "category_code": "CAT04",
+            "register_keys": [
+                "controlled"
+            ]
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "MEM",
+            "name_en": "Memo",
+            "name_lo": "[DEV-UNTRANSLATED] Memo",
+            "description_en": null,
+            "description_lo": null,
+            "active": true,
+            "review_enabled": false,
+            "review_interval_months": null,
+            "review_baseline": null,
+            "category_code": "CAT20",
+            "register_keys": [
+                "incoming",
+                "outgoing"
+            ]
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "MOM",
+            "name_en": "Meeting Minutes",
+            "name_lo": "[DEV-UNTRANSLATED] Meeting Minutes",
+            "description_en": null,
+            "description_lo": null,
+            "active": true,
+            "review_enabled": false,
+            "review_interval_months": null,
+            "review_baseline": null,
+            "category_code": "CAT21",
+            "register_keys": [
+                "controlled"
+            ]
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "PLN",
+            "name_en": "Plan",
+            "name_lo": "[DEV-UNTRANSLATED] Plan",
+            "description_en": null,
+            "description_lo": null,
+            "active": true,
+            "review_enabled": false,
+            "review_interval_months": null,
+            "review_baseline": null,
+            "category_code": "CAT04",
+            "register_keys": [
+                "controlled"
+            ]
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "POL",
+            "name_en": "Policy",
+            "name_lo": "[DEV-UNTRANSLATED] Policy",
+            "description_en": null,
+            "description_lo": null,
+            "active": true,
+            "review_enabled": false,
+            "review_interval_months": null,
+            "review_baseline": null,
+            "category_code": "CAT03",
+            "register_keys": [
+                "controlled"
+            ]
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "RPT",
+            "name_en": "Report",
+            "name_lo": "[DEV-UNTRANSLATED] Report",
+            "description_en": null,
+            "description_lo": null,
+            "active": true,
+            "review_enabled": false,
+            "review_interval_months": null,
+            "review_baseline": null,
+            "category_code": "CAT04",
+            "register_keys": [
+                "controlled",
+                "incoming",
+                "outgoing"
+            ]
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "RSK",
+            "name_en": "Risk Assessment",
+            "name_lo": "[DEV-UNTRANSLATED] Risk Assessment",
+            "description_en": null,
+            "description_lo": null,
+            "active": true,
+            "review_enabled": false,
+            "review_interval_months": null,
+            "review_baseline": null,
+            "category_code": "CAT28",
+            "register_keys": [
+                "controlled"
+            ]
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "SDF",
+            "name_en": "Standard Form",
+            "name_lo": "[DEV-UNTRANSLATED] Standard Form",
+            "description_en": null,
+            "description_lo": null,
+            "active": true,
+            "review_enabled": false,
+            "review_interval_months": null,
+            "review_baseline": null,
+            "category_code": "CAT18",
+            "register_keys": [
+                "controlled"
+            ]
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "SOP",
+            "name_en": "Standard Operating Procedure",
+            "name_lo": "[DEV-UNTRANSLATED] Standard Operating Procedure",
+            "description_en": null,
+            "description_lo": null,
+            "active": true,
+            "review_enabled": false,
+            "review_interval_months": null,
+            "review_baseline": null,
+            "category_code": "CAT03",
+            "register_keys": [
+                "controlled"
+            ]
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "SPC",
+            "name_en": "Specification",
+            "name_lo": "[DEV-UNTRANSLATED] Specification",
+            "description_en": null,
+            "description_lo": null,
+            "active": true,
+            "review_enabled": false,
+            "review_interval_months": null,
+            "review_baseline": null,
+            "category_code": "CAT23",
+            "register_keys": [
+                "controlled"
+            ]
+        },
+        {
+            "scope": "site:XPPL",
+            "code": "WI",
+            "name_en": "Work Instruction",
+            "name_lo": "[DEV-UNTRANSLATED] Work Instruction",
+            "description_en": null,
+            "description_lo": null,
+            "active": true,
+            "review_enabled": false,
+            "review_interval_months": null,
+            "review_baseline": null,
+            "category_code": "CAT03",
+            "register_keys": [
+                "controlled"
+            ]
+        }
+    ],
+    "numbering": [
+        {
+            "scope": "site:XPPL",
+            "register_key": "incoming",
+            "purpose": "internal_register",
+            "reset_policy": "annual",
+            "prefix": "XPPL/DCMS/INCOMING/4/INTERNAL_REGISTER",
+            "padding": 4,
+            "format": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "register_key": "outgoing",
+            "purpose": "internal_register",
+            "reset_policy": "annual",
+            "prefix": "XPPL/DCMS/OUTGOING/5/INTERNAL_REGISTER",
+            "padding": 4,
+            "format": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "register_key": "outgoing",
+            "purpose": "official_outgoing",
+            "reset_policy": "annual",
+            "prefix": "XPPL/DCMS/OUTGOING/5/OFFICIAL_OUTGOING",
+            "padding": 4,
+            "format": null,
+            "active": true
+        },
+        {
+            "scope": "site:XPPL",
+            "register_key": "controlled",
+            "purpose": "internal_register",
+            "reset_policy": "continuous",
+            "prefix": "XPPL/DCMS/REGISTER/6",
+            "padding": 4,
+            "format": null,
+            "active": true
+        }
+    ],
+    "policies": [
+        "controlled",
+        "incoming",
+        "outgoing"
+    ]
+}
