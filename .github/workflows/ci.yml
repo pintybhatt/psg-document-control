@@ -103,7 +103,14 @@ jobs:
           php -l artisan
           vendor/bin/pint --test
           git diff --check
+      - name: Core PR backend suite
+        if: github.event_name == 'pull_request'
+        run: |
+          cp .env.example .env
+          php artisan key:generate --no-interaction
+          vendor/bin/phpunit --configuration phpunit.core.xml --log-junit "$RUNNER_TEMP/sqlite-results.xml"
       - name: Complete default backend suite
+        if: github.event_name != 'pull_request'
         run: |
           cp .env.example .env
           php artisan key:generate --no-interaction
@@ -133,6 +140,7 @@ jobs:
         run: test "$FRONTEND" = success && test "$PHP" = success
 
   mysql:
+    if: github.event_name != 'pull_request'
     name: MySQL 8.4 (shard ${{ matrix.shard }}/4)
     strategy:
       fail-fast: false
