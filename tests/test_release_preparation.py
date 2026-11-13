@@ -100,6 +100,106 @@ class AutomaticPublicationEvidenceTests(unittest.TestCase):
                 self.verify(fixture)
 
 
+def fast_main_release(attempt=1):
+    fixture = automatic_release(attempt)
+    rows = fixture['jobs']['jobs']
+    rows[:] = [row for row in rows if not row['name'].startswith('MySQL')]
+    rows.append(dict(rows[0], name='MySQL 8.4 (shard ${{ matrix.shard }}/4)'))
+    for row in rows:
+        if row['name'] in ('Frontend', 'PHP / SQLite', 'Fast CI') or row['name'].startswith('MySQL'):
+            row.update(conclusion='skipped', steps=[])
+        elif row['name'] == 'Full release validation':
+            row['name'] = 'Main release validation'
+        elif row['name'] == 'Publish release / publish':
+            row['steps'] = [{'name': 'Publish the exact image already built and smoke tested', 'status': 'completed', 'conclusion': 'success'}]
+        elif row['name'] == 'Image / smoke':
+            row['steps'] = [{'name': name, 'status': 'completed', 'conclusion': 'success'} for name in
+                            ('Build production image without publication', 'Test that exact image in a disposable stack')]
+    fixture['jobs']['total_count'] = len(rows)
+    return fixture
+
+
+class FastMainPublicationEvidenceTests(unittest.TestCase):
+    def verify(self, fixture):
+        return evidence.verify_publication(fixture['manifest'], fixture['run'], fixture['jobs'], fixture['artifacts'], 456)
+
+    def test_fast_main_accepts_only_complete_same_run_and_attempt_evidence(self):
+        for attempt in (1, 2):
+            for suffix in ('', '@main', '@refs/heads/main'):
+                fixture = fast_main_release(attempt)
+                fixture['run']['path'] += suffix
+                self.assertEqual(self.verify(fixture), DIGEST)
+
+    def test_missing_duplicate_failed_cancelled_or_foreign_jobs_are_rejected(self):
+        for index in range(7):
+            for change in ('missing', 'duplicate', 'failure', 'cancelled', 'running', 'attempt', 'run', 'wrong_status'):
+                fixture = fast_main_release()
+                rows = fixture['jobs']['jobs']
+                if change == 'missing': rows.pop(index)
+                elif change == 'duplicate': rows.append(copy.deepcopy(rows[index]))
+                elif change == 'running': rows[index]['status'] = 'in_progress'
+                elif change == 'attempt': rows[index]['run_attempt'] = 2
+                elif change == 'run': rows[index]['run_id'] = 999
+                elif change == 'wrong_status':
+                    rows[index]['conclusion'] = 'success' if rows[index]['conclusion'] == 'skipped' else 'skipped'
+                else: rows[index]['conclusion'] = change
+                fixture['jobs']['total_count'] = len(rows)
+                with self.subTest(index=index, change=change), self.assertRaises(ValueError):
+                    self.verify(fixture)
+
+    def test_mixed_layouts_and_executed_regression_steps_are_rejected(self):
+        for name in ('Full release validation', 'MySQL 8.4 (shard 1/4)', 'unexpected'):
+            fixture = fast_main_release()
+            fixture['jobs']['jobs'].append(dict(fixture['jobs']['jobs'][0], name=name))
+            fixture['jobs']['total_count'] += 1
+            with self.subTest(name=name), self.assertRaises(ValueError):
+                self.verify(fixture)
+        fixture = fast_main_release()
+        fixture['jobs']['jobs'][0]['steps'] = [{'name': 'tests', 'conclusion': 'failure'}]
+        with self.assertRaises(ValueError):
+            self.verify(fixture)
+
+    def test_build_smoke_and_publication_steps_must_be_unique_completed_and_successful(self):
+        for job_name, index in (('Image / smoke', 0), ('Image / smoke', 1), ('Publish release / publish', 0)):
+            for change in ('missing', 'duplicate', 'failure', 'skipped', 'cancelled', 'running'):
+                fixture = fast_main_release()
+                steps = next(row for row in fixture['jobs']['jobs'] if row['name'] == job_name)['steps']
+                if change == 'missing': steps.pop(index)
+                elif change == 'duplicate': steps.append(copy.deepcopy(steps[index]))
+                elif change == 'running': steps[index]['status'] = 'in_progress'
+                else: steps[index]['conclusion'] = change
+                with self.subTest(index=index, change=change), self.assertRaises(ValueError):
+                    self.verify(fixture)
+
+    def test_fast_main_preserves_identity_artifact_and_pagination_checks(self):
+        for change in ('source', 'digest', 'image_id', 'workflow_commit', 'version', 'manifest_attempt',
+                       'event', 'branch', 'path', 'fork', 'failed_run', 'rerun', 'artifact_source',
+                       'artifact_run', 'expired', 'artifact_missing', 'artifact_duplicate', 'jobs_pagination', 'artifacts_pagination'):
+            fixture = fast_main_release()
+            manifest = json.loads(fixture['manifest'])
+            if change in ('source', 'workflow_commit'): manifest['source_commit' if change == 'source' else 'release_workflow_commit'] = 'f'*40
+            elif change == 'digest': manifest['image'] = 'ghcr.io/untrusted/image@sha256:'+'c'*64
+            elif change == 'image_id': manifest['tested_image_id'] = 'latest'
+            elif change == 'version': manifest['version'] = 'v0.0.999-rc.1'
+            elif change == 'manifest_attempt': manifest['github_run_attempt'] = '2'
+            elif change == 'event': fixture['run']['event'] = 'pull_request'
+            elif change == 'branch': fixture['run']['head_branch'] = 'feature'
+            elif change == 'path': fixture['run']['path'] += '@refs/heads/feature'
+            elif change == 'fork': fixture['run']['head_repository']['full_name'] = 'untrusted/fork'
+            elif change == 'failed_run': fixture['run']['conclusion'] = 'failure'
+            elif change == 'rerun': fixture['run']['run_attempt'] = 2
+            elif change == 'artifact_source': fixture['artifacts']['artifacts'][0]['workflow_run']['head_sha'] = 'f'*40
+            elif change == 'artifact_run': fixture['artifacts']['artifacts'][0]['workflow_run']['id'] = 999
+            elif change == 'expired': fixture['artifacts']['artifacts'][0]['expired'] = True
+            elif change == 'artifact_missing': fixture['artifacts']['artifacts'] = []; fixture['artifacts']['total_count'] = 0
+            elif change == 'artifact_duplicate': fixture['artifacts']['artifacts'] *= 2; fixture['artifacts']['total_count'] = 2
+            elif change == 'jobs_pagination': fixture['jobs']['total_count'] += 1
+            elif change == 'artifacts_pagination': fixture['artifacts']['total_count'] += 1
+            fixture['manifest'] = json.dumps(manifest).encode()
+            with self.subTest(change=change), self.assertRaises(ValueError):
+                self.verify(fixture)
+
+
 class GhcrPolicyTests(unittest.TestCase):
     def test_low_level_header_errors_cannot_print_registry_credentials(self):
         output = io.StringIO()
@@ -413,6 +513,20 @@ class ReleaseConfigurationTests(unittest.TestCase):
                 self.assertNotRegex(path.read_text(), r'packages:\s*write')
         self.assertEqual(ci.count('packages: write'), 1)
         self.assertRegex(publish, r'\n      packages: write\n')
+
+    def test_release_gate_rejects_failed_images_and_unexpected_test_results(self):
+        workflow = (ROOT/'.github/workflows/ci.yml').read_text()
+        gate = workflow.split('  full_release:\n', 1)[1].split('  publish:\n', 1)[0]
+        script = textwrap.dedent(gate.split('        run: |\n', 1)[1])
+        for event in ('push', 'workflow_dispatch'):
+            for fast in ('success', 'failure', 'skipped', 'cancelled'):
+                for mysql in ('success', 'failure', 'skipped', 'cancelled'):
+                    for image in ('success', 'failure', 'skipped', 'cancelled'):
+                        result = subprocess.run(['bash', '-e', '-c', script], capture_output=True,
+                                                env=dict(os.environ, EVENT=event, FAST=fast, MYSQL=mysql, IMAGE=image))
+                        expected = image == 'success' and fast == mysql == ('skipped' if event == 'push' else 'success')
+                        with self.subTest(event=event, fast=fast, mysql=mysql, image=image):
+                            self.assertEqual(result.returncode == 0, expected)
 
     def test_manifest_records_tested_identity_run_and_complete_migration_inventory(self):
         source = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
