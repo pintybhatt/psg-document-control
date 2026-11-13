@@ -29,6 +29,7 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   frontend:
+    if: github.event_name != 'push'
     name: Frontend
     runs-on: ubuntu-24.04
     timeout-minutes: 10
@@ -64,6 +65,7 @@ jobs:
           retention-days: 1
 
   php:
+    if: github.event_name != 'push'
     name: PHP / SQLite
     needs: frontend
     runs-on: ubuntu-24.04
@@ -129,7 +131,7 @@ jobs:
   fast:
     name: Fast CI
     needs: [frontend, php]
-    if: always()
+    if: always() && github.event_name != 'push'
     runs-on: ubuntu-24.04
     timeout-minutes: 2
     steps:
@@ -140,7 +142,7 @@ jobs:
         run: test "$FRONTEND" = success && test "$PHP" = success
 
   mysql:
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && github.event_name != 'push'
     name: MySQL 8.4 (shard ${{ matrix.shard }}/4)
     strategy:
       fail-fast: false
@@ -271,7 +273,7 @@ jobs:
           compression-level: 0
 
   full_release:
-    name: Full release validation
+    name: ${{ github.event_name == 'push' && 'Main release validation' || 'Full release validation' }}
     if: always() && (github.event_name != 'pull_request' || inputs.source_commit != '')
     needs: [fast, mysql, image]
     runs-on: ubuntu-24.04
@@ -281,15 +283,22 @@ jobs:
     steps:
       - name: Require all release checks on the same source
         env:
+          EVENT: ${{ github.event_name }}
           FAST: ${{ needs.fast.result }}
           MYSQL: ${{ needs.mysql.result }}
           IMAGE: ${{ needs.image.result }}
-        run: test "$FAST" = success && test "$MYSQL" = success && test "$IMAGE" = success
+        run: |
+          test "$IMAGE" = success
+          if [[ "$EVENT" == push ]]; then
+            test "$FAST" = skipped && test "$MYSQL" = skipped
+          else
+            test "$FAST" = success && test "$MYSQL" = success
+          fi
 
   publish:
     name: Publish release
     needs: full_release
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'pintybhatt/psg-document-control' && inputs.source_commit == ''
+    if: ${{ !cancelled() && needs.full_release.result == 'success' && github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'pintybhatt/psg-document-control' && inputs.source_commit == '' }}
     permissions:
       contents: read
       packages: write

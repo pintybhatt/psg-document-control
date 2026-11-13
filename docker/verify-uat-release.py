@@ -74,20 +74,42 @@ def verify_publication(manifest_bytes, run, jobs, artifacts, artifact_id):
     rows = jobs.get('jobs', [])
     require(jobs.get('total_count') == len(rows), 'Incomplete job evidence; fetch every page.')
     prefix = '' if automatic else 'ci / '
-    mysql_names = [row.get('name', '') for row in rows if row.get('name', '').startswith(prefix+'MySQL')]
-    shards = [prefix+'MySQL 8.4 (shard '+str(number)+'/4)' for number in range(1, 5)]
-    # Historical RC evidence predates sharding. Never mix layouts or accept partial shards.
-    required_mysql = ['ci / MySQL 8.4'] if legacy and mysql_names == ['ci / MySQL 8.4'] else shards
-    require(sorted(mysql_names) == sorted(required_mysql), 'Incomplete or ambiguous MySQL release evidence.')
-    required = ['Frontend', 'PHP / SQLite', 'Fast CI', 'Image / smoke', 'Full release validation', 'Publish release / publish'] if automatic else ['ci / Fast CI', 'ci / Image / smoke', 'ci / Full release validation', 'publish']
-    for name in (*required, *required_mysql):
+    fast_main = automatic and any(row.get('name') == 'Main release validation' for row in rows)
+    if fast_main:
+        skipped = ['Frontend', 'PHP / SQLite', 'Fast CI', 'MySQL 8.4 (shard ${{ matrix.shard }}/4)']
+        required = ['Image / smoke', 'Main release validation', 'Publish release / publish']
+        require(sorted(row.get('name', '') for row in rows) == sorted(skipped+required),
+                'Incomplete or mixed fast-main release evidence.')
+        for name in skipped:
+            row = next(row for row in rows if row.get('name') == name)
+            require(row.get('run_id') == run['id'] and row.get('run_attempt') == run['run_attempt']
+                    and row.get('status') == 'completed' and row.get('conclusion') == 'skipped'
+                    and not row.get('steps'), 'Main regression job must be intentionally skipped: '+name)
+    else:
+        mysql_names = [row.get('name', '') for row in rows if row.get('name', '').startswith(prefix+'MySQL')]
+        shards = [prefix+'MySQL 8.4 (shard '+str(number)+'/4)' for number in range(1, 5)]
+        # Historical RC evidence predates sharding. Never mix layouts or accept partial shards.
+        required_mysql = ['ci / MySQL 8.4'] if legacy and mysql_names == ['ci / MySQL 8.4'] else shards
+        require(sorted(mysql_names) == sorted(required_mysql), 'Incomplete or ambiguous MySQL release evidence.')
+        required = ['Frontend', 'PHP / SQLite', 'Fast CI', 'Image / smoke', 'Full release validation', 'Publish release / publish'] if automatic else ['ci / Fast CI', 'ci / Image / smoke', 'ci / Full release validation', 'publish']
+        required += required_mysql
+    for name in required:
         matches = [row for row in rows if row.get('name') == name]
         require(len(matches) == 1 and matches[0].get('run_id') == run['id']
                 and matches[0].get('run_attempt', None if automatic else run['run_attempt']) == run['run_attempt']
                 and matches[0].get('status') == 'completed' and matches[0].get('conclusion') == 'success', 'Required release job absent, failed, skipped or ambiguous: '+name)
     image_job = next(row for row in rows if row['name'] == prefix+'Image / smoke')
-    require(any(step.get('name') == 'Test that exact image in a disposable stack' and step.get('conclusion') == 'success'
-                for step in image_job.get('steps', [])), 'Successful exact-image smoke evidence required.')
+    if fast_main:
+        publish_job = next(row for row in rows if row['name'] == 'Publish release / publish')
+        for job, name in ((image_job, 'Build production image without publication'),
+                          (image_job, 'Test that exact image in a disposable stack'),
+                          (publish_job, 'Publish the exact image already built and smoke tested')):
+            steps = [step for step in job.get('steps', []) if step.get('name') == name]
+            require(len(steps) == 1 and steps[0].get('status') == 'completed'
+                    and steps[0].get('conclusion') == 'success', 'Successful image build/smoke/publication evidence required: '+name)
+    else:
+        require(any(step.get('name') == 'Test that exact image in a disposable stack' and step.get('conclusion') == 'success'
+                    for step in image_job.get('steps', [])), 'Successful exact-image smoke evidence required.')
     require(artifacts.get('total_count', len(artifacts.get('artifacts', []))) == len(artifacts.get('artifacts', [])), 'Incomplete artifact evidence.')
     matches = [row for row in artifacts.get('artifacts', []) if row.get('name') == 'release-manifest-'+version+'-'+source]
     require(len(matches) == 1 and matches[0].get('expired') is False
