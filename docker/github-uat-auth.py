@@ -53,7 +53,7 @@ class AuthorizationProgress:
         'oidc_identity': {
             'OIDC_ISSUER_MISMATCH', 'OIDC_AUDIENCE_MISMATCH', 'OIDC_REPOSITORY_MISMATCH',
             'OIDC_REPOSITORY_ID_MISMATCH', 'OIDC_EVENT_MISMATCH', 'OIDC_REF_MISMATCH',
-            'OIDC_REF_TYPE_MISMATCH', 'OIDC_VISIBILITY_MISMATCH', 'OIDC_SUBJECT_MISMATCH',
+            'OIDC_REF_TYPE_MISMATCH', 'OIDC_SUBJECT_MISMATCH',
             'OIDC_RUNNER_ENVIRONMENT_MISMATCH', 'OIDC_WORKFLOW_REF_MISMATCH',
             'OIDC_RUN_ID_MISMATCH', 'OIDC_RUN_ATTEMPT_MISMATCH', 'OIDC_OPERATOR_MISMATCH',
             'OIDC_JOB_WORKFLOW_REF_MISMATCH', 'OIDC_JOB_WORKFLOW_SHA_MISMATCH',
@@ -258,14 +258,14 @@ def verify_oidc(token, request, policy, now=None, progress=None):
     require(now-300 <= claims['iat'], 'OIDC authorization too old.')
     expected = {'iss': ISSUER, 'aud': audience(request), 'repository': REPOSITORY,
                 'repository_id': str(policy['repository_id']), 'event_name': 'workflow_dispatch',
-                'ref': 'refs/heads/main', 'ref_type': 'branch', 'repository_visibility': 'private',
+                'ref': 'refs/heads/main', 'ref_type': 'branch',
                 'sub': 'repo:pintybhatt@8923839/psg-document-control@1435463595:environment:uat',
                 'runner_environment': 'self-hosted',
                 'workflow_ref': REPOSITORY+'/'+WORKFLOW+'@refs/heads/main',
                 'run_id': str(request['deployment_run_id']), 'run_attempt': str(request['deployment_run_attempt'])}
     reasons = ('OIDC_ISSUER_MISMATCH', 'OIDC_AUDIENCE_MISMATCH', 'OIDC_REPOSITORY_MISMATCH',
                'OIDC_REPOSITORY_ID_MISMATCH', 'OIDC_EVENT_MISMATCH', 'OIDC_REF_MISMATCH',
-               'OIDC_REF_TYPE_MISMATCH', 'OIDC_VISIBILITY_MISMATCH', 'OIDC_SUBJECT_MISMATCH',
+               'OIDC_REF_TYPE_MISMATCH', 'OIDC_SUBJECT_MISMATCH',
                'OIDC_RUNNER_ENVIRONMENT_MISMATCH', 'OIDC_WORKFLOW_REF_MISMATCH',
                'OIDC_RUN_ID_MISMATCH', 'OIDC_RUN_ATTEMPT_MISMATCH')
     for (key, value), reason in zip(expected.items(), reasons, strict=True):
@@ -309,7 +309,7 @@ def workflow_current(api, request, claims, policy, progress=None):
     progress.mark('github_run', 'GITHUB_RUN_UNAVAILABLE')
     run = api.get('actions/runs/'+str(request['deployment_run_id']))
     progress.mark('github_main', 'PROTECTED_MAIN_MISMATCH')
-    require(repository.get('id') == policy['repository_id'] and repository.get('full_name') == REPOSITORY and repository.get('private') is True
+    require(repository.get('id') == policy['repository_id'] and repository.get('full_name') == REPOSITORY
             and branch.get('protected') is True and branch['commit']['sha'] == claims['sha'], 'Protected current main required.')
     progress.mark('github_run', 'DEPLOYMENT_RUN_MISMATCH')
     require(run.get('id') == request['deployment_run_id'] and run.get('path') == WORKFLOW

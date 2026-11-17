@@ -88,6 +88,7 @@ class ProductionSelectionTests(unittest.TestCase):
         return selector.deployment_request(self.api, reference, self.environment)
 
     def test_main_builds_exact_eight_field_request_accepted_by_the_server(self):
+        self.api.private = False
         data = self.select()
         self.assertEqual(data, {'deployment_run_id': 789, 'deployment_run_attempt': 2, 'release_run_id': 123,
                                 'release_run_attempt': 1, 'release_artifact_id': 456, 'image': DIGEST,
@@ -146,7 +147,7 @@ class ProductionSelectionTests(unittest.TestCase):
                          {'status': 'ahead', 'merge_base_commit': {'sha': 'b'*40}}):
             with patch.object(self.api, 'get', side_effect=lambda path: response if path.startswith('compare/') else original(path)):
                 with self.assertRaisesRegex(selector.SelectionError, 'ancestry'): self.select()
-        for attribute, value in (('protected', False), ('private', False), ('main', 'f'*40), ('workflow_sha', 'f'*40)):
+        for attribute, value in (('protected', False), ('main', 'f'*40), ('workflow_sha', 'f'*40)):
             previous = getattr(self.api, attribute)
             setattr(self.api, attribute, value)
             with self.subTest(attribute=attribute), self.assertRaisesRegex(selector.SelectionError, 'workflow'): self.select()

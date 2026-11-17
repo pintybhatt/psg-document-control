@@ -60,7 +60,7 @@ def approved_workflow(api, environment, identities):
         run = api.get('actions/runs/'+str(identities['deployment_run_id']))
         branch = api.get('branches/main')
         repository = api.get('')
-        check(repository.get('full_name') == auth.REPOSITORY and repository.get('private') is True
+        check(repository.get('full_name') == auth.REPOSITORY
               and branch.get('protected') is True and branch['commit']['sha'] == environment['GITHUB_SHA']
               and run.get('head_sha') == environment['GITHUB_SHA'], 'workflow')
     except (ValueError, KeyError, TypeError):
