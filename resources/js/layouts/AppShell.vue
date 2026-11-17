@@ -63,7 +63,9 @@ function closeNavigation() {
                 <div class="absolute -bottom-24 -left-10 size-72 rounded-full bg-emerald-400/15 blur-3xl"></div>
             </div>
             <a :href="navigation[0].href" class="flex items-center gap-3 border-b border-white/10 py-6 text-white" :class="sidebarCollapsed ? 'justify-center' : 'px-6'" :title="sidebarCollapsed ? 'XPPL DCMS' : undefined">
-                <img src="/logo/xppl.png" alt="XPPL" class="size-10 shrink-0 rounded-xl object-contain" />
+                <span class="flex size-[60px] shrink-0 items-center justify-center rounded-[10px] border border-slate-200 bg-[#f8fafc] p-[6px] shadow-sm">
+                    <img src="/logo/xppl.png" alt="XPPL" class="size-full object-contain" />
+                </span>
                 <span :class="sidebarCollapsed ? 'sr-only' : 'min-w-0'"><span class="block text-sm font-semibold">XPPL DCMS</span><span class="block text-xs text-slate-400">{{ t('appName') }}</span></span>
             </a>
             <p class="px-6 pt-5 pb-3 text-xs font-semibold tracking-wider text-slate-400" :class="{ 'sr-only': sidebarCollapsed }">{{ t('workspace') }}</p>
