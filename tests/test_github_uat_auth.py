@@ -86,7 +86,10 @@ class OidcVerificationTests(unittest.TestCase):
         return result
 
     def test_signed_request_bound_trusted_workflow_passes_real_openssl_verification(self):
-        self.assertEqual(self.verify(self.token())['actor_id'], '100')
+        for visibility in ('public', 'private'):
+            with self.subTest(visibility=visibility):
+                claims = dict(claims_for(request()), repository_visibility=visibility)
+                self.assertEqual(self.verify(self.token(claims)), claims)
 
     def test_exact_immutable_subject_and_verified_github_identity_pass_signed_verification(self):
         claims = dict(claims_for(request()), repository_id='1435463595', actor_id='8923839',
@@ -193,7 +196,7 @@ class OidcVerificationTests(unittest.TestCase):
         reasons = {'iss': 'OIDC_ISSUER_MISMATCH', 'aud': 'OIDC_AUDIENCE_MISMATCH',
                    'repository': 'OIDC_REPOSITORY_MISMATCH', 'repository_id': 'OIDC_REPOSITORY_ID_MISMATCH',
                    'event_name': 'OIDC_EVENT_MISMATCH', 'ref': 'OIDC_REF_MISMATCH', 'ref_type': 'OIDC_REF_TYPE_MISMATCH',
-                   'repository_visibility': 'OIDC_VISIBILITY_MISMATCH', 'sub': 'OIDC_SUBJECT_MISMATCH',
+                   'sub': 'OIDC_SUBJECT_MISMATCH',
                    'runner_environment': 'OIDC_RUNNER_ENVIRONMENT_MISMATCH', 'workflow_ref': 'OIDC_WORKFLOW_REF_MISMATCH',
                    'run_id': 'OIDC_RUN_ID_MISMATCH', 'run_attempt': 'OIDC_RUN_ATTEMPT_MISMATCH',
                    'actor_id': 'OIDC_OPERATOR_MISMATCH', 'workflow_sha': 'OIDC_WORKFLOW_REVISION_INVALID',
@@ -251,7 +254,7 @@ class OidcVerificationTests(unittest.TestCase):
                            ('sub', 'repo:'+auth.REPOSITORY+':environment:production'), ('actor_id', '999'),
                            ('workflow_ref', auth.REPOSITORY+'/.github/workflows/ci.yml@refs/heads/main'),
                            ('runner_environment', 'github-hosted'), ('run_attempt', '2'), ('run_id', '999'),
-                           ('workflow_sha', 'f'*40), ('check_run_id', ''), ('repository_visibility', 'public'),
+                           ('workflow_sha', 'f'*40), ('check_run_id', ''),
                            ('job_workflow_ref', 'other/reusable')]:
             with self.subTest(key=key), self.assertRaises(ValueError):
                 self.verify(self.token(dict(original, **{key: value})))
@@ -372,10 +375,12 @@ class GithubEvidenceTests(unittest.TestCase):
 
     def test_only_active_dispatch_on_current_protected_main_and_dedicated_runner_passes(self):
         api = self.api()
-        with patch.object(api, 'get', side_effect=[{'id': 42, 'full_name': auth.REPOSITORY, 'private': True},
+        for private in (False, True):
+            with self.subTest(private=private), \
+                    patch.object(api, 'get', side_effect=[{'id': 42, 'full_name': auth.REPOSITORY, 'private': private},
                          {'protected': True, 'commit': {'sha': 'd'*40}}, deployment_run()]), \
-                patch.object(api, 'collection', return_value={'jobs': [deployment_job()]}):
-            auth.workflow_current(api, request(), claims_for(request()), POLICY)
+                    patch.object(api, 'collection', return_value={'jobs': [deployment_job()]}):
+                auth.workflow_current(api, request(), claims_for(request()), POLICY)
 
     def test_actual_github_job_metadata_shape_matches_all_pinned_ids(self):
         policy = dict(POLICY, repository_id=1435463595, operator_ids=[8923839], runner_ids=[21])
