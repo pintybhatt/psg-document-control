@@ -58,7 +58,7 @@ class OutgoingCorrespondenceController extends Controller
         $register = RegisterConfiguration::query()->where('scope_id', $scope->id)->where('register_key', 'outgoing')->first();
         $automatic = app(XpplNumbering::class)->policyActive($scope->company_id, 'outgoing');
         $types = DocumentType::query()->where('scope_id', $scope->id)->with('category')->get()
-            ->filter(fn (DocumentType $type): bool => $register && $type->effectiveFor($register) && (! $automatic || $type->code === 'LTR'))
+            ->filter(fn (DocumentType $type): bool => $register && $type->effectiveFor($register))
             ->map(fn (DocumentType $type): array => $type->only(['id', 'code', 'name_en', 'name_lo', 'category_id']) + ['category' => $type->category->only(['id', 'name_en', 'name_lo'])])->values();
 
         return response()->json(['data' => $types, 'automatic_numbering' => $automatic]);

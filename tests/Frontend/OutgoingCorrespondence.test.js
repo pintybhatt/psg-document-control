@@ -38,7 +38,7 @@ function server({ mutationError = null, detailError = null, registered = false, 
         if (method === 'GET') { return detailError ? response(detailError.body, detailError.status) : response({ data: record, audits: [{ id: 1, action: 'created', created_at: '2026-10-26', actor_id: 5 }] }); }
         if (mutationError) { return response(mutationError.body, mutationError.status); }
         const body = JSON.parse(options.body);
-        record = path.endsWith('/register') ? { ...record, status: 'registered', internal_number: 'TEST/OUT/2026/000001', official_number: body.namespace_id ? 'XPPL-ENG-LTR-26-0001' : 'TEST/OFFICIAL/2026/000001' } : { ...record, ...body };
+        record = path.endsWith('/register') ? { ...record, status: 'registered', internal_number: 'TEST/OUT/2026/000001', official_number: automatic && record.type.code !== 'LTR' ? 'XPPL-OUT-26-0001' : body.namespace_id ? 'XPPL-ENG-LTR-26-0001' : 'TEST/OFFICIAL/2026/000001' } : { ...record, ...body };
         if (body.type_id) { record.type = availableTypes.find(item => String(item.id) === String(body.type_id)) ?? record.type; }
         return response({ data: record }, method === 'POST' && path === '/outgoing' ? 201 : 200);
     });
@@ -81,6 +81,34 @@ describe('outgoing correspondence', () => {
         expect(wrapper.get('#outgoing-category').element.value).toBe('Correspondence');
         await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(wrapper.get('#outgoing-type option[value="9"]').text()).toBe(lo.outgoingOfficialLetter);
+    });
+    it('shows every lookup type under automatic numbering and saves a report with bilingual category labels', async () => {
+        const report = { id: 10, code: 'RPT', name_en: 'Report', name_lo: 'ບົດລາຍງານ', category: { id: 12, name_en: 'Reports', name_lo: 'ບົດລາຍງານ' } };
+        const fetch = server({ automatic: true, availableTypes: [type, report] });
+        const wrapper = await render();
+        await button(wrapper, en.outgoingCreate).trigger('click');
+        expect(wrapper.get('#outgoing-type').element.value).toBe('');
+        expect(wrapper.get('#outgoing-type option[value="9"]').text()).toBe(en.outgoingOfficialLetter);
+        expect(wrapper.get('#outgoing-type option[value="10"]').text()).toBe('Report');
+        await wrapper.get('#outgoing-type').setValue(10);
+        expect(wrapper.get('#outgoing-category').element.value).toBe('Reports');
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
+        expect(wrapper.get('#outgoing-type option[value="10"]').text()).toBe(report.name_lo);
+        expect(wrapper.get('#outgoing-category').element.value).toBe(report.category.name_lo);
+        await wrapper.get('#outgoing-draft-form').trigger('submit'); await flushPromises();
+        const mutation = fetch.mock.calls.find(([, options]) => options?.method === 'POST');
+        expect(JSON.parse(mutation[1].body).type_id).toBe(10);
+        expect(wrapper.text()).not.toContain(lo.outgoingCorrectDraftType);
+        expect(button(wrapper, lo.outgoingRegister).element.disabled).toBe(false);
+        await button(wrapper, lo.outgoingEdit).trigger('click');
+        expect(wrapper.findAll('#outgoing-type option[value="10"]')).toHaveLength(1);
+        expect(wrapper.get('#outgoing-type option[value="10"]').element.disabled).toBe(false);
+        await button(wrapper, lo.uiCancel).trigger('click');
+        await button(wrapper, lo.outgoingRegister).trigger('click'); await flushPromises();
+        await button(wrapper.get('dialog'), lo.uiConfirm).trigger('click'); await flushPromises();
+        expect(wrapper.text()).toContain('XPPL-OUT-26-0001');
+        const registration = fetch.mock.calls.find(([url]) => url.includes('/register?'));
+        expect(JSON.parse(registration[1].body)).not.toHaveProperty('namespace_id');
     });
     it('corrects a legacy draft only through an explicit type selection and save', async () => {
         const fetch = server({ automatic: true, legacyType: true });

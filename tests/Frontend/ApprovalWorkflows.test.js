@@ -121,7 +121,7 @@ it('clears settings and ignores a late response across scope changes and access 
 it('adds Approval Workflows to the existing Administration navigation', async () => {
     server(); const wrapper = mount(AdministrationPage, { props: { endpoints: { contexts: '/contexts', roles: '/roles', permissions: '/permissions', approvalWorkflows: '/workflows' }, csrfToken: 'csrf-test' }, global: { plugins: [createLocalization()], stubs } });
     wrappers.push(wrapper); await flushPromises();
-    await button(wrapper, en.workflowTitle).trigger('click'); await flushPromises();
+    await wrapper.get('[data-admin-shortcut="approvalWorkflows"]').trigger('click'); await flushPromises();
     expect(wrapper.findComponent(ApprovalWorkflows).exists()).toBe(true);
     expect(wrapper.text()).toContain(en.workflowNotice);
 });

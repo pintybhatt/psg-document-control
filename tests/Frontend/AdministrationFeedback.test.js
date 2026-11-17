@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { enableAutoUnmount, flushPromises, mount } from '@vue/test-utils';
+import Swal from 'sweetalert2';
 import BusyOverlay from '../../resources/js/components/ui/BusyOverlay.vue';
 import FormModal from '../../resources/js/components/ui/FormModal.vue';
 import SweetConfirmDialog from '../../resources/js/components/ui/SweetConfirmDialog.vue';
@@ -9,7 +10,13 @@ import { createLocalization } from '../../resources/js/localization/index.js';
 import { settle, swalCancel, swalConfirm, swalText, swalTitle } from './swal.js';
 
 enableAutoUnmount(afterEach);
-afterEach(() => { vi.unstubAllGlobals(); localStorage.clear(); document.body.replaceChildren(); document.body.style.overflow = ''; });
+afterEach(async () => {
+    Swal.close();
+    // SweetAlert2 restores focus after 100 ms, then schedules popup disposal.
+    await new Promise(resolve => setTimeout(resolve, 100));
+    await settle();
+    vi.unstubAllGlobals(); localStorage.clear(); document.body.replaceChildren(); document.body.style.overflow = '';
+});
 const global = { plugins: [createLocalization()] };
 const reply = (data, status = 200) => ({ ok: status < 400, status, json: async () => structuredClone(data) });
 

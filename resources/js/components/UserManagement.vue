@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import UiButton from './ui/UiButton.vue';
+import StatusBadge from './ui/StatusBadge.vue';
 import IconButton from './ui/IconButton.vue';
 import TextInput from './ui/TextInput.vue';
 import SelectInput from './ui/SelectInput.vue';
@@ -223,7 +224,7 @@ onBeforeUnmount(() => { editorController?.abort(); siteController?.abort(); scop
         <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white">
             <table class="w-full text-left text-sm">
                 <thead class="bg-slate-50"><tr><th class="p-3">{{ t('userName') }}</th><th class="p-3">{{ t('userEmail') }}</th><th class="p-3">{{ t('uiStatus') }}</th><th class="p-3">{{ t('rbacActions') }}</th></tr></thead>
-                <tbody><tr v-for="user in users" :key="user.id" class="border-t border-slate-200"><td class="p-3">{{ user.name }}</td><td class="p-3">{{ user.email }}</td><td class="p-3">{{ t(user.active ? 'rbacActive' : 'rbacInactive') }}</td><td class="p-3"><IconButton action="edit" :label="t('rbacEdit')" :disabled="saving" @click="open(user)" /></td></tr></tbody>
+                <tbody><tr v-for="user in users" :key="user.id" class="border-t border-slate-200"><td class="p-3">{{ user.name }}</td><td class="p-3">{{ user.email }}</td><td class="p-3"><StatusBadge :status="user.active ? 'effective' : 'inactive'" :label="t(user.active ? 'rbacActive' : 'rbacInactive')" /></td><td class="p-3"><IconButton action="edit" :label="t('rbacEdit')" :disabled="saving" @click="open(user)" /></td></tr></tbody>
             </table>
             <p v-if="!loading && !users.length" class="p-4 text-sm text-slate-500">{{ t('userNone') }}</p>
         </div>

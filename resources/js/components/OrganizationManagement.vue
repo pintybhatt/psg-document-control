@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue';
 import DataTable from './ui/DataTable.vue';
 import UiButton from './ui/UiButton.vue';
+import StatusBadge from './ui/StatusBadge.vue';
 import IconButton from './ui/IconButton.vue';
 import TextInput from './ui/TextInput.vue';
 import CheckboxInput from './ui/CheckboxInput.vue';
@@ -104,6 +105,7 @@ onBeforeUnmount(() => { disposed = true; controller?.abort(); });
         <p v-if="errorKey" role="alert" class="rounded-lg bg-red-50 p-3 text-sm text-red-800">{{ t(errorKey) }}</p>
         <div class="flex flex-wrap items-center justify-between gap-3"><h4 class="font-medium">{{ t(`org-${kind}`) }}</h4><UiButton :disabled="saving || loading" @click="edit()">{{ t('orgCreate') }}</UiButton></div>
         <DataTable v-model:page="page" :rows="displayRows" :columns="columns" :caption="t(`org-${kind}`)" :loading="loading" server-side :total="total" :per-page="10" @change="load">
+            <template #cell-status="{ row }"><StatusBadge :status="row.active ? 'effective' : 'inactive'" :label="row.status" /></template>
             <template #cell-actions="{ row }"><div class="flex flex-wrap gap-2"><IconButton action="edit" :label="t('rbacEdit')" :disabled="saving" @click="edit(row)" /><UiButton v-if="kind !== 'departments'" variant="secondary" :disabled="saving" @click="navigate(kind === 'companies' ? 'sites' : 'departments', row)">{{ t(kind === 'companies' ? 'orgSites' : 'orgDepartments') }}</UiButton></div></template>
         </DataTable>
         <FormModal v-if="form" size="md" :title="`${t(editing ? 'orgEdit' : 'orgCreate')} · ${t(`org-${kind}`)}`" :subtitle="editing ? t('orgIdentityNotice') : ''" :busy="saving" @close="form = null">

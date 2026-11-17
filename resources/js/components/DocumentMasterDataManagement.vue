@@ -7,17 +7,20 @@ import TextareaInput from './ui/TextareaInput.vue';
 import SelectInput from './ui/SelectInput.vue';
 import CheckboxInput from './ui/CheckboxInput.vue';
 import DataTable from './ui/DataTable.vue';
+import StatusBadge from './ui/StatusBadge.vue';
 import ConfirmDialog from './ui/SweetConfirmDialog.vue';
 import FormModal from './ui/FormModal.vue';
 import { showSuccess } from '../utilities/alerts.js';
 import { useLocalization } from '../localization/index.js';
 import { createJsonClient } from '../utilities/jsonClient.js';
 
-const props = defineProps({ scope: { type: Object, required: true }, endpoints: { type: Object, required: true }, csrfToken: { type: String, required: true } });
+const props = defineProps({ scope: { type: Object, required: true }, endpoints: { type: Object, required: true }, csrfToken: { type: String, required: true }, kind: { type: String, default: '' } });
 const emit = defineEmits(['unauthorized']);
 const { t, language } = useLocalization();
 const request = createJsonClient(props.csrfToken);
-const kinds = ['categories', 'types', 'registers'];
+const kinds = ['types', 'categories', 'registers'];
+const selectedKind = ref('types');
+const visibleKind = computed(() => props.kind || selectedKind.value);
 const identities = ['incoming', 'outgoing', 'controlled'];
 const lists = reactive(Object.fromEntries(kinds.map(kind => [kind, { rows: [], page: 1, total: 0, loading: false }])));
 const classifications = ref([]);
@@ -161,12 +164,14 @@ onBeforeUnmount(() => controller?.abort());
     <section class="flex flex-col gap-6" aria-labelledby="master-heading">
         <div><h3 id="master-heading" class="text-lg font-semibold">{{ t('masterTitle') }}</h3><p class="mt-2 text-sm leading-7 text-slate-600">{{ t('masterScopeNotice') }}</p></div>
         <p v-if="errorKey && !editor" role="alert" class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">{{ t(errorKey) }}</p>
-        <section v-for="kind in kinds" :key="kind" class="flex flex-col gap-4" :aria-labelledby="`master-${kind}`">
+        <nav v-if="!kind" :aria-label="t('adminTaskNavigation')" class="flex flex-wrap gap-2"><UiButton v-for="item in kinds" :key="item" :variant="visibleKind === item ? 'primary' : 'secondary'" :aria-pressed="visibleKind === item" @click="selectedKind = item">{{ t(`master-${item}`) }}</UiButton></nav>
+        <section v-for="kind in kinds" v-show="visibleKind === kind" :key="kind" class="flex flex-col gap-4" :aria-labelledby="`master-${kind}`">
             <div class="flex flex-wrap items-center justify-between gap-3">
                 <h4 :id="`master-${kind}`" class="font-semibold">{{ t(`master-${kind}`) }}</h4>
                 <UiButton v-if="canManage && (kind !== 'registers' || lists.registers.total < 3)" :disabled="saving || lists[kind].loading || optionsLoading" @click="openEditor(kind)">{{ t('masterCreate') }} · {{ t(`master-${kind}`) }}</UiButton>
             </div>
             <DataTable v-model:page="lists[kind].page" :rows="displayRows(kind)" :columns="columns(kind)" :caption="t(`master-${kind}`)" :loading="lists[kind].loading" server-side :total="lists[kind].total" :per-page="10" @change="loadList(kind)">
+                <template #cell-status="{ row }"><StatusBadge :status="!row.active ? 'inactive' : row.effective ? 'effective' : 'pending'" :label="row.status" /></template>
                 <template #cell-actions="{ row }"><div class="flex flex-wrap gap-2">
                     <IconButton :action="canManage ? 'edit' : 'view'" :label="t(canManage ? 'rbacEdit' : 'rbacDetails')" :disabled="saving || optionsLoading" @click="openEditor(kind, row)" />
                     <IconButton v-if="canManage" :action="row.active ? 'deactivate' : 'activate'" :label="t(row.active ? 'membershipSuspend' : 'membershipActivate')" :disabled="saving" @click="prepareToggle(kind, row)" />
@@ -190,7 +195,7 @@ onBeforeUnmount(() => controller?.abort());
                 <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 sm:col-span-2"><CheckboxInput v-model="form.active" :label="t('rbacActive')" :disabled="!canManage || saving" :error-key="fieldError('active')" /></div>
             </div>
             <fieldset v-if="editor.kind === 'types'" :disabled="!canManage || saving || optionsLoading" class="rounded-xl border border-slate-200 p-4">
-                <legend class="px-2 text-sm font-semibold">{{ t('masterApplicability') }}</legend>
+                <legend class="px-2 text-sm font-semibold">{{ t('adminTypeApplicability') }}</legend>
                 <p v-if="!optionsLoading && !registerOptions.length" class="text-sm text-slate-500">{{ t('masterConfigureRegisters') }}</p>
                 <div class="grid grid-cols-1 gap-x-4 sm:grid-cols-3">
                     <label v-for="register in registerOptions" :key="register.id" class="mt-3 flex items-start gap-3 text-sm">
@@ -204,17 +209,19 @@ onBeforeUnmount(() => controller?.abort());
                 <legend class="px-2 text-sm font-semibold">{{ t('masterReviewPolicy') }}</legend>
                 <p class="text-sm text-slate-600 sm:col-span-2">{{ t('masterReviewHelp') }}</p>
                 <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 sm:col-span-2"><CheckboxInput id="master-review-enabled" v-model="form.review_enabled" :label="t('masterReviewEnabled')" :error-key="fieldError('review_enabled')" /></div>
-                <TextInput id="master-review-months" v-model="form.review_interval_months" type="number" min="1" max="1200" :label="t('masterReviewMonths')" :error-key="fieldError('review_interval_months')" />
-                <SelectInput id="master-review-baseline" v-model="form.review_baseline" :label="t('masterReviewBaseline')" :options="[{ value: '', label: t('uiChoose') }, { value: 'completion_date', label: t('masterReviewCompletionBaseline') }]" :error-key="fieldError('review_baseline')" />
+                <template v-if="form.review_enabled">
+                    <TextInput id="master-review-months" v-model="form.review_interval_months" type="number" min="1" max="1200" :label="t('masterReviewMonths')" :error-key="fieldError('review_interval_months')" />
+                    <SelectInput id="master-review-baseline" v-model="form.review_baseline" :label="t('masterReviewBaseline')" :options="[{ value: '', label: t('uiChoose') }, { value: 'completion_date', label: t('masterReviewCompletionBaseline') }]" :error-key="fieldError('review_baseline')" />
+                </template>
             </fieldset>
             <div class="flex flex-wrap justify-end gap-3 border-t border-slate-200 pt-4"><UiButton variant="secondary" :disabled="saving" @click="editor = null">{{ t('uiCancel') }}</UiButton><UiButton v-if="canManage" type="submit" :loading="saving" :disabled="optionsLoading">{{ t('masterSave') }}</UiButton></div>
         </form>
         </FormModal>
-        <section class="rounded-xl border border-slate-200 bg-white p-5" aria-labelledby="master-classifications">
-            <h4 id="master-classifications" class="font-semibold">{{ t('masterClassifications') }}</h4>
+        <details class="rounded-xl border border-slate-200 bg-white p-5" aria-labelledby="master-classifications">
+            <summary id="master-classifications" class="cursor-pointer font-semibold">{{ t('masterClassifications') }}</summary>
             <p class="mt-2 text-sm leading-7 text-slate-600">{{ t('masterClassificationNotice') }}</p>
             <dl class="mt-4 grid gap-5 sm:grid-cols-3"><div v-for="level in classifications" :key="level.value"><dt class="text-sm font-semibold">{{ t(level.label_key) }}</dt><dd class="mt-2 text-sm leading-7 text-slate-600">{{ t(level.description_key) }}</dd></div></dl>
-        </section>
+        </details>
         <ConfirmDialog v-model="confirmationOpen" :title="t('masterConfirmTitle')" :message="confirmationMessage" :danger="pending?.row.active" :loading="saving" @confirm="toggle" />
     </section>
 </template>

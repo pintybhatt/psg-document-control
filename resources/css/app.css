@@ -257,10 +257,15 @@ select[aria-invalid='true'] + .select2-container .select2-selection--single.dcms
     backdrop-filter: blur(18px) saturate(160%);
 }
 
-.dcms-glass :is(section, div, details, article, form, ul, dl).bg-white:not([data-form-modal] *) :is(section, div, details, article, form, ul, dl).bg-white {
+.dcms-glass :is(section, div, details, article, form, ul, dl).bg-white:not([data-form-modal] *) :is(section, div, details, article, form, ul, dl).bg-white:not([role='dialog']) {
     backdrop-filter: none;
     background-color: rgb(255 255 255 / 0.55);
     box-shadow: none;
+}
+
+.dcms-date-calendar {
+    background-color: var(--color-white, #fff);
+    color: var(--color-slate-800, #1e293b);
 }
 
 .dcms-glass a.bg-white:not([data-form-modal] *) {

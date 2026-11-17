@@ -75,10 +75,6 @@ class ManageOutgoingCorrespondence
             if (! $type || ! $type->effectiveFor($register)) {
                 throw ValidationException::withMessages(['type_id' => 'outgoingInvalidType']);
             }
-            if (app(XpplNumbering::class)->policyActive($scope->companyId, 'outgoing') && $type->code !== 'LTR'
-                && (! $record || $record->type_id !== $type->id)) {
-                throw ValidationException::withMessages(['type_id' => 'outgoingOfficialTypeRequired']);
-            }
             if (! $record) {
                 $profile = new DocumentSecurityProfile([
                     'resource_type' => DocumentResourceType::Outgoing, 'resource_key' => (string) Str::uuid(),
@@ -147,13 +143,25 @@ class ManageOutgoingCorrespondence
                 if ($draft->isFormallyRegistered()) {
                     return $draft;
                 }
-                if ($scope->departmentId === null || $draft->type->code !== 'LTR') {
+                if ($scope->departmentId === null) {
                     throw ValidationException::withMessages(['outgoing' => 'outgoingXpplOriginRequired']);
+                }
+                if (! $draft->type->effectiveFor(RegisterConfiguration::query()->findOrFail($draft->register_id))) {
+                    throw ValidationException::withMessages(['type_id' => 'outgoingInvalidType']);
                 }
                 $support = app(ManageNumbering::class)->forCorrespondencePolicy($actor, $scope, 'outgoing');
                 $officialSupport = app(ManageNumbering::class)->forCorrespondencePolicy($actor, $scope, 'outgoing', NumberingPurpose::OfficialOutgoing);
+                if ($draft->type->code !== 'LTR') {
+                    $configuration = $officialSupport->currentConfiguration;
+                    if (! $configuration?->active || $officialSupport->reset_policy !== NumberingResetPolicy::Annual || $configuration->padding !== 4
+                        || str_replace('{prefix}', $configuration->prefix, $configuration->format['pattern'] ?? '') !== 'XPPL-OUT-{year2}-{sequence}') {
+                        throw ValidationException::withMessages(['outgoing' => 'outgoingOfficialNumberingUnavailable']);
+                    }
+                }
                 $engine->initializeInternalPolicy($actor, $scope, $support);
-                $namespaceId = $engine->initializeLetterPolicy($actor, $scope, $draft->type_id, $officialSupport);
+                if ($draft->type->code === 'LTR') {
+                    $namespaceId = $engine->initializeLetterPolicy($actor, $scope, $draft->type_id, $officialSupport);
+                }
             }
             $series = NumberingSeries::query()->where('scope_id', $canonical->id)
                 ->whereHas('register', fn (Builder $query): Builder => $query->where('register_key', 'outgoing'))->get()->keyBy(fn (NumberingSeries $series): string => $series->purpose->value);
@@ -170,8 +178,11 @@ class ManageOutgoingCorrespondence
             $record = null;
             $officialIssuance = null;
             // Both callbacks persist one complete formal identity; neither number survives an outer rollback.
-            $internalIssuance = $this->numbering->register($actor, $canonical, $internal->id, function (string $internalNumber) use ($actor, $scope, $canonical, $official, $id, &$record, &$officialIssuance, $xppl): OutgoingCorrespondence {
-                $officialIssuance = $this->numbering->register($actor, $canonical, $official->id, function (string $officialNumber) use ($actor, $scope, $id, $internalNumber, &$record): OutgoingCorrespondence {
+            $internalIssuance = $this->numbering->register($actor, $canonical, $internal->id, function (string $internalNumber) use ($actor, $scope, $canonical, $official, $id, &$record, &$officialIssuance, $xppl, $automatic): OutgoingCorrespondence {
+                $officialIssuance = $this->numbering->register($actor, $canonical, $official->id, function (string $officialNumber) use ($actor, $scope, $id, $internalNumber, &$record, $xppl, $automatic): OutgoingCorrespondence {
+                    if ($automatic && $xppl === null && ! preg_match('/^XPPL-OUT-'.now()->format('y').'-[0-9]{4,12}$/D', $officialNumber)) {
+                        throw ValidationException::withMessages(['outgoing' => 'outgoingOfficialNumberingUnavailable']);
+                    }
                     // Preserve register -> series -> correspondence lock ordering on every registration request.
                     $record = $this->find($actor, $scope, $id, true);
                     $this->authorizeContext($actor, $scope, 'outgoing.register');

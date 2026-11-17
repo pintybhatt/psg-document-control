@@ -62,12 +62,11 @@ const canManage = computed(() => props.scope.permissions.includes('outgoing.draf
 const canRegister = computed(() => props.scope.permissions.includes('outgoing.register') && props.scope.permissions.includes('numbering.issue'));
 const label = item => item?.[language.value === 'lo' ? 'name_lo' : 'name_en'] ?? '';
 const typeLabel = item => automaticOfficial.value && item?.code === 'LTR' ? t('outgoingOfficialLetter') : label(item);
-const eligibleTypes = computed(() => automaticOfficial.value ? types.value.filter(item => item.code === 'LTR') : types.value);
-const needsTypeCorrection = computed(() => automaticOfficial.value && detail.value && !detail.value.registered_at && detail.value.type?.code !== 'LTR');
+const needsTypeCorrection = computed(() => automaticOfficial.value && detail.value && !detail.value.registered_at && !types.value.some(item => item.id === detail.value.type_id));
 const typeOptions = computed(() => [
     { value: '', label: t('uiChoose') },
-    ...(needsTypeCorrection.value ? [{ value: detail.value.type_id, label: t('outgoingCurrentDraftType'), disabled: true }] : []),
-    ...eligibleTypes.value.map(item => ({ value: item.id, label: typeLabel(item) })),
+    ...(needsTypeCorrection.value && !types.value.some(item => item.id === detail.value.type_id) ? [{ value: detail.value.type_id, label: t('outgoingCurrentDraftType'), disabled: true }] : []),
+    ...types.value.map(item => ({ value: item.id, label: typeLabel(item) })),
 ]);
 const selectedType = computed(() => types.value.find(item => String(item.id) === String(form.type_id)));
 const selectedCategoryLabel = computed(() => label(selectedType.value?.category ?? (String(form.type_id) === String(detail.value?.type_id) ? detail.value?.category : null)));
@@ -158,7 +157,7 @@ async function edit(create = false) {
     const record = detail.value;
     for (const field of [...textFields, ...descriptionFields]) { form[field] = record?.[field] ?? ''; }
     Object.assign(form, { type_id: record?.type_id ?? '', priority: record?.priority ?? 'normal', classification: record?.classification ?? 'normal', recipients: record?.recipients?.map(item => Object.fromEntries(['kind', ...recipientFields].map(field => [field, item[field] ?? '']))) ?? [emptyRecipient()] });
-    if (create && automaticOfficial.value && eligibleTypes.value.length === 1) { form.type_id = eligibleTypes.value[0].id; }
+    if (create && automaticOfficial.value && types.value.length === 1) { form.type_id = types.value[0].id; }
     fields.value = {}; error.value = ''; editing.value = true;
     await nextTick(); editorElement.value?.querySelector('h2')?.focus();
 }
@@ -212,7 +211,7 @@ onBeforeUnmount(() => controller?.abort());
                 <SelectInput id="outgoing-department" v-model="departmentContext" :label="t('outgoingIssuingDepartment')" :options="authorizedDepartmentOptions" :helper="t('documentDepartmentHelp')" :disabled="!!detail || saving" required />
                 <SelectInput id="outgoing-type" v-model="form.type_id" :label="t('documentType')" :options="typeOptions" :helper="automaticOfficial ? t('outgoingOfficialTypeHelp') : undefined" :error-key="fields.type_id?.[0]" required />
                 <p v-if="needsTypeCorrection" class="text-sm text-slate-600">{{ t('outgoingCorrectDraftType') }}</p>
-                <p v-if="automaticOfficial && !eligibleTypes.length" role="status" class="text-sm text-slate-600">{{ t('outgoingOfficialTypeMissing') }}</p>
+                <p v-if="automaticOfficial && !types.length" role="status" class="text-sm text-slate-600">{{ t('outgoingOfficialTypeMissing') }}</p>
                 <TextInput id="outgoing-category" :model-value="selectedCategoryLabel" :label="t('documentCategory')" :helper="t('documentCategoryHelp')" readonly />
                 <SelectInput v-if="!detail" id="outgoing-classification" v-model="form.classification" :label="t('outgoingClassification')" :options="classificationOptions" :helper="t(`confidentiality-${form.classification}-description`)" :error-key="fields.classification?.[0]" required />
                 <SelectInput id="outgoing-priority" v-model="form.priority" :label="t('outgoingPriority')" :options="priorityOptions" :error-key="fields.priority?.[0]" required />

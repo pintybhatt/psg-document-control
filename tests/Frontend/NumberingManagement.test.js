@@ -86,6 +86,7 @@ describe('numbering administration', () => {
         const wrapper = await render({ ...scope, scope_type: 'company', site_id: null, scope_key: 'company:4' });
         const panel = wrapper.get(`section[aria-labelledby="xppl-policy-${kind}"]`);
         expect(panel.text()).toContain(en.rbacInactive);
+        expect(panel.find('[data-numbering-policy-formats]').exists()).toBe(false);
         expect(button(panel, en[`numberingPolicyActivate-${kind}`]).element.disabled).toBe(true);
         expect(fetch.mock.calls.some(([url]) => url.endsWith('/xppl/activate'))).toBe(false);
         await control(panel, en[`numberingPolicyConfirm-${kind}`]).setValue(true);
@@ -94,6 +95,7 @@ describe('numbering administration', () => {
         expect(calls).toHaveLength(1);
         expect(JSON.parse(calls[0][1].body)).toEqual({ scope_type: 'company', company_id: 4, site_id: null, confirm: true, register_kind: kind });
         expect(panel.text()).toContain(en.rbacActive);
+        expect(panel.get('[data-numbering-policy-formats]').text()).toContain(kind === 'incoming' ? 'XPPL-IN-YYYY-NNNN' : 'XPPL-OUT-YYYY-NNNN');
         expect(wrapper.get('section[aria-labelledby="xppl-policy-title"]').text()).toContain(en.rbacInactive);
         await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(panel.text()).toContain(lo[`numberingPolicy-${kind}`]);
@@ -118,14 +120,15 @@ describe('numbering administration', () => {
         expect(policyPanel.text()).toContain(lo.numberingPolicyStatus);
         expect(policyPanel.text()).toContain(lo.rbacActive);
     });
-    it('shows simple bilingual guidance with advanced and legacy controls collapsed and no mutations', async () => {
+    it('shows bilingual policy guidance with number series available and technical setup collapsed', async () => {
         const fetch = server();
         const wrapper = await render({ ...scope, scope_type: 'company', site_id: null, scope_key: 'company:4' });
-        expect(wrapper.text()).toContain('COMP-DEPT-TYPE-0001-R00');
-        expect(wrapper.text()).toContain('COMP-DEPT-LTR-YY-0001');
+        expect(wrapper.get('[data-numbering-context]').text()).toBe(en.adminNumberPolicyHelp);
+        expect(wrapper.find('[data-numbering-policy-formats]').exists()).toBe(false);
         expect(wrapper.text()).toContain('Document numbers are generated automatically');
         expect(wrapper.get('[data-numbering-advanced]').element.open).toBe(false);
-        expect(wrapper.get('[data-numbering-legacy]').element.open).toBe(false);
+        expect(wrapper.get('[data-numbering-legacy]').element.open).toBe(true);
+        expect(wrapper.get('[data-numbering-legacy] > summary').text()).toBe('Number series');
         expect(wrapper.get('[data-numbering-legacy]').findAll('button').some(item => item.text() === en.numberingCreate)).toBe(true);
         expect(wrapper.findAll('label').some(item => item.text().includes(en.numberingXpplSeries))).toBe(false);
         await expand(wrapper, '[data-numbering-advanced]');
@@ -228,7 +231,7 @@ describe('numbering administration', () => {
         await expand(wrapper, '[data-numbering-legacy]');
         await button(wrapper, 'Edit').trigger('click');
         await control(wrapper, 'Prefix').setValue('UNSAVED');
-        await button(wrapper, 'Preview next configured number').trigger('click');
+        await button(wrapper, en.numberingNextPreview).trigger('click');
         await flushPromises();
         expect(wrapper.text()).toContain('EXAMPLE/OUT/2026/000008');
         const [, options] = fetch.mock.calls.find(([url]) => url.endsWith('/preview'));
@@ -394,7 +397,7 @@ it('loads, previews and saves a custom definition and presents each historical f
     await button(wrapper, 'Configuration history').trigger('click'); await flushPromises();
     const history = wrapper.get('section[aria-labelledby="numbering-history"]');
     expect(history.text()).toContain(JSON.stringify(format, null, 2));
-    expect(history.text()).toContain('Legacy format: PREFIX/YYYY/SEQUENCE');
+    expect(history.text()).toContain('Standard series format: PREFIX/YYYY/SEQUENCE');
     await button(wrapper, 'Edit').trigger('click');
     expect(control(wrapper, 'Use custom format').element.checked).toBe(true);
     expect(control(wrapper, 'Format pattern').element.value).toBe(format.pattern);
@@ -411,7 +414,7 @@ it('loads, previews and saves a custom definition and presents each historical f
     expect(JSON.parse(fetch.mock.calls.find(([, options]) => options.method === 'PATCH')[1].body).format).toEqual({ ...format, company: 'CHANGED' });
 });
 
-it('allows an explicit return to the legacy format and leaves custom definitions read-only for viewers', async () => {
+it('allows an explicit return to the standard series format and leaves custom definitions read-only for viewers', async () => {
     const custom = { ...series, configuration: { ...configuration, format: { pattern: 'EXAMPLE-{year}-{sequence}' } } };
     const fetch = server({ rows: [custom] });
     const reader = await render({ ...scope, permissions: ['numbering.view'] });
@@ -422,9 +425,9 @@ it('allows an explicit return to the legacy format and leaves custom definitions
     reader.unmount();
     const editor = await render(); await button(editor, 'Edit').trigger('click');
     await control(editor, 'Use custom format').setValue(false);
-    expect(editor.text()).toContain('Legacy format: PREFIX/YYYY/SEQUENCE');
+    expect(editor.text()).toContain('Standard series format: PREFIX/YYYY/SEQUENCE');
     await confirmSave(editor);
     expect(JSON.parse(fetch.mock.calls.find(([, options]) => options.method === 'PATCH')[1].body).format).toBeNull();
     await editor.get('[data-language-switcher] input[value="lo"]').setValue(true);
-    expect(editor.text()).toContain('ຮູບແບບເດີມ: PREFIX/YYYY/SEQUENCE');
+    expect(editor.text()).toContain('ຮູບແບບຊຸດເລກມາດຕະຖານ: PREFIX/YYYY/SEQUENCE');
 });
