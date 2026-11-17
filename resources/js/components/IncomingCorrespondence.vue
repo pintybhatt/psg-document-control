@@ -7,6 +7,7 @@ import { formatDate, formatDateTime } from '../utilities/dates.js';
 import StatusBadge from './ui/StatusBadge.vue';
 import PdfPreviewDialog from './ui/PdfPreviewDialog.vue';
 import UiButton from './ui/UiButton.vue';
+import PageBackButton from './ui/PageBackButton.vue';
 import ExportActions from './ui/ExportActions.vue';
 import IncomingOperations from './IncomingOperations.vue';
 import TextInput from './ui/TextInput.vue';
@@ -15,6 +16,15 @@ import SelectInput from './ui/SelectInput.vue';
 import DataTable from './ui/DataTable.vue';
 import ConfirmDialog from './ui/ConfirmDialog.vue';
 import ToastNotifications from './ui/ToastNotifications.vue';
+import { Icon } from '@iconify/vue';
+import FormHeader from './ui/FormHeader.vue';
+import FormSection from './ui/FormSection.vue';
+import FormActions from './ui/FormActions.vue';
+import fileImportIcon from '@iconify-icons/flowbite/file-import-outline';
+import tagIcon from '@iconify-icons/flowbite/tag-outline';
+import addressBookIcon from '@iconify-icons/flowbite/address-book-outline';
+import annotationIcon from '@iconify-icons/flowbite/annotation-outline';
+import infoIcon from '@iconify-icons/flowbite/info-circle-outline';
 import { useNotifications } from './ui/useNotifications.js';
 import { useLocalization } from '../localization/index.js';
 import { createJsonClient } from '../utilities/jsonClient.js';
@@ -52,6 +62,19 @@ const contextLoading = ref(false);
 const contextValid = ref(true);
 const textFields = ['document_revision', 'sender_organization', 'sender_contact', 'sender_email', 'sender_phone', 'external_reference', 'correspondence_date', 'received_date', 'subject'];
 const descriptionFields = ['description_en', 'description_lo'];
+const additionalFields = ['document_revision', 'sender_contact', 'sender_email', 'sender_phone'];
+const additionalOpen = computed(() => [...additionalFields, ...descriptionFields].some(field => fields.value[field]));
+function fieldProps(field) {
+    return {
+        id: `incoming-${field}`,
+        label: t(`incoming-${field}`),
+        type: field.endsWith('_date') ? 'date' : field.endsWith('email') ? 'email' : 'text',
+        helper: field === 'received_date' ? t('correspondenceReceivedDateHelp') : field.endsWith('_date') ? t('correspondenceDocumentDateHelp') : '',
+        errorKey: fields.value[field]?.[0],
+        required: ['sender_organization', 'subject', 'correspondence_date', 'received_date'].includes(field),
+        maxlength: field === 'subject' ? 500 : field === 'document_revision' ? 30 : field.endsWith('phone') ? 64 : 255,
+    };
+}
 const canManage = computed(() => props.scope.permissions.includes('incoming.drafts.manage'));
 const canRegister = computed(() => props.scope.permissions.includes('incoming.register') && props.scope.permissions.includes('numbering.issue'));
 const label = item => item?.[language.value === 'lo' ? 'name_lo' : 'name_en'] ?? '';
@@ -183,12 +206,12 @@ onBeforeUnmount(() => controller?.abort());
     <section class="incoming-register flex flex-col gap-5">
         <SelectInput v-if="!editing && !detail && authorizedDepartmentOptions.length > 1" id="incoming-context" v-model="departmentContext" :label="t('incomingReceivingDepartment')" :options="authorizedDepartmentOptions" :disabled="loading || saving" class="max-w-sm" />
         <div v-if="!editing && !detail" class="flex flex-wrap items-center justify-between gap-3"><h2 id="incoming-list-title" tabindex="-1" class="text-lg font-semibold">{{ t('incomingTitle') }}</h2><UiButton v-if="canManage" :disabled="saving || loading" @click="edit(true)">{{ t('incomingCreate') }}</UiButton></div>
-        <UiButton v-if="editing || detail" variant="secondary" class="self-start" :disabled="saving" @click="backToList">{{ t('backToRegister') }} · {{ t('incomingTitle') }}</UiButton>
+        <PageBackButton v-if="editing || detail" :title="`${t('backToRegister')} · ${t('incomingTitle')}`" :disabled="saving" @click="backToList" />
         <p v-if="error" role="alert" class="rounded-xl bg-red-50 p-4 text-red-800">{{ t(error) }}</p>
         <form v-if="!editing && !detail" class="grid items-end gap-3 md:grid-cols-3 print:hidden" @submit.prevent="page = 1; load()">
             <TextInput id="incoming-filter-search" v-model="filters.search" :label="t('incomingSearch')" maxlength="200" />
             <SelectInput id="incoming-filter-status" v-model="filters.filter_status" :label="t('uiStatus')" :options="filterStatuses" />
-            <UiButton type="submit" variant="secondary" :disabled="loading || saving">{{ t('incomingApplyFilters') }}</UiButton>
+            <UiButton type="submit" :disabled="loading || saving">{{ t('incomingApplyFilters') }}</UiButton>
             <details class="md:col-span-3"><summary class="cursor-pointer text-sm font-medium text-teal-800">{{ t('moreFilters') }}</summary><div class="mt-3 grid gap-3 md:grid-cols-3">
             <SelectInput id="incoming-filter-channel" v-model="filters.filter_channel" :label="t('incomingChannel')" :options="[{ value: '', label: t('incomingAllChannels') }, ...channelOptions.slice(1)]" />
             <SelectInput id="incoming-filter-due" v-model="filters.filter_due" :label="t('incomingDueDate')" :options="dueOptions" />
@@ -198,29 +221,35 @@ onBeforeUnmount(() => controller?.abort());
 
         <ExportActions v-if="!editing && !detail" :excel-href="reportUrl('xlsx')" :disabled="loading || saving" @preview="preview()" />
         <DataTable v-if="!editing && !detail" v-model:page="page" :error="listError" :rows="displayRows" :columns="columns" :caption="t('incomingTitle')" :loading="loading" server-side :total="total" :per-page="10" @change="load()">
-            <template #cell-subject="{ row }"><button type="button" class="text-left font-semibold text-teal-800 hover:underline disabled:opacity-50" :disabled="saving || loading" @click="show(row)">{{ row.subject }}</button><span class="mt-1 block max-w-64 font-mono text-xs wrap-anywhere text-slate-500">{{ row.internal_number }}</span></template>
+            <template #cell-subject="{ row }"><button type="button" :title="row.subject" class="text-left font-semibold text-teal-800 hover:underline disabled:opacity-50" :disabled="saving || loading" @click="show(row)">{{ row.subject }}</button><span class="mt-1 block max-w-64 font-mono text-xs wrap-anywhere text-slate-500">{{ row.internal_number }}</span></template>
             <template #cell-status_label="{ row }"><StatusBadge :status="row.operations?.status ?? row.status" :label="row.status_label" /></template>
             <template #cell-actions="{ row }"><UiButton variant="secondary" :disabled="saving || loading" @click="show(row)">{{ t('rbacDetails') }}</UiButton></template>
         </DataTable>
-        <form id="incoming-draft-form" v-if="editing" ref="editorElement" class="flex flex-col gap-5 rounded-2xl border border-slate-200 bg-white p-5" @submit.prevent="save">
-            <h2 tabindex="-1" class="text-lg font-semibold">{{ t(detail ? 'incomingEdit' : 'incomingCreate') }}</h2>
-            <p class="text-sm text-slate-600">{{ t('incomingDraftRules') }}</p>
-            <p v-if="scope.permissions.includes('documents.attachments.manage')" class="text-sm text-slate-600">{{ t('storageDraftHelp') }}</p>
-            <fieldset class="grid gap-4 md:grid-cols-2"><legend class="mb-3 font-semibold">{{ t('documentInformation') }}</legend>
+        <form id="incoming-draft-form" v-if="editing" ref="editorElement" class="flex flex-col gap-5" @submit.prevent="save">
+            <FormHeader :icon="fileImportIcon" :eyebrow="t('overview-incoming')" :title="t(detail ? 'incomingEdit' : 'incomingCreate')" :description="t('incomingDraftRules')">
+                <p v-if="scope.permissions.includes('documents.attachments.manage')" class="flex items-start gap-2 text-sm text-slate-600"><Icon :icon="infoIcon" aria-hidden="true" class="mt-0.5 size-4 shrink-0 text-teal-700" />{{ t('storageDraftHelp') }}</p>
+            </FormHeader>
+            <FormSection :icon="tagIcon" :title="t('formSectionClassification')" :description="t('formSectionClassificationHelp')">
                 <SelectInput id="incoming-department" v-model="departmentContext" :label="t('incomingReceivingDepartment')" :options="authorizedDepartmentOptions" :helper="t('documentDepartmentHelp')" :disabled="!!detail || saving" required />
                 <SelectInput id="incoming-type" v-model="form.type_id" :label="t('documentType')" :options="typeOptions" :error-key="fields.type_id?.[0]" required />
                 <TextInput id="incoming-category" :model-value="selectedCategoryLabel" :label="t('documentCategory')" :helper="t('documentCategoryHelp')" readonly />
                 <SelectInput v-if="!detail" id="incoming-classification" v-model="form.classification" :label="t('incomingClassification')" :options="classificationOptions" :helper="t(`confidentiality-${form.classification}-description`)" :error-key="fields.classification?.[0]" required />
                 <SelectInput id="incoming-channel" v-model="form.channel" :label="t('incomingChannel')" :options="channelOptions" :error-key="fields.channel?.[0]" required />
                 <SelectInput id="incoming-priority" v-model="form.priority" :label="t('incomingPriority')" :options="priorityOptions" :error-key="fields.priority?.[0]" required />
-                <TextInput v-for="field in textFields.filter(field => !['document_revision', 'sender_contact', 'sender_email', 'sender_phone', 'signatory_title'].includes(field))" :id="`incoming-${field}`" :key="field" v-model="form[field]" :label="t(`incoming-${field}`)" :class="field === 'subject' ? 'md:col-span-2' : ''" :type="field.endsWith('_date') ? 'date' : field === 'sender_email' ? 'email' : 'text'" :helper="field === 'received_date' ? t('correspondenceReceivedDateHelp') : field.endsWith('_date') ? t('correspondenceDocumentDateHelp') : ''" :error-key="fields[field]?.[0]" :required="['sender_organization', 'subject', 'correspondence_date', 'received_date'].includes(field)" :maxlength="field === 'subject' ? 500 : field === 'sender_phone' ? 64 : 255" />
-            </fieldset>
-            <details :open="['document_revision', 'sender_contact', 'sender_email', 'sender_phone', 'signatory_title', ...descriptionFields].some(field => fields[field])" class="rounded-xl border border-slate-200 p-4"><summary class="cursor-pointer text-sm font-semibold">{{ t('additionalInformation') }}</summary><div class="mt-4 grid gap-4 md:grid-cols-2">
-                <TextInput v-for="field in textFields.filter(field => ['document_revision', 'sender_contact', 'sender_email', 'sender_phone', 'signatory_title'].includes(field))" :id="`incoming-${field}`" :key="field" v-model="form[field]" :label="t(`incoming-${field}`)" :type="field.endsWith('email') ? 'email' : 'text'" :error-key="fields[field]?.[0]" :maxlength="field === 'document_revision' ? 30 : field.endsWith('phone') ? 64 : 255" />
+            </FormSection>
+            <FormSection :icon="addressBookIcon" :title="t('formSectionSender')" :description="t('formSectionSenderHelp')">
+                <TextInput v-for="field in ['sender_organization', 'external_reference']" :key="field" v-model="form[field]" v-bind="fieldProps(field)" />
+            </FormSection>
+            <FormSection :icon="annotationIcon" :title="t('formSectionContent')" :description="t('formSectionContentHelp')">
+                <div class="md:col-span-2"><TextInput v-model="form.subject" v-bind="fieldProps('subject')" /></div>
+                <TextInput v-for="field in ['correspondence_date', 'received_date']" :key="field" v-model="form[field]" v-bind="fieldProps(field)" />
+            </FormSection>
+            <FormSection collapsible :open="additionalOpen" :icon="infoIcon" :title="t('additionalInformation')" :description="t('formSectionAdditionalHelp')">
+                <TextInput v-for="field in additionalFields" :key="field" v-model="form[field]" v-bind="fieldProps(field)" />
                 <TextareaInput v-for="field in descriptionFields" :id="`incoming-${field}`" :key="field" v-model="form[field]" :label="t(`incoming-${field}`)" :error-key="fields[field]?.[0]" maxlength="5000" />
-            </div></details>
+            </FormSection>
             <p v-if="contextLoading" role="status" class="text-sm text-slate-600">{{ t('documentDepartmentLoading') }}</p>
-            <div class="sticky bottom-0 flex flex-wrap gap-3 border-t border-slate-200 bg-white py-3"><UiButton type="submit" :loading="saving" :disabled="contextLoading || !contextValid">{{ t('incomingSave') }}</UiButton><UiButton variant="secondary" :disabled="saving" @click="editing = false">{{ t('uiCancel') }}</UiButton></div>
+            <FormActions><UiButton variant="secondary" :disabled="saving" @click="editing = false">{{ t('uiCancel') }}</UiButton><UiButton type="submit" :loading="saving" :disabled="contextLoading || !contextValid">{{ t('incomingSave') }}</UiButton></FormActions>
         </form>
         <section v-else-if="detail" class="flex flex-col gap-5 rounded-2xl border border-slate-200 bg-white p-5" aria-labelledby="incoming-detail-title">
             <div class="flex flex-wrap items-center justify-between gap-3"><h2 id="incoming-detail-title" tabindex="-1" class="text-lg font-semibold">{{ detail.subject }}</h2><div v-if="detail.status === 'draft'" class="flex gap-3"><UiButton v-if="canManage" variant="secondary" :disabled="saving || loading" @click="edit()">{{ t('incomingEdit') }}</UiButton><UiButton v-if="canRegister" :disabled="saving || loading" @click="confirmation = true">{{ t('incomingRegister') }}</UiButton></div></div>

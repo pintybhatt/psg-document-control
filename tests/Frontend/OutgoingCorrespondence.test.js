@@ -246,7 +246,7 @@ describe('outgoing correspondence', () => {
         server(); const wrapper = await render({ ...scope, permissions: [] }); await show(wrapper);
         expect(wrapper.findAll('button').some(item => ['Create outgoing draft', 'Edit draft', 'Register and assign numbers'].includes(item.text()))).toBe(false);
         await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
-        expect(wrapper.text()).toContain('ທະບຽນເອກະສານຂາອອກ'); expect(wrapper.text()).toContain('ຜູ້ຮັບຫຼັກ');
+        expect(wrapper.get('[data-page-back]').attributes('title')).toContain('ທະບຽນເອກະສານຂາອອກ'); expect(wrapper.text()).toContain('ຜູ້ຮັບຫຼັກ');
         expect(wrapper.text()).toContain(lo.outgoingIssuingDepartment); expect(wrapper.text()).toContain(lo.documentCategory);
         expect(wrapper.find('script').exists()).toBe(false);
         expect(wrapper.find('table').exists()).toBe(false);

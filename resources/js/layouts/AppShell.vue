@@ -63,7 +63,9 @@ function closeNavigation() {
                 <div class="absolute -bottom-24 -left-10 size-72 rounded-full bg-emerald-400/15 blur-3xl"></div>
             </div>
             <a :href="navigation[0].href" class="flex items-center gap-3 border-b border-white/10 py-6 text-white" :class="sidebarCollapsed ? 'justify-center' : 'px-6'" :title="sidebarCollapsed ? 'XPPL DCMS' : undefined">
-                <img src="/logo/xppl.png" alt="XPPL" class="size-10 shrink-0 rounded-xl object-contain" />
+                <span class="flex size-[60px] shrink-0 items-center justify-center rounded-[10px] border border-slate-200 bg-[#f8fafc] p-[6px] shadow-sm">
+                    <img src="/logo/xppl.png" alt="XPPL" class="size-full object-contain" />
+                </span>
                 <span :class="sidebarCollapsed ? 'sr-only' : 'min-w-0'"><span class="block text-sm font-semibold">XPPL DCMS</span><span class="block text-xs text-slate-400">{{ t('appName') }}</span></span>
             </a>
             <p class="px-6 pt-5 pb-3 text-xs font-semibold tracking-wider text-slate-400" :class="{ 'sr-only': sidebarCollapsed }">{{ t('workspace') }}</p>
@@ -86,7 +88,7 @@ function closeNavigation() {
             <header class="sticky top-0 z-30 border-b border-white/70 bg-white/60 shadow-[0_1px_0_rgb(15_23_42/0.04)] backdrop-blur-xl backdrop-saturate-150" @keydown.esc="closeNavigation">
                 <div class="flex h-16 items-center gap-3 px-4 sm:px-6 lg:px-8">
                     <div class="flex min-w-0 flex-1 items-center gap-2 sm:gap-3">
-                        <button ref="menuButton" type="button" :aria-label="navigationOpen ? t('closeNavigation') : t('openNavigation')" :aria-expanded="navigationOpen" aria-controls="mobile-navigation" class="inline-flex size-10 shrink-0 items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100 hover:text-slate-900 lg:hidden" @click="navigationOpen = !navigationOpen">
+                        <button ref="menuButton" type="button" :aria-label="navigationOpen ? t('closeNavigation') : t('openNavigation')" :title="navigationOpen ? t('closeNavigation') : t('openNavigation')" :aria-expanded="navigationOpen" aria-controls="mobile-navigation" class="inline-flex size-10 shrink-0 items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100 hover:text-slate-900 lg:hidden" @click="navigationOpen = !navigationOpen">
                             <AppIcon :name="navigationOpen ? 'close' : 'menu'" class="size-5" />
                         </button>
                         <button type="button" :aria-label="sidebarCollapsed ? t('expandNavigation') : t('collapseNavigation')" :title="sidebarCollapsed ? t('expandNavigation') : t('collapseNavigation')" :aria-expanded="!sidebarCollapsed" aria-controls="desktop-navigation" class="hidden size-10 shrink-0 items-center justify-center rounded-xl text-slate-600 hover:bg-slate-100 hover:text-slate-900 lg:inline-flex" @click="sidebarCollapsed = !sidebarCollapsed">
@@ -129,10 +131,12 @@ function closeNavigation() {
                     <span aria-hidden="true" class="inline-flex size-12 shrink-0 items-center justify-center rounded-2xl bg-linear-to-br from-teal-500 to-sky-600 text-white shadow-lg shadow-teal-700/25 ring-1 ring-white/40">
                         <AppIcon :name="page" class="size-6" />
                     </span>
-                    <div class="min-w-0">
+                    <div class="min-w-0 flex-1">
                         <p class="text-xs font-semibold tracking-wider text-teal-700 uppercase">{{ t('appName') }}</p>
                         <h1 class="truncate text-2xl font-semibold tracking-tight text-slate-900 sm:text-3xl">{{ t(page) }}</h1>
                     </div>
+                    <!-- Page-level actions (e.g. the Back button) are teleported here so they line up with the title. -->
+                    <div data-page-header-actions class="flex shrink-0 items-center gap-2 empty:hidden"></div>
                 </div>
                 <p v-if="workspace?.error.value" role="alert" class="rounded-xl border border-red-200 bg-red-50/90 p-3 text-sm text-red-800 backdrop-blur">{{ t(workspace.error.value) }}</p>
                 <slot />

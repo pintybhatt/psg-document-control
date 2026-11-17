@@ -171,6 +171,7 @@ Route::middleware(['auth:web', EnsureActiveUserSession::class])->group(function 
         Route::get('organization/{kind}', [OrganizationController::class, 'index'])->whereIn('kind', ['companies', 'sites', 'departments'])->name('organization.index');
         Route::post('organization/{kind}', [OrganizationController::class, 'store'])->whereIn('kind', ['companies', 'sites', 'departments'])->name('organization.store');
         Route::patch('organization/{kind}/{record}', [OrganizationController::class, 'update'])->whereIn('kind', ['companies', 'sites', 'departments'])->name('organization.update');
+        Route::delete('organization/departments/{record}', [OrganizationController::class, 'destroy'])->name('organization.departments.destroy');
         Route::get('administration/history', AdministrationHistoryController::class)->name('administration.history');
         Route::get('authorization/contexts', [AuthorizationContextController::class, 'index'])->name('authorization.contexts');
         Route::get('role-assignment-users', [AuthorizationContextController::class, 'users'])->name('assignment-users');
