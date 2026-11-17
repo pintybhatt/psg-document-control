@@ -74,6 +74,7 @@ describe('confidentiality administration', () => {
         const wrapper = mount(AdministrationPage, { props: { endpoints: { contexts: '/administration-contexts', confidentiality: '/confidentiality' }, csrfToken: 'sample-csrf' }, global: { plugins: [createLocalization()] } });
         await flushPromises();
         expect(wrapper.text()).toContain('Confidentiality & Access');
+        await wrapper.get('[data-admin-shortcut="confidentiality"]').trigger('click'); await flushPromises();
         expect(wrapper.text()).toContain('User Clearances');
         expect(wrapper.text()).not.toContain('Create role');
         expect(fetch.mock.calls.every(([url]) => /administration-contexts|confidentiality/.test(url))).toBe(true);

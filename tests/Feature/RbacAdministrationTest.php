@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Authorization\PermissionCatalog;
 use App\Models\AuthorizationScope;
+use App\Models\OrganizationMembership;
 use App\Models\Role;
 use App\Models\Site;
 use App\Models\User;
@@ -20,6 +21,31 @@ class RbacAdministrationTest extends TestCase
     private function roleData(AuthorizationScope $scope, array $keys = ['roles.view']): array
     {
         return $this->scopeData($scope) + ['code' => 'EXAMPLE_ROLE', 'name_en' => 'Example role', 'name_lo' => 'ບົດບາດຕົວຢ່າງ', 'description' => 'Example configuration', 'active' => true, 'permission_keys' => $keys];
+    }
+
+    public function test_template_capability_requires_exact_site_membership_even_for_system_administrators(): void
+    {
+        $this->definitions();
+        $actor = User::factory()->create();
+        $global = AuthorizationScope::context('global')->persist();
+        $role = Role::query()->where('code', 'SECURITY_ADMINISTRATOR')->sole();
+        UserRoleAssignment::query()->create(['user_id' => $actor->id, 'role_id' => $role->id, 'scope_id' => $global->id, 'active' => true]);
+        $site = Site::factory()->create();
+        $scope = AuthorizationScope::context('site', $site->company_id, $site->id)->persist();
+        $this->signIn($actor);
+
+        $contexts = $this->getJson('/api/v1/authorization/contexts?administration=1')->assertOk()->json('data');
+        $context = collect($contexts)->firstWhere('scope_key', $scope->scope_key);
+        $this->assertContains('templates.view', $context['permissions']);
+        $this->assertFalse($context['can_access_templates']);
+        $this->getJson($this->scopedUrl('document-templates', $scope))->assertForbidden();
+        $this->getJson($this->scopedUrl('roles', $scope))->assertOk();
+
+        OrganizationMembership::factory()->for($actor)->atSite($site)->create();
+        $contexts = $this->getJson('/api/v1/authorization/contexts?administration=1')->assertOk()->json('data');
+        $this->assertTrue(collect($contexts)->firstWhere('scope_key', $scope->scope_key)['can_access_templates']);
+        $this->getJson($this->scopedUrl('document-templates', $scope))->assertOk();
+        $this->getJson($this->scopedUrl('document-templates', $global))->assertForbidden();
     }
 
     public function test_guest_apis_return_401_and_authenticated_users_without_roles_receive_403(): void

@@ -87,6 +87,7 @@ describe('simple account administration', () => {
             : { data: [], last_page: 1 } })));
         const wrapper = mount(AdministrationPage, { props: { endpoints: { contexts: '/contexts', userManagement: '/api/v1/user-management', currentUserId: 1 }, csrfToken: 'csrf-token' }, global: { plugins: [createLocalization('lo')], stubs: { ConfirmDialog: true } } });
         await flushPromises();
+        await wrapper.get('[data-admin-shortcut="users"]').trigger('click'); await flushPromises();
         expect(wrapper.findComponent(UserManagement).exists()).toBe(true);
         expect(wrapper.text()).toContain('ສ້າງຜູ້ໃຊ້');
         expect(wrapper.text()).not.toContain('userManagementTitle');

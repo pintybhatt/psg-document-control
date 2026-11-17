@@ -161,7 +161,8 @@ onBeforeUnmount(() => close());
             <input ref="input" :value="displayed" v-bind="{ ...$attrs, ...controlAttrs }" type="text" inputmode="numeric" placeholder="dd/mm/yyyy" pattern="[0-9]{2}/[0-9]{2}/[0-9]{4}" class="ui-control pr-11 tabular-nums" :aria-controls="open ? popupId : undefined" aria-haspopup="dialog" :aria-expanded="open" @input="update" @blur="validate" @click="show(false)" @keydown="inputKey" />
             <button type="button" :disabled="!!input?.disabled || !!input?.readOnly || ($attrs.disabled !== undefined && $attrs.disabled !== false) || ($attrs.readonly !== undefined && $attrs.readonly !== false)" class="absolute inset-y-0 right-0 flex w-10 items-center justify-center rounded-r-lg text-slate-500 hover:text-teal-800 focus-visible:outline-2 focus-visible:outline-teal-600 disabled:cursor-not-allowed disabled:text-slate-300" :aria-label="t('calendarOpen', { field: label })" aria-haspopup="dialog" :aria-expanded="open" :aria-controls="popupId" @click="open ? close(true) : show()"><AppIcon name="calendar" class="size-4" /></button>
         </div>
-        <div :id="popupId" ref="popup" v-show="open" :popover="nativePopover ? 'auto' : undefined" role="dialog" :aria-label="t('calendarTitle', { field: label })" :aria-describedby="`${popupId}-help`" class="fixed z-50 m-0 overflow-y-auto rounded-xl border border-slate-300 bg-white p-3 font-sans text-sm text-slate-800 shadow-sm" :style="position" @toggle="event => { if (event.newState === 'closed') { open = false; } }">
+        <Teleport to="body" :disabled="nativePopover">
+        <div :id="popupId" ref="popup" v-show="open" :popover="nativePopover ? 'auto' : undefined" role="dialog" :aria-label="t('calendarTitle', { field: label })" :aria-describedby="`${popupId}-help`" class="dcms-date-calendar fixed z-[1080] m-0 overflow-y-auto rounded-xl border border-slate-300 bg-white p-3 font-sans text-sm text-slate-800 shadow-lg" :style="position" @toggle="event => { if (event.newState === 'closed') { open = false; } }">
             <p :id="`${popupId}-help`" class="sr-only">{{ t('calendarHelp') }}</p>
             <p class="sr-only" role="status" aria-live="polite" aria-atomic="true">{{ monthLabel }}</p>
             <div class="mb-3 flex items-center gap-1">
@@ -180,5 +181,6 @@ onBeforeUnmount(() => close());
                 <button type="button" class="rounded px-1 py-1 text-xs text-slate-600 hover:bg-slate-100 focus-visible:outline-2 focus-visible:outline-teal-600" @click="close(true)">{{ t('calendarClose') }}</button>
             </div>
         </div>
+        </Teleport>
     </FormField>
 </template>

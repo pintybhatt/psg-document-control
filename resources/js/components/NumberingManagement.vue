@@ -6,6 +6,7 @@ import TextInput from './ui/TextInput.vue';
 import SelectInput from './ui/SelectInput.vue';
 import CheckboxInput from './ui/CheckboxInput.vue';
 import DataTable from './ui/DataTable.vue';
+import StatusBadge from './ui/StatusBadge.vue';
 import ConfirmDialog from './ui/SweetConfirmDialog.vue';
 import FormModal from './ui/FormModal.vue';
 import { showSuccess } from '../utilities/alerts.js';
@@ -97,10 +98,18 @@ const canManage = computed(() => !revoked.value && props.scope.permissions.inclu
 const options = computed(() => [{ value: '', label: t('uiChoose') }, ...registers.value.map(row => ({ value: row.id, label: t(`masterRegister-${row.register_key}`), disabled: !row.active }))]);
 const purposes = computed(() => ['internal_register', 'official_outgoing'].map(value => ({ value, label: t(`numberingPurpose-${value}`), disabled: value === 'official_outgoing' && registers.value.find(row => row.id === Number(form.register_id))?.register_key !== 'outgoing' })));
 const policies = computed(() => ['annual', 'continuous'].map(value => ({ value, label: t(`numberingPolicy-${value}`) })));
-const columns = computed(() => [{ key: 'register_label', label: t('masterRegister') }, { key: 'purpose_label', label: t('numberingPurpose') }, { key: 'prefix', label: t('numberingPrefix') }, { key: 'format_definition', label: t('numberingFormatDefinition') }, { key: 'policy_label', label: t('numberingPolicy') }, { key: 'status', label: t('uiStatus') }, { key: 'actions', label: t('rbacActions') }]);
-const displayRows = computed(() => rows.value.map(row => ({ ...row, register_label: t(`masterRegister-${row.register_key}`), purpose_label: t(`numberingPurpose-${row.purpose}`), prefix: row.configuration?.prefix ?? '—', format_definition: formatDefinition(row.configuration?.format), policy_label: t(`numberingPolicy-${row.reset_policy}`), status: t(!row.configuration?.active ? 'rbacInactive' : row.effective ? 'rbacActive' : 'masterBlocked') })));
-const historyColumns = computed(() => [{ key: 'version', label: t('numberingVersion') }, { key: 'prefix', label: t('numberingPrefix') }, { key: 'format_definition', label: t('numberingFormatDefinition') }, { key: 'padding', label: t('numberingPadding') }, { key: 'status', label: t('uiStatus') }, { key: 'effective_at', label: t('numberingEffective') }, { key: 'created_by', label: t('numberingActor') }, { key: 'change_reason', label: t('numberingReason') }]);
+const columns = computed(() => [{ key: 'register_label', label: t('masterRegister') }, { key: 'purpose_label', label: t('numberingPurpose') }, { key: 'format_definition', label: t('adminNumberFormat') }, { key: 'policy_label', label: t('numberingPolicy') }, { key: 'status', label: t('uiStatus') }, { key: 'actions', label: t('rbacActions') }]);
+const displayRows = computed(() => rows.value.map(row => ({ ...row, register_label: t(`masterRegister-${row.register_key}`), purpose_label: t(`numberingPurpose-${row.purpose}`), prefix: row.configuration?.prefix ?? '—', example: row.configuration?.prefix?.startsWith('XPPL/DCMS/') ? t('adminSupportingSeries') : formatExample(row.configuration), format_definition: formatDefinition(row.configuration?.format), policy_label: t(`numberingPolicy-${row.reset_policy}`), status: t(!row.configuration?.active ? 'rbacInactive' : row.effective ? 'rbacActive' : 'masterBlocked') })));
+const historyColumns = computed(() => [{ key: 'version', label: t('numberingVersion') }, { key: 'format_definition', label: t('adminNumberFormat') }, { key: 'padding', label: t('numberingPadding') }, { key: 'status', label: t('uiStatus') }, { key: 'effective_at', label: t('numberingEffective') }, { key: 'created_by', label: t('numberingActor') }, { key: 'change_reason', label: t('numberingReason') }]);
 const historyRows = computed(() => history.value.map(row => ({ ...row, format_definition: formatDefinition(row.format), effective_at: formatDateTime(row.effective_at), status: t(row.active ? 'rbacActive' : 'rbacInactive') })));
+function formatExample(configuration) {
+    if (!configuration) { return '—'; }
+    const year = String(new Date().getFullYear());
+    const sequence = '1'.padStart(configuration.padding, '0');
+    const pattern = configuration.format?.pattern ?? '{prefix}/{year}/{sequence}';
+    const values = { prefix: configuration.prefix, year, year2: year.slice(-2), sequence, ...configuration.format };
+    return pattern.replace(/\{(prefix|year|year2|sequence|company|department|document_type)\}/g, (token, key) => values[key] ?? token);
+}
 function formatDefinition(format) { return format ? JSON.stringify(format, null, 2) : t('numberingLegacyFormat'); }
 function formatData() { return form.custom_format ? { pattern: form.pattern, ...Object.fromEntries(['company', 'department', 'document_type'].filter(key => form[key] !== '').map(key => [key, form[key]])) } : null; }
 function scopeData() { return { scope_type: props.scope.scope_type, company_id: props.scope.company_id, site_id: props.scope.site_id }; }
@@ -200,16 +209,14 @@ onBeforeUnmount(() => { controller?.abort(); previewController?.abort(); history
     <section aria-labelledby="numbering-heading" class="flex flex-col gap-5">
         <h3 id="numbering-heading" class="text-lg font-semibold">{{ t('numberingTitle') }}</h3>
         <p class="text-sm leading-7 text-slate-600">{{ t('numberingAutomaticHelp') }}</p>
-        <dl class="grid gap-4 rounded-xl border border-slate-200 bg-white p-5 sm:grid-cols-2">
-            <div class="flex flex-col gap-2"><dt class="text-sm font-semibold">{{ t('numberingFormat-xppl_controlled') }}</dt><dd class="wrap-anywhere font-mono text-sm">COMP-DEPT-TYPE-0001-R00</dd><dd class="text-sm text-slate-600">{{ t('numberingControlledHelp') }}</dd></div>
-            <div class="flex flex-col gap-2"><dt class="text-sm font-semibold">{{ t('numberingFormat-xppl_letter') }}</dt><dd class="wrap-anywhere font-mono text-sm">COMP-DEPT-LTR-YY-0001</dd><dd class="text-sm text-slate-600">{{ t('numberingLetterHelp') }}</dd></div>
-        </dl>
-        <p class="text-xs leading-6 text-slate-500">{{ t('numberingCodesHelp') }}</p>
+        <p class="text-sm leading-6 text-slate-600" data-numbering-context>{{ t(scope.scope_type === 'company' ? 'adminNumberPolicyHelp' : 'adminNumberPolicyUnknown') }}</p>
         <p v-if="errorKey && !editor" role="alert" class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">{{ t(errorKey) }}</p>
         <section v-if="!revoked && scope.scope_type === 'company' && xpplOptions.policy_available" class="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-5" aria-labelledby="xppl-policy-title">
             <h4 id="xppl-policy-title" class="font-semibold">{{ t('numberingAdvanced') }}</h4>
             <p role="status">{{ t('numberingPolicyStatus') }}: {{ t(xpplOptions.policy ? 'rbacActive' : 'rbacInactive') }}</p>
             <p class="text-sm text-slate-600">{{ t('numberingPolicyHelp') }}</p>
+            <p v-if="xpplOptions.policy" class="font-mono text-sm">COMP-DEPT-TYPE-NNNN-R00</p>
+            <p v-if="xpplOptions.policy" class="text-sm text-slate-600">{{ t('adminControlledIdentity') }}</p>
             <template v-if="!xpplOptions.policy && canManage">
                 <CheckboxInput v-model="policyConfirmed" :label="t('numberingPolicyConfirm')" :disabled="xpplBusy" />
                 <UiButton :disabled="xpplBusy || !policyConfirmed" @click="activatePolicy()">{{ t('numberingPolicyActivate') }}</UiButton>
@@ -219,7 +226,10 @@ onBeforeUnmount(() => { controller?.abort(); previewController?.abort(); history
             <section v-for="kind in ['incoming', 'outgoing']" :key="kind" class="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-5" :aria-labelledby="`xppl-policy-${kind}`">
                 <h4 :id="`xppl-policy-${kind}`" class="font-semibold">{{ t(`numberingPolicy-${kind}`) }}</h4>
                 <p role="status">{{ t(xpplOptions.correspondence_policies?.[kind] ? 'rbacActive' : 'rbacInactive') }}</p>
-                <p class="font-mono text-sm">{{ kind === 'incoming' ? 'XPPL-IN-YYYY-NNNN' : 'XPPL-OUT-YYYY-NNNN · XPPL-DEPT-LTR-YY-NNNN' }}</p>
+                <div v-if="xpplOptions.correspondence_policies?.[kind]" class="flex flex-col gap-2 text-sm" data-numbering-policy-formats>
+                    <p class="font-mono">{{ kind === 'incoming' ? 'XPPL-IN-YYYY-NNNN' : 'XPPL-OUT-YYYY-NNNN · XPPL-DEPT-LTR-YY-NNNN' }}</p>
+                    <p v-if="kind === 'outgoing'">{{ t('adminNonLetterConfiguration') }}</p>
+                </div>
                 <p class="text-sm text-slate-600">{{ t(`numberingPolicyHelp-${kind}`) }}</p>
                 <template v-if="!xpplOptions.correspondence_policies?.[kind] && canManage">
                     <CheckboxInput v-model="registerPolicyConfirmed[kind]" :label="t(`numberingPolicyConfirm-${kind}`)" :disabled="xpplBusy" />
@@ -254,13 +264,14 @@ onBeforeUnmount(() => { controller?.abort(); previewController?.abort(); history
                 </div></details>
             </div>
         </details>
-        <details v-if="!revoked" :key="`legacy:${scope.scope_key}`" data-numbering-legacy class="rounded-xl border border-slate-200 bg-white p-5">
+        <details open v-if="!revoked" :key="`legacy:${scope.scope_key}`" data-numbering-legacy class="rounded-xl border border-slate-200 bg-white p-5">
             <summary class="cursor-pointer font-semibold text-slate-900">{{ t('numberingLegacySettings') }}</summary>
             <div class="mt-4 flex flex-col gap-5">
                 <p class="text-sm leading-7 text-slate-600">{{ t('numberingBoundary') }}</p>
                 <div v-if="canManage"><UiButton :disabled="loading || saving" @click="edit()">{{ t('numberingCreate') }}</UiButton></div>
             <DataTable v-model:page="page" :rows="displayRows" :columns="columns" :caption="t('numberingTitle')" :loading="loading" server-side :total="total" :per-page="10" @change="load">
-                <template #cell-format_definition="{ row }"><pre class="whitespace-pre-wrap wrap-anywhere font-mono text-xs">{{ row.format_definition }}</pre></template>
+                <template #cell-format_definition="{ row }"><span class="font-mono text-sm">{{ row.example }}</span><details class="mt-2 text-sm"><summary class="cursor-pointer text-teal-800">{{ t('adminTechnicalDetails') }}</summary><p class="mt-2 font-mono">{{ row.prefix }}</p><pre class="mt-2 whitespace-pre-wrap wrap-anywhere font-mono text-xs">{{ row.format_definition }}</pre></details></template>
+                <template #cell-status="{ row }"><StatusBadge :status="!row.configuration?.active ? 'inactive' : row.effective ? 'effective' : 'pending'" :label="row.status" /></template>
                 <template #cell-actions="{ row }"><div class="flex flex-wrap gap-2"><IconButton :action="canManage ? 'edit' : 'view'" :label="t(canManage ? 'rbacEdit' : 'rbacDetails')" :disabled="saving" @click="edit(row)" /><UiButton variant="secondary" :disabled="saving" @click="loadHistory(row)">{{ t('numberingHistory') }}</UiButton></div></template>
             </DataTable>
             <FormModal v-if="editor" :title="t(editor.id ? 'numberingEdit' : 'numberingCreate')" :subtitle="t('numberingIdentityHelp')" :busy="saving" @close="editor = null">
@@ -270,14 +281,15 @@ onBeforeUnmount(() => { controller?.abort(); previewController?.abort(); history
                     <div class="sm:col-span-2"><SelectInput v-model="form.register_id" :label="t('masterRegister')" :options="options" :disabled="!!editor.id || !canManage || saving" :error-key="fields.register_id?.[0]" required /></div>
                     <SelectInput v-model="form.purpose" :label="t('numberingPurpose')" :options="purposes" :disabled="!!editor.id || !canManage || saving" :error-key="fields.purpose?.[0]" required />
                     <SelectInput v-model="form.reset_policy" :label="t('numberingPolicy')" :options="policies" :disabled="!!editor.id || !canManage || saving" :error-key="fields.reset_policy?.[0]" required />
-                    <div class="grid grid-cols-1 gap-5 sm:col-span-2 sm:grid-cols-3">
+                    <details class="sm:col-span-2"><summary class="cursor-pointer text-sm font-semibold">{{ t('adminTechnicalDetails') }}</summary><div class="mt-4 grid grid-cols-1 gap-5 sm:grid-cols-3">
                         <div class="sm:col-span-2"><TextInput v-model="form.prefix" :label="t('numberingPrefix')" :helper="t('numberingPrefixHelp')" :readonly="!canManage || saving" :error-key="fields.prefix?.[0]" maxlength="80" required /></div>
                         <TextInput v-model="form.padding" type="number" :label="t('numberingPadding')" :readonly="!canManage || saving" :error-key="fields.padding?.[0]" min="1" max="12" required />
                     </div>
+                    </details>
                     <div class="sm:col-span-2"><TextInput v-model="form.change_reason" :label="t('numberingReason')" :readonly="!canManage || saving" :error-key="fields.change_reason?.[0]" maxlength="500" /></div>
                     <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 sm:col-span-2"><CheckboxInput v-model="form.active" :label="t('rbacActive')" :disabled="!canManage || saving" /></div>
                 </div>
-                <fieldset :disabled="!canManage || saving" class="flex flex-col gap-4 rounded-xl border border-slate-200 p-4">
+                <details class="rounded-xl border border-slate-200 p-4"><summary class="cursor-pointer font-semibold">{{ t('numberingFormatDefinition') }}</summary><fieldset :disabled="!canManage || saving" class="mt-4 flex flex-col gap-4">
                     <legend class="px-2 font-semibold">{{ t('numberingFormatDefinition') }}</legend>
                     <CheckboxInput v-model="form.custom_format" :label="t('numberingCustomFormat')" />
                     <p class="text-sm text-slate-600">{{ t(form.custom_format ? 'numberingFormatHelp' : 'numberingLegacyFormat') }}</p>
@@ -285,15 +297,17 @@ onBeforeUnmount(() => { controller?.abort(); previewController?.abort(); history
                         <TextInput v-model="form.pattern" :label="t('numberingFormatPattern')" :error-key="fields['format.pattern']?.[0] || fields.format?.[0]" maxlength="256" required />
                         <div class="grid grid-cols-1 gap-4 sm:grid-cols-3"><TextInput v-for="code in ['company', 'department', 'document_type']" :key="code" v-model="form[code]" :label="t(`numberingComponent-${code}`)" :error-key="fields[`format.${code}`]?.[0]" maxlength="32" /></div>
                     </template>
-                </fieldset>
+                </fieldset></details>
                 <div class="flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
                     <div class="grid grid-cols-1 items-end gap-3 sm:grid-cols-[minmax(0,10rem)_auto_auto] sm:justify-start"><TextInput v-model="form.year" type="number" :label="t('numberingPreviewYear')" :error-key="fields.year?.[0]" min="2000" max="9999" /><UiButton variant="secondary" :loading="previewLoading" :disabled="saving" @click="showPreview()">{{ t('numberingPreview') }}</UiButton><UiButton v-if="editor.id" variant="secondary" :loading="previewLoading" :disabled="saving" @click="showPreview(true)">{{ t('numberingNextPreview') }}</UiButton></div>
-                    <p v-if="preview" role="status" class="rounded-lg bg-white px-3 py-2 font-mono text-sm wrap-anywhere ring-1 ring-slate-200">{{ preview }}</p>
+                    <p class="text-sm leading-6 text-slate-600">{{ t('adminSavedPreviewHelp') }}</p>
+                    <details v-if="preview && preview.startsWith('XPPL/DCMS/')" class="rounded-lg bg-white p-3"><summary class="cursor-pointer text-sm font-semibold">{{ t('adminTechnicalDetails') }}</summary><p role="status" class="mt-2 wrap-anywhere font-mono text-sm">{{ preview }}</p></details>
+                    <p v-else-if="preview" role="status" class="rounded-lg bg-white px-3 py-2 font-mono text-sm wrap-anywhere ring-1 ring-slate-200">{{ preview }}</p>
                 </div>
                 <div class="flex flex-wrap justify-end gap-3 border-t border-slate-200 pt-4"><UiButton variant="secondary" :disabled="saving" @click="editor = null">{{ t('uiCancel') }}</UiButton><UiButton v-if="canManage" type="submit" :disabled="saving">{{ t('numberingSave') }}</UiButton></div>
             </form>
             </FormModal>
-            <section v-if="historySeries" class="flex flex-col gap-3" aria-labelledby="numbering-history"><h4 id="numbering-history" class="font-semibold">{{ t('numberingHistory') }} · {{ historySeries.configuration?.prefix }}</h4><DataTable v-model:page="historyPage" :rows="historyRows" :columns="historyColumns" :caption="t('numberingHistory')" :loading="historyLoading" server-side :total="historyTotal" :per-page="10" @change="loadHistory()"><template #cell-format_definition="{ row }"><pre class="whitespace-pre-wrap wrap-anywhere font-mono text-xs">{{ row.format_definition }}</pre></template></DataTable></section>
+            <section v-if="historySeries" class="flex flex-col gap-3" aria-labelledby="numbering-history"><h4 id="numbering-history" class="font-semibold">{{ t('numberingHistory') }}</h4><DataTable v-model:page="historyPage" :rows="historyRows" :columns="historyColumns" :caption="t('numberingHistory')" :loading="historyLoading" server-side :total="historyTotal" :per-page="10" @change="loadHistory()"><template #cell-format_definition="{ row }"><details><summary class="cursor-pointer text-teal-800">{{ t('adminTechnicalDetails') }}</summary><p class="font-mono">{{ row.prefix }}</p><pre class="whitespace-pre-wrap wrap-anywhere font-mono text-xs">{{ row.format_definition }}</pre></details></template></DataTable></section>
             </div>
         </details>
         <ConfirmDialog v-model="confirmationOpen" :title="t('numberingSave')" :message="t('numberingSaveConfirm')" :loading="saving" @confirm="save" />

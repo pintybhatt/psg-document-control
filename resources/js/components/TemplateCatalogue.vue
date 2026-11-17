@@ -20,7 +20,8 @@ const request = createJsonClient(props.csrfToken);
 const rows = ref([]), sources = ref([]), history = ref([]), selected = ref(null), page = ref(1), total = ref(0);
 const busy = ref(false), editing = ref(false), error = ref(''), search = ref(''), reason = ref(''), confirming = ref(false);
 const form = reactive({ name_en: '', name_lo: '', description_en: '', description_lo: '', purpose: '', attachment_version_id: '' });
-const canManage = computed(() => props.scope.permissions.includes('templates.manage'));
+const canView = computed(() => props.scope.scope_type === 'site' && props.scope.can_access_templates !== false && props.scope.permissions.includes('templates.view'));
+const canManage = computed(() => canView.value && props.scope.permissions.includes('templates.manage'));
 const canPublish = computed(() => canManage.value && props.scope.permissions.includes('templates.publish'));
 const confirmAction = ref('retire');
 const columns = computed(() => [{ key: 'name', label: t('masterName') }, { key: 'purpose', label: t('templatePurpose') }, { key: 'state', label: t('uiStatus') }, { key: 'actions', label: t('rbacActions') }]);
@@ -48,6 +49,7 @@ async function reset() {
     controller?.abort(); controller = new AbortController();
     rows.value = []; sources.value = []; history.value = []; selected.value = null; page.value = 1; total.value = 0; editing.value = false; confirming.value = false; error.value = ''; reason.value = ''; search.value = '';
     Object.keys(form).forEach(key => { form[key] = ''; });
+    if (!canView.value) { busy.value = false; error.value = 'adminTemplateScopeRestricted'; return; }
     await load();
 }
 function create() { Object.keys(form).forEach(key => { form[key] = ''; }); sources.value = []; search.value = ''; editing.value = true; selected.value = null; history.value = []; error.value = ''; }
@@ -76,7 +78,7 @@ async function save(action = 'create') {
     } catch (failure) { if (!signal.aborted) { confirming.value = false; fail(failure); } }
     finally { if (!signal.aborted) { busy.value = false; } }
 }
-watch(() => props.scope.scope_key, reset, { immediate: true });
+watch(() => [props.scope.scope_key, canView.value], reset, { immediate: true });
 onBeforeUnmount(() => controller?.abort());
 </script>
 
