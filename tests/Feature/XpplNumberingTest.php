@@ -194,11 +194,11 @@ class XpplNumberingTest extends TestCase
             'reason' => 'Existing draft attachment',
         ])->assertCreated()->json('data.id');
         app(XpplNumbering::class)->activatePolicy($this->actor, $this->companyScope, ['register_kind' => 'outgoing', 'confirm' => true]);
-        $this->getJson('/api/v1/outgoing-correspondence/lookups'.$query)->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $ltr->id)->assertJsonPath('data.0.code', 'LTR');
+        $this->getJson('/api/v1/outgoing-correspondence/lookups'.$query)->assertOk()->assertJsonCount(2, 'data')->assertJsonFragment(['id' => $ltr->id, 'code' => 'LTR']);
         $body = ['type_id' => $ltr->id, 'subject' => $draft->subject, 'signatory_name' => $draft->signatory_name,
             'document_date' => $draft->document_date->format('Y-m-d'), 'priority' => $draft->priority,
             'recipients' => $draft->recipients->map(fn ($recipient): array => $recipient->only(['kind', 'organization', 'contact_name', 'email', 'phone', 'address']))->all()];
-        $this->postJson('/api/v1/outgoing-correspondence'.$query, array_replace($body, ['type_id' => $site['type_id'], 'classification' => 'normal']))->assertUnprocessable()->assertJsonValidationErrors('type_id');
+        $this->postJson('/api/v1/outgoing-correspondence'.$query, array_replace($body, ['type_id' => $site['type_id'], 'classification' => 'normal']))->assertCreated()->assertJsonPath('data.type_id', $site['type_id']);
         $ltr->registers()->detach($register->id);
         $this->patchJson('/api/v1/outgoing-correspondence/'.$draft->id.$query, $body)->assertUnprocessable()->assertJsonValidationErrors('type_id');
         $ltr->registers()->attach($register->id, ['scope_id' => $scope->id]);
@@ -216,9 +216,65 @@ class XpplNumberingTest extends TestCase
         $this->assertSame($ltr->id, $draft->fresh()->type_id);
     }
 
+    public function test_outgoing_policy_registers_reports_and_drawings_with_shared_official_numbers_and_preserves_letters(): void
+    {
+        $this->setupCompany();
+        $site = $this->site('ADM', 'RPT', true, false);
+        $scope = $site['scope']->authorizationScope();
+        $register = RegisterConfiguration::query()->where('scope_id', $scope->id)->where('register_key', 'outgoing')->sole();
+        $incoming = RegisterConfiguration::factory()->create(['scope_id' => $scope->id, 'register_key' => 'incoming']);
+        $controlled = RegisterConfiguration::factory()->create(['scope_id' => $scope->id, 'register_key' => 'controlled']);
+        $site['type']->registers()->attach([$incoming->id, $controlled->id], ['scope_id' => $scope->id]);
+        $letter = DocumentType::factory()->create(['scope_id' => $scope->id, 'category_id' => $site['type']->category_id, 'code' => 'LTR']);
+        $letter->registers()->attach($register->id, ['scope_id' => $scope->id]);
+        $inactive = DocumentType::factory()->create(['scope_id' => $scope->id, 'category_id' => $site['type']->category_id, 'active' => false]);
+        $inactive->registers()->attach($register->id, ['scope_id' => $scope->id]);
+        $incomingOnly = DocumentType::factory()->create(['scope_id' => $scope->id, 'category_id' => $site['type']->category_id]);
+        $incomingOnly->registers()->attach($incoming->id, ['scope_id' => $scope->id]);
+        $this->site('ENG', 'RPT', true, false);
+        app(XpplNumbering::class)->activatePolicy($this->actor, $this->companyScope, ['register_kind' => 'outgoing', 'confirm' => true]);
+        $query = '?'.http_build_query(['company_id' => $scope->company_id, 'site_id' => $scope->site_id, 'department_id' => $site['department_id']]);
+
+        $this->getJson('/api/v1/outgoing-correspondence/lookups'.$query)->assertOk()->assertJsonCount(2, 'data')
+            ->assertJsonFragment(['id' => $site['type_id'], 'code' => 'RPT'])->assertJsonFragment(['id' => $letter->id, 'code' => 'LTR']);
+        $this->getJson('/api/v1/incoming-correspondence/lookups'.$query)->assertOk()->assertJsonCount(2, 'data')->assertJsonFragment(['id' => $site['type_id']]);
+        $this->getJson('/api/v1/controlled-documents/lookups'.$query)->assertOk()->assertJsonCount(1, 'data')->assertJsonPath('data.0.id', $site['type_id']);
+        $body = ['type_id' => $site['type_id'], 'classification' => 'normal', 'subject' => 'Outgoing report', 'signatory_name' => 'Signatory',
+            'document_date' => '2026-10-26', 'priority' => 'normal', 'recipients' => [['kind' => 'primary', 'organization' => 'Recipient']]];
+        $id = $this->postJson('/api/v1/outgoing-correspondence'.$query, $body)->assertCreated()->assertJsonPath('data.type_id', $site['type_id'])->json('data.id');
+        unset($body['classification']);
+        $this->patchJson('/api/v1/outgoing-correspondence/'.$id.$query, $body)->assertOk()->assertJsonPath('data.type_id', $site['type_id']);
+        $this->assertDatabaseHas('outgoing_correspondences', ['id' => $id, 'type_id' => $site['type_id'], 'status' => 'draft', 'internal_number' => null, 'official_number' => null]);
+        $this->postJson('/api/v1/outgoing-correspondence/'.$id.'/register'.$query)->assertUnprocessable()->assertJsonPath('errors.outgoing.0', 'outgoingOfficialNumberingUnavailable');
+        $this->assertDatabaseCount('issued_document_numbers', 0);
+        $this->assertDatabaseCount('xppl_numbering_namespaces', 0);
+        app(ManageNumbering::class)->save($this->actor, $scope, ['register_id' => $register->id, 'purpose' => 'official_outgoing',
+            'reset_policy' => 'annual', 'prefix' => 'XPPL-OUT', 'padding' => 4, 'format' => ['pattern' => '{prefix}-{year2}-{sequence}'], 'active' => true]);
+        DB::beginTransaction();
+        app(ManageOutgoingCorrespondence::class)->register($this->actor, $site['scope'], (string) $id);
+        DB::rollBack();
+        $this->assertDatabaseHas('outgoing_correspondences', ['id' => $id, 'status' => 'draft', 'official_number' => null, 'internal_number' => null]);
+        $this->assertDatabaseCount('issued_document_numbers', 0);
+        $this->assertDatabaseCount('numbering_counters', 0);
+        $this->postJson('/api/v1/outgoing-correspondence/'.$id.'/register'.$query)->assertOk()
+            ->assertJsonPath('data.official_number', 'XPPL-OUT-26-0001')->assertJsonPath('data.internal_number', 'XPPL-OUT-2026-0001');
+        $this->postJson('/api/v1/outgoing-correspondence/'.$id.'/register'.$query)->assertOk()->assertJsonPath('data.official_number', 'XPPL-OUT-26-0001');
+        $letterRecord = app(ManageOutgoingCorrespondence::class)->register($this->actor, $site['scope'], (string) $this->outgoingDraft(array_replace($site, ['type_id' => $letter->id]))->id);
+        $this->assertSame('XPPL-ADM-LTR-26-0001', $letterRecord->official_number);
+        $drawing = DocumentType::factory()->create(['scope_id' => $scope->id, 'category_id' => $site['type']->category_id, 'code' => 'DRW']);
+        $drawing->registers()->attach($register->id, ['scope_id' => $scope->id]);
+        $drawingDraft = $this->outgoingDraft(array_replace($site, ['type_id' => $drawing->id]));
+        $this->postJson('/api/v1/outgoing-correspondence/'.$drawingDraft->id.'/register'.$query)->assertOk()
+            ->assertJsonPath('data.official_number', 'XPPL-OUT-26-0003')->assertJsonPath('data.internal_number', 'XPPL-OUT-2026-0003');
+        $this->assertSame('XPPL-ADM-LTR-26-0001', $letterRecord->fresh()->official_number);
+        $this->assertDatabaseCount('issued_document_numbers', 6);
+        $this->assertDatabaseCount('xppl_numbering_allocations', 4);
+        $this->assertDatabaseHas('outgoing_correspondences', ['id' => $drawingDraft->id, 'official_number' => 'XPPL-OUT-26-0003', 'type_id' => $drawing->id]);
+    }
+
     #[TestWith(['department'])]
     #[TestWith(['type'])]
-    public function test_outgoing_policy_requires_eligible_letter_type_and_origin_before_initialization(string $missing): void
+    public function test_outgoing_policy_requires_eligible_type_and_origin_before_initialization(string $missing): void
     {
         $this->setupCompany();
         $site = $this->site('ADM', $missing === 'type' ? 'MEM' : 'LTR', true, false);
@@ -226,12 +282,15 @@ class XpplNumberingTest extends TestCase
             $site['scope'] = new DocumentScope($this->company->id, $site['scope']->siteId);
         }
         $draft = $this->outgoingDraft($site);
+        if ($missing === 'type') {
+            $site['type']->update(['active' => false]);
+        }
         app(XpplNumbering::class)->activatePolicy($this->actor, $this->companyScope, ['register_kind' => 'outgoing', 'confirm' => true]);
         try {
             app(ManageOutgoingCorrespondence::class)->register($this->actor, $site['scope'], (string) $draft->id);
-            $this->fail('Official letter prerequisites must be enforced.');
+            $this->fail('Outgoing registration prerequisites must be enforced.');
         } catch (ValidationException $exception) {
-            $this->assertSame(['outgoingXpplOriginRequired'], $exception->errors()['outgoing']);
+            $this->assertSame($missing === 'type' ? ['type_id' => ['outgoingInvalidType']] : ['outgoing' => ['outgoingXpplOriginRequired']], $exception->errors());
         }
         $this->assertDatabaseCount('numbering_series', 0);
         $this->assertDatabaseCount('xppl_numbering_namespaces', 0);

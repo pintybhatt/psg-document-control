@@ -231,7 +231,9 @@ class XpplNumbering
                 }
             }
         }
-        foreach (DB::table('issued_document_numbers as i')->join('numbering_series as s', 's.id', '=', 'i.series_id')->whereIn('s.scope_id', $companyScopes)->where('i.number', 'like', $masters['prefix'].'%')->get(['i.number', 'i.record_type', 'i.record_key']) as $row) {
+        foreach (DB::table('issued_document_numbers as i')->join('numbering_series as s', 's.id', '=', 'i.series_id')->whereIn('s.scope_id', $companyScopes)
+            ->when($internal, fn (Builder $query): Builder => $query->where('s.purpose', NumberingPurpose::InternalRegister->value))
+            ->where('i.number', 'like', $masters['prefix'].'%')->get(['i.number', 'i.record_type', 'i.record_key']) as $row) {
             $inspect($row->number, $row->record_type.':'.$row->record_key);
         }
         foreach (DB::table('controlled_documents')->whereIn('scope_id', $companyScopes)->where(fn (Builder $query): Builder => $query->where('document_code', 'like', $masters['prefix'].'%')->orWhere('internal_number', 'like', $masters['prefix'].'%'))->get(['id', 'document_code', 'internal_number']) as $row) {
@@ -242,8 +244,10 @@ class XpplNumbering
                 $inspect($row->internal_number, 'controlled:'.$row->id);
             }
         }
-        foreach (DB::table('outgoing_correspondences')->whereIn('scope_id', $companyScopes)->where('official_number', 'like', $masters['prefix'].'%')->get(['id', 'official_number']) as $row) {
-            $inspect($row->official_number, 'outgoing:'.$row->id);
+        if (! $internal) {
+            foreach (DB::table('outgoing_correspondences')->whereIn('scope_id', $companyScopes)->where('official_number', 'like', $masters['prefix'].'%')->get(['id', 'official_number']) as $row) {
+                $inspect($row->official_number, 'outgoing:'.$row->id);
+            }
         }
         $collisions = count(array_filter($identities, fn (array $owners): bool => count($owners) > 1));
         $counter = $namespace ? DB::table('xppl_numbering_counters')->where('namespace_id', $namespace->id)->where('period', $period)->first() : null;
