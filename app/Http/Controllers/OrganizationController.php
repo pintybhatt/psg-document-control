@@ -7,6 +7,7 @@ use App\Http\Requests\OrganizationRequest;
 use App\Http\Resources\OrganizationResource;
 use App\Models\Site;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Http\Response;
 
 class OrganizationController extends Controller
 {
@@ -33,5 +34,12 @@ class OrganizationController extends Controller
     public function update(OrganizationRequest $request, string $kind, string $record, ManageOrganization $organization): OrganizationResource
     {
         return new OrganizationResource($organization->save($request->user(), $kind, $request->validated(), $record));
+    }
+
+    public function destroy(OrganizationRequest $request, string $record, ManageOrganization $organization): Response
+    {
+        $organization->deleteDepartment($request->user(), $record);
+
+        return response()->noContent();
     }
 }

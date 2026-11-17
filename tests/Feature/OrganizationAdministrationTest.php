@@ -49,7 +49,9 @@ class OrganizationAdministrationTest extends TestCase
         foreach (['companies' => $company, 'sites' => $site, 'departments' => $department] as $kind => $id) {
             $this->patchJson('/api/v1/organization/'.$kind.'/'.$id, ['name_lo' => 'ຊື່ໃໝ່'])->assertOk()->assertJsonPath('data.name_lo', 'ຊື່ໃໝ່');
             $this->assertDatabaseHas($kind, ['id' => $id, 'code' => 'EXAMPLE', 'name_lo' => 'ຊື່ໃໝ່']);
-            $this->deleteJson('/api/v1/organization/'.$kind.'/'.$id)->assertStatus(405);
+            if ($kind !== 'departments') {
+                $this->deleteJson('/api/v1/organization/'.$kind.'/'.$id)->assertStatus(405);
+            }
         }
         $this->assertDatabaseCount('rbac_audits', 6);
         $this->assertDatabaseHas('rbac_audits', ['actor_id' => $actor->id, 'subject_type' => 'department', 'action' => 'organization.updated', 'scope_id' => AuthorizationScope::context('global')->id]);
@@ -178,26 +180,82 @@ class OrganizationAdministrationTest extends TestCase
         $this->assertDatabaseCount('rbac_audits', 2);
     }
 
-    public function test_children_and_historical_memberships_prevent_deactivation_without_cascades(): void
+    public function test_active_children_and_active_memberships_prevent_deactivation_without_cascades(): void
     {
         $this->administrator();
         $department = Department::factory()->create();
-        $member = OrganizationMembership::factory()->inDepartment($department)->create(['active' => false]);
+        $member = OrganizationMembership::factory()->inDepartment($department)->create(['active' => true]);
         foreach (['companies' => $department->company_id, 'sites' => $department->site_id, 'departments' => $department->id] as $kind => $id) {
             $this->patchJson('/api/v1/organization/'.$kind.'/'.$id, ['active' => false])->assertUnprocessable()->assertJsonValidationErrors('active');
             $this->assertDatabaseHas($kind, ['id' => $id, 'active' => true]);
         }
         $this->assertSame($department->id, $member->refresh()->department_id);
+        $this->assertTrue($member->active);
         $this->assertDatabaseCount('rbac_audits', 0);
     }
 
-    public function test_configured_sites_and_their_departments_are_protected_and_inactive_parents_block_activation(): void
+    public function test_scopes_and_historical_references_do_not_block_bottom_up_deactivation(): void
+    {
+        $this->administrator();
+        $department = Department::factory()->create();
+        $scope = AuthorizationScope::context('site', $department->company_id, $department->site_id)->persist();
+        $member = OrganizationMembership::factory()->inDepartment($department)->create(['active' => false]);
+        foreach (['departments' => $department->id, 'sites' => $department->site_id, 'companies' => $department->company_id] as $kind => $id) {
+            $this->patchJson('/api/v1/organization/'.$kind.'/'.$id, ['active' => false])->assertOk()->assertJsonPath('data.active', false);
+        }
+        $this->assertDatabaseHas('authorization_scopes', ['id' => $scope->id]);
+        $this->assertSame($department->id, $member->refresh()->department_id);
+        $this->assertDatabaseCount('rbac_audits', 3);
+    }
+
+    public function test_unused_department_can_be_deleted_with_audit_history(): void
     {
         $this->administrator();
         $department = Department::factory()->create();
         AuthorizationScope::context('site', $department->company_id, $department->site_id)->persist();
-        $this->patchJson('/api/v1/organization/sites/'.$department->site_id, ['active' => false])->assertUnprocessable();
-        $this->patchJson('/api/v1/organization/departments/'.$department->id, ['active' => false])->assertUnprocessable();
+        $this->deleteJson('/api/v1/organization/departments/'.$department->id)->assertNoContent();
+        $this->assertDatabaseMissing('departments', ['id' => $department->id]);
+        $this->assertDatabaseHas('sites', ['id' => $department->site_id]);
+        $audit = RbacAudit::query()->sole();
+        $this->assertSame('organization.deleted', $audit->action);
+        $this->assertSame('department', $audit->subject_type);
+        $this->assertSame($department->id, $audit->subject_id);
+        $this->assertSame($department->code, $audit->before['code']);
+        $this->assertNull($audit->after);
+    }
+
+    public function test_referenced_department_cannot_be_deleted(): void
+    {
+        $this->administrator();
+        $department = Department::factory()->create();
+        OrganizationMembership::factory()->inDepartment($department)->create(['active' => false]);
+        $this->deleteJson('/api/v1/organization/departments/'.$department->id)->assertUnprocessable()->assertJsonValidationErrors('department');
+        $this->assertDatabaseHas('departments', ['id' => $department->id]);
+        $this->assertDatabaseCount('rbac_audits', 0);
+    }
+
+    public function test_department_deletion_requires_a_global_administrator(): void
+    {
+        $department = Department::factory()->create();
+        $this->deleteJson('/api/v1/organization/departments/'.$department->id)->assertUnauthorized();
+        $this->definitions();
+        $this->signIn(User::factory()->create());
+        $this->deleteJson('/api/v1/organization/departments/'.$department->id)->assertForbidden();
+        $this->assertDatabaseHas('departments', ['id' => $department->id]);
+    }
+
+    public function test_only_departments_have_a_delete_endpoint(): void
+    {
+        $this->administrator();
+        $site = Site::factory()->create();
+        $this->deleteJson('/api/v1/organization/sites/'.$site->id)->assertStatus(405);
+        $this->deleteJson('/api/v1/organization/companies/'.$site->company_id)->assertStatus(405);
+        $this->assertDatabaseHas('sites', ['id' => $site->id]);
+    }
+
+    public function test_inactive_parents_block_activation(): void
+    {
+        $this->administrator();
         $company = Company::factory()->inactive()->create();
         $this->postJson('/api/v1/organization/sites', $this->data() + ['company_id' => $company->id])->assertUnprocessable()->assertJsonValidationErrors('active');
         $this->assertDatabaseCount('rbac_audits', 0);

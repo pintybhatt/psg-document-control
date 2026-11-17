@@ -10,6 +10,7 @@ use App\Models\Site;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\QueryException;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -103,25 +104,71 @@ class ManageOrganization
         }
     }
 
+    /**
+     * Permanently deletes a department that nothing references. Departments used by
+     * memberships, security profiles, clearances, incoming operations or numbering
+     * mappings must be deactivated instead, so their history stays intact.
+     */
+    public function deleteDepartment(User $actor, string $id): void
+    {
+        $this->authorize($actor);
+        try {
+            $this->mutation->run(function () use ($actor, $id): void {
+                $this->authorize($actor);
+                $record = Department::query()->whereKey($id)->lockForUpdate()->firstOrFail();
+                if ($this->departmentIsReferenced($record)) {
+                    throw ValidationException::withMessages(['department' => 'orgDeleteInUse']);
+                }
+                $before = $this->snapshot($record);
+                if (! $record->delete()) {
+                    throw new LogicException('Organization deletion was cancelled.');
+                }
+                $audit = RbacAudit::query()->create([
+                    'actor_id' => $actor->id, 'source' => 'web', 'action' => 'organization.deleted',
+                    'subject_type' => 'department', 'subject_id' => $before['id'],
+                    'scope_id' => AuthorizationScope::context('global')->id,
+                    'before' => $before, 'after' => null,
+                ]);
+                if (! $audit->exists) {
+                    throw new LogicException('Organization audit persistence was cancelled.');
+                }
+            });
+        } catch (QueryException) {
+            // A foreign key we do not check explicitly still references the department.
+            throw ValidationException::withMessages(['department' => 'orgDeleteInUse']);
+        }
+    }
+
+    private function departmentIsReferenced(Department $record): bool
+    {
+        foreach (['organization_memberships', 'document_security_profiles', 'confidentiality_clearances', 'xppl_numbering_mappings'] as $table) {
+            if (DB::table($table)->where('department_id', $record->id)->exists()) {
+                return true;
+            }
+        }
+
+        return DB::table('incoming_correspondence_operations')->where('responsible_department_id', $record->id)->exists();
+    }
+
+    /**
+     * Deactivation never deletes or cascades, so historical references (inactive
+     * memberships, authorization scopes, documents, storage) remain intact and do
+     * not block it. Only active children and active memberships block it.
+     */
     private function hasDependencies(string $kind, Model $record): bool
     {
         $column = match ($kind) {
             'companies' => 'company_id', 'sites' => 'site_id', 'departments' => 'department_id'
         };
-        foreach (['organization_memberships', 'document_security_profiles', 'confidentiality_clearances'] as $table) {
-            if (DB::table($table)->where($column, $record->id)->exists()) {
-                return true;
-            }
-        }
-        if ($kind === 'departments') {
-            return AuthorizationScope::query()->where('site_id', $record->site_id)->exists()
-                || DB::table('incoming_correspondence_operations')->where('responsible_department_id', $record->id)->exists();
+        if (DB::table('organization_memberships')->where($column, $record->id)->where('active', true)->exists()) {
+            return true;
         }
 
-        return AuthorizationScope::query()->where($column, $record->id)->exists()
-            || DB::table('storage_locations')->where($column, $record->id)->exists()
-            || ($kind === 'companies' ? Site::query()->where('company_id', $record->id)->exists()
-                : Department::query()->where('site_id', $record->id)->exists() || DB::table('physical_copies')->where('site_id', $record->id)->exists());
+        return match ($kind) {
+            'companies' => Site::query()->where('company_id', $record->id)->where('active', true)->exists(),
+            'sites' => Department::query()->where('site_id', $record->id)->where('active', true)->exists(),
+            'departments' => false,
+        };
     }
 
     /** @return array<string, mixed> */

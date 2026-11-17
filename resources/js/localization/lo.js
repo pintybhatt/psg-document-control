@@ -276,6 +276,11 @@ export default {
     "adminSubject-department": "ພະແນກ",
     "adminAction-organization.created": "ສ້າງລາຍການອົງກອນແລ້ວ",
     "adminAction-organization.updated": "ປັບປຸງລາຍການອົງກອນແລ້ວ",
+    "adminAction-organization.deleted": "ລຶບລາຍການອົງກອນແລ້ວ",
+    "orgDelete": "ລຶບພະແນກ",
+    "orgDeleteTitle": "ຢືນຢັນການລຶບພະແນກ",
+    "orgDeleteNotice": "ການລຶບພະແນກນີ້ແມ່ນຖາວອນ ແລະ ບໍ່ສາມາດກູ້ຄືນໄດ້. ພະແນກທີ່ກຳລັງນຳໃຊ້ບໍ່ສາມາດລຶບໄດ້, ໃຫ້ປິດໃຊ້ງານແທນ.",
+    "orgDeleteInUse": "ພະແນກນີ້ຖືກນຳໃຊ້ຢູ່ ແລະ ບໍ່ສາມາດລຶບໄດ້. ໃຫ້ປິດໃຊ້ງານແທນ.",
 
     "adminAction-administrator.bootstrapped": "ເລີ່ມຕົ້ນຜູ້ບໍລິຫານແລ້ວ",
     "adminAction-role.membership-administration-enabled": "ເປີດການຈັດການສະມາຊິກແລ້ວ",

@@ -6,7 +6,9 @@
         "build": "vite build",
         "dev": "vite",
         "test": "vitest run",
-        "test:watch": "vitest"
+        "test:watch": "vitest",
+        "clear": "php artisan cache:clear && php artisan config:clear && php artisan route:clear && php artisan view:clear",
+        "prod": "npm run build && php artisan route:cache && php artisan view:cache && composer install --optimize-autoloader --no-dev"
     },
     "devDependencies": {
         "@tailwindcss/vite": "^4.0.0",
