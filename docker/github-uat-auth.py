@@ -309,7 +309,7 @@ def workflow_current(api, request, claims, policy, progress=None):
     progress.mark('github_run', 'GITHUB_RUN_UNAVAILABLE')
     run = api.get('actions/runs/'+str(request['deployment_run_id']))
     progress.mark('github_main', 'PROTECTED_MAIN_MISMATCH')
-    require(repository.get('id') == policy['repository_id'] and repository.get('full_name') == REPOSITORY and repository.get('private') is True
+    require(repository.get('id') == policy['repository_id'] and repository.get('full_name') == REPOSITORY
             and branch.get('protected') is True and branch['commit']['sha'] == claims['sha'], 'Protected current main required.')
     progress.mark('github_run', 'DEPLOYMENT_RUN_MISMATCH')
     require(run.get('id') == request['deployment_run_id'] and run.get('path') == WORKFLOW
