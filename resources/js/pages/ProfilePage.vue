@@ -173,10 +173,10 @@ onBeforeUnmount(() => {
                     </div>
 
                     <div v-if="canEditPhoto" class="flex shrink-0 flex-wrap items-start justify-center gap-2 sm:pt-4">
-                        <button type="button" data-profile-photo-upload :disabled="uploading" class="inline-flex min-h-10 items-center gap-2 rounded-xl border border-teal-700 bg-teal-700 px-4 text-sm font-semibold text-white shadow-sm shadow-teal-700/20 transition hover:bg-teal-800 disabled:opacity-60" @click="choosePhoto">
+                        <button type="button" data-profile-photo-upload :title="t('profilePhotoUpload')" :disabled="uploading" class="inline-flex min-h-10 items-center gap-2 rounded-xl border border-teal-700 bg-teal-700 px-4 text-sm font-semibold text-white shadow-sm shadow-teal-700/20 transition hover:bg-teal-800 disabled:opacity-60" @click="choosePhoto">
                             <Icon :icon="uploadIcon" aria-hidden="true" class="size-4" />{{ uploading ? t('profilePhotoUploading') : t('profilePhotoUpload') }}
                         </button>
-                        <button v-if="user.photoUrl" type="button" data-profile-photo-remove :disabled="uploading || removing" class="inline-flex min-h-10 items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-red-300 hover:bg-red-50 hover:text-red-700 disabled:opacity-60" @click="confirmRemove = true">
+                        <button v-if="user.photoUrl" type="button" data-profile-photo-remove :title="t('profilePhotoRemove')" :disabled="uploading || removing" class="inline-flex min-h-10 items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:border-red-300 hover:bg-red-50 hover:text-red-700 disabled:opacity-60" @click="confirmRemove = true">
                             <Icon :icon="trashIcon" aria-hidden="true" class="size-4" />{{ t('profilePhotoRemove') }}
                         </button>
                     </div>

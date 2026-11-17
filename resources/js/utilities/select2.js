@@ -12,7 +12,7 @@ if (typeof $.fn.select2 !== 'function') {
  * Vue's v-model keeps listening to native change events, and Select2's display follows.
  * `element` may appear later (v-if); `sources` are reactive getters that refresh the display.
  */
-export function useSelect2(element, { sources = [], placeholder = '', searchThreshold = 8, selectionClass = '', dropdownClass = '', width = '100%', config = {} } = {}) {
+export function useSelect2(element, { sources = [], placeholder = '', searchThreshold = 0, selectionClass = '', dropdownClass = '', width = '100%', config = {} } = {}) {
     let $select;
 
     function destroy() {

@@ -227,7 +227,7 @@ it('hides mutation actions for readers and removes sensitive detail after access
     server({ registered: true }); const wrapper = await render({ ...scope, permissions: [] }); await show(wrapper);
     expect(wrapper.findAll('button').some(item => item.text() === en['controlledAction-release'])).toBe(false);
     server({ detailError: { status: 404, body: { message: 'Not Found' } } });
-    await button(wrapper, en.backToRegister).trigger('click'); await flushPromises();
+    await button(wrapper, en.uiBack).trigger('click'); await flushPromises();
     await show(wrapper);
     expect(wrapper.text()).not.toContain(en.controlledHistory);
     expect(wrapper.text()).not.toContain('Example owner');

@@ -40,7 +40,7 @@ onBeforeUnmount(() => document.removeEventListener('click', handleDocumentClick)
 
 <template>
     <div ref="root" class="relative" @keydown.esc.stop="close(true)">
-        <button ref="trigger" type="button" data-user-menu-trigger aria-haspopup="true" :aria-expanded="open" aria-controls="user-menu" :aria-label="t('userMenu')" class="flex items-center gap-3 rounded-full py-1 pr-2 pl-1 transition-colors hover:bg-slate-100" :class="{ 'bg-slate-100': open }" @click="toggle">
+        <button ref="trigger" type="button" data-user-menu-trigger aria-haspopup="true" :aria-expanded="open" aria-controls="user-menu" :aria-label="t('userMenu')" :title="t('userMenu')" class="flex items-center gap-3 rounded-full py-1 pr-2 pl-1 transition-colors hover:bg-slate-100" :class="{ 'bg-slate-100': open }" @click="toggle">
             <UserAvatar :name="name" :photo-url="photoUrl" />
             <span class="hidden min-w-0 text-left md:block">
                 <span class="block max-w-44 truncate text-sm font-semibold text-slate-800">{{ name }}</span>

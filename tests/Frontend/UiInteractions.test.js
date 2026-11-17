@@ -133,14 +133,19 @@ describe('toast notifications', () => {
             return { wrapper, ...controls };
         }
 
-        it('expires success after four seconds and info after five while preserving warnings and errors', async () => {
+        it('confirms success with a SweetAlert2 popup instead of a toast', async () => {
             const { wrapper, notify } = notifications();
-            for (const type of ['success', 'info', 'warning', 'error']) { notify({ type, message: type }); }
-            await vi.advanceTimersByTimeAsync(3999);
-            expect(wrapper.findAll('article')).toHaveLength(4);
-            await vi.advanceTimersByTimeAsync(1);
-            expect(wrapper.findAll('article').map(item => item.get('p + p').text())).toEqual(['info', 'warning', 'error']);
-            await vi.advanceTimersByTimeAsync(999);
+            notify({ type: 'success', messageKey: 'uiPreviewSaved' });
+            await flushPromises();
+            expect(wrapper.findAll('article')).toHaveLength(0);
+            expect(document.querySelector('.swal2-container .swal2-title')?.textContent).toBe('Saved successfully');
+            expect(document.querySelector('.swal2-container .swal2-popup')?.textContent).toContain('Sample form validated. No data was saved.');
+        });
+
+        it('expires info after five seconds while preserving warnings and errors', async () => {
+            const { wrapper, notify } = notifications();
+            for (const type of ['info', 'warning', 'error']) { notify({ type, message: type }); }
+            await vi.advanceTimersByTimeAsync(4999);
             expect(wrapper.findAll('article')).toHaveLength(3);
             await vi.advanceTimersByTimeAsync(1);
             expect(wrapper.findAll('article').map(item => item.get('p + p').text())).toEqual(['warning', 'error']);
@@ -152,14 +157,14 @@ describe('toast notifications', () => {
 
         it('keeps consecutive notifications on independent deadlines and cancels manually dismissed timers', async () => {
             const { wrapper, notify } = notifications();
-            notify({ type: 'success', message: 'First' });
+            notify({ type: 'info', message: 'First' });
             await vi.advanceTimersByTimeAsync(3000);
-            notify({ type: 'success', message: 'Second' });
+            notify({ type: 'info', message: 'Second' });
             await vi.advanceTimersByTimeAsync(0);
             expect(wrapper.findAll('article')).toHaveLength(2);
             await wrapper.get('article button').trigger('click');
             expect(vi.getTimerCount()).toBe(1);
-            await vi.advanceTimersByTimeAsync(1000);
+            await vi.advanceTimersByTimeAsync(2000);
             expect(wrapper.text()).toContain('Second');
             notify({ type: 'info', message: 'Third' });
             await vi.advanceTimersByTimeAsync(3000);
@@ -172,8 +177,8 @@ describe('toast notifications', () => {
 
         it('clears pending timers when its component unmounts', async () => {
             const { wrapper, notify, items } = notifications();
-            notify({ type: 'success', message: 'Success' });
-            notify({ type: 'info', message: 'Info' });
+            notify({ type: 'info', message: 'First' });
+            notify({ type: 'info', message: 'Second' });
             expect(vi.getTimerCount()).toBe(2);
             wrapper.unmount();
             expect(vi.getTimerCount()).toBe(0);
@@ -203,7 +208,7 @@ describe('toast notifications', () => {
             setup() {
                 const notifications = useNotifications();
                 notifications.notify({ type: 'info', message: 'First' });
-                notifications.notify({ type: 'success', message: 'Second' });
+                notifications.notify({ type: 'warning', message: 'Second' });
                 return notifications;
             },
             template: '<ToastNotifications :items="items" @dismiss="dismiss" />',
@@ -259,7 +264,8 @@ describe('development preview', () => {
         await wrapper.get('input[name="sample-acknowledged"]').setValue(true);
         await wrapper.get('form').trigger('submit');
         expect(wrapper.findAll('form [role="alert"]')).toHaveLength(0);
-        expect(wrapper.findComponent(ToastNotifications).text()).toContain('ບໍ່ມີການບັນທຶກຂໍ້ມູນ.');
+        await flushPromises();
+        expect(document.querySelector('.swal2-container .swal2-popup')?.textContent).toContain('ບໍ່ມີການບັນທຶກຂໍ້ມູນ.');
 
         const table = wrapper.findComponent(DataTable);
         await table.findAll('nav button')[1].trigger('click');
@@ -272,6 +278,7 @@ describe('development preview', () => {
         await wrapper.get('dialog').findAll('button')[1].trigger('click');
         await flushPromises();
         expect(wrapper.get('dialog').element.open).toBe(false);
-        expect(wrapper.findComponent(ToastNotifications).findAll('article')).toHaveLength(2);
+        // The confirmed-dialog info toast remains; the earlier success went to SweetAlert2.
+        expect(wrapper.findComponent(ToastNotifications).findAll('article')).toHaveLength(1);
     });
 });

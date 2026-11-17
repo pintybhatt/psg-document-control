@@ -1,11 +1,11 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, ref } from 'vue';
 import DataTable from './ui/DataTable.vue';
-import UiButton from './ui/UiButton.vue';
 import StatusBadge from './ui/StatusBadge.vue';
+import UiButton from './ui/UiButton.vue';
 import IconButton from './ui/IconButton.vue';
 import TextInput from './ui/TextInput.vue';
-import CheckboxInput from './ui/CheckboxInput.vue';
+import ToggleSwitch from './ui/ToggleSwitch.vue';
 import ConfirmDialog from './ui/SweetConfirmDialog.vue';
 import FormModal from './ui/FormModal.vue';
 import { useLocalization } from '../localization/index.js';
@@ -30,11 +30,13 @@ const form = ref(null);
 const editing = ref(null);
 const editor = ref(null);
 const confirm = ref(false);
+const deleting = ref(null);
+const confirmDelete = ref(false);
 let controller;
 let disposed = false;
 const label = record => record?.[language.value === 'lo' ? 'name_lo' : 'name_en'] ?? '';
 const columns = computed(() => [{ key: 'code', label: t('orgCode'), type: 'reference' }, { key: 'label', label: t('orgName') }, { key: 'status', label: t('uiStatus') }, { key: 'actions', label: t('rbacActions') }]);
-const displayRows = computed(() => rows.value.map(row => ({ ...row, label: label(row), status: t(row.active ? 'rbacActive' : 'rbacInactive') })));
+const displayRows = computed(() => rows.value.map(row => ({ ...row, label: label(row), status_key: row.active ? 'active' : 'inactive', status: t(row.active ? 'rbacActive' : 'rbacInactive') })));
 function handleError(failure) {
     if (disposed || failure.name === 'AbortError') { return; }
     fields.value = failure.fields ?? {};
@@ -89,6 +91,19 @@ async function save() {
     } catch (failure) { confirm.value = false; handleError(failure); await nextTick(); editor.value?.querySelector('[aria-invalid="true"]')?.focus(); }
     finally { saving.value = false; }
 }
+function prepareDelete(record) {
+    deleting.value = record; errorKey.value = ''; confirmDelete.value = true;
+}
+async function remove() {
+    if (saving.value || !deleting.value) { return; }
+    saving.value = true; errorKey.value = '';
+    try {
+        await request(`${base}/departments/${deleting.value.id}`, { method: 'DELETE' });
+        if (disposed) { return; }
+        confirmDelete.value = false; deleting.value = null; emit('saved'); await load();
+    } catch (failure) { confirmDelete.value = false; handleError(failure); }
+    finally { saving.value = false; }
+}
 load();
 onBeforeUnmount(() => { disposed = true; controller?.abort(); });
 </script>
@@ -105,8 +120,8 @@ onBeforeUnmount(() => { disposed = true; controller?.abort(); });
         <p v-if="errorKey" role="alert" class="rounded-lg bg-red-50 p-3 text-sm text-red-800">{{ t(errorKey) }}</p>
         <div class="flex flex-wrap items-center justify-between gap-3"><h4 class="font-medium">{{ t(`org-${kind}`) }}</h4><UiButton :disabled="saving || loading" @click="edit()">{{ t('orgCreate') }}</UiButton></div>
         <DataTable v-model:page="page" :rows="displayRows" :columns="columns" :caption="t(`org-${kind}`)" :loading="loading" server-side :total="total" :per-page="10" @change="load">
-            <template #cell-status="{ row }"><StatusBadge :status="row.active ? 'effective' : 'inactive'" :label="row.status" /></template>
-            <template #cell-actions="{ row }"><div class="flex flex-wrap gap-2"><IconButton action="edit" :label="t('rbacEdit')" :disabled="saving" @click="edit(row)" /><UiButton v-if="kind !== 'departments'" variant="secondary" :disabled="saving" @click="navigate(kind === 'companies' ? 'sites' : 'departments', row)">{{ t(kind === 'companies' ? 'orgSites' : 'orgDepartments') }}</UiButton></div></template>
+            <template #cell-status="{ row }"><StatusBadge :status="row.status_key" :label="row.status" /></template>
+            <template #cell-actions="{ row }"><div class="flex flex-wrap gap-2"><IconButton action="edit" :label="t('rbacEdit')" :disabled="saving" @click="edit(row)" /><IconButton v-if="kind === 'departments'" action="delete" :label="t('orgDelete')" :disabled="saving" @click="prepareDelete(row)" /><UiButton v-if="kind !== 'departments'" variant="secondary" :disabled="saving" @click="navigate(kind === 'companies' ? 'sites' : 'departments', row)">{{ t(kind === 'companies' ? 'orgSites' : 'orgDepartments') }}</UiButton></div></template>
         </DataTable>
         <FormModal v-if="form" size="md" :title="`${t(editing ? 'orgEdit' : 'orgCreate')} · ${t(`org-${kind}`)}`" :subtitle="editing ? t('orgIdentityNotice') : ''" :busy="saving" @close="form = null">
         <form ref="editor" novalidate class="flex flex-col gap-4" @submit.prevent="prepareSave">
@@ -114,11 +129,12 @@ onBeforeUnmount(() => { disposed = true; controller?.abort(); });
                 <TextInput v-model="form.code" name="org-code" :label="t('orgCode')" :readonly="!!editing" :disabled="saving" :error-key="fields.code?.[0]" required maxlength="32" />
                 <TextInput v-model="form.name_en" name="org-name-en" :label="t('rbacNameEn')" :disabled="saving" :error-key="fields.name_en?.[0]" required lang="en" maxlength="255" />
                 <TextInput v-model="form.name_lo" name="org-name-lo" :label="t('rbacNameLo')" :disabled="saving" :error-key="fields.name_lo?.[0]" required lang="lo" maxlength="255" />
-                <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3"><CheckboxInput v-model="form.active" :label="t('rbacActive')" :disabled="saving" :error-key="fields.active?.[0]" /></div>
+                <div class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3"><ToggleSwitch v-model="form.active" :label="t(form.active ? 'rbacActive' : 'rbacInactive')" :disabled="saving" :error-key="fields.active?.[0]" /></div>
             </div>
             <div class="flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-4"><UiButton variant="secondary" :disabled="saving" @click="form = null">{{ t('uiCancel') }}</UiButton><UiButton type="submit" :loading="saving">{{ t('orgSave') }}</UiButton></div>
         </form>
         </FormModal>
         <ConfirmDialog v-model="confirm" :danger="!form?.active" :title="t('orgStatusChange')" :message="`${label(editing)} · ${t(form?.active ? 'rbacActive' : 'rbacInactive')}. ${t('orgDeactivationNotice')}`" :loading="saving" @confirm="save" />
+        <ConfirmDialog v-model="confirmDelete" danger :title="t('orgDeleteTitle')" :message="`${deleting?.code ?? ''} · ${label(deleting)}. ${t('orgDeleteNotice')}`" :loading="saving" @confirm="remove" />
     </section>
 </template>

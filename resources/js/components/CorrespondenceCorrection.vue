@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, reactive, ref } from 'vue';
 import { useLocalization } from '../localization/index.js';
 import { createJsonClient } from '../utilities/jsonClient.js';
+import { showSuccess } from '../utilities/alerts.js';
 import TextInput from './ui/TextInput.vue';
 import TextareaInput from './ui/TextareaInput.vue';
 import SelectInput from './ui/SelectInput.vue';
@@ -49,7 +50,7 @@ async function save() {
     const scope = Object.fromEntries(['company_id', 'site_id', 'department_id'].map(key => [key, props.scope[key]]).filter(([, value]) => value != null));
     try {
         const result = await request(`${props.endpoint}/${props.record.id}/operations?${new URLSearchParams(scope)}`, { method: 'POST', body: { ...scope, action: 'correct_details', revision: revision.value, note: reason.value, details }, signal: controller.signal });
-        if (!controller.signal.aborted) { editing.value = false; emit('saved', result.data); }
+        if (!controller.signal.aborted) { editing.value = false; showSuccess(t('uiSaveSuccess')); emit('saved', result.data); }
     } catch (caught) {
         if (!controller.signal.aborted) {
             fields.value = caught.fields ?? {};

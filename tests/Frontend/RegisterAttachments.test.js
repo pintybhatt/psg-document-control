@@ -80,5 +80,7 @@ it.each(registers.flatMap(register => ['en', 'lo'].map(language => ({ ...registe
     expect(upload[1].headers['X-CSRF-TOKEN']).toBe('sample-csrf');
     expect(new URL(upload[0], 'http://localhost').searchParams.get('revision_id')).toBe(kind === 'controlled' ? '11' : null);
     expect(panel.text()).toContain('signed-original.pdf');
-    expect(kind === 'controlled' ? wrapper.text() : panel.text()).toContain(dictionary[kind === 'controlled' ? 'controlledSavedWithAttachment' : 'storageSaved']);
+    // Saves are confirmed with a SweetAlert2 popup; the storage panel also keeps its inline status.
+    expect(document.querySelector('.swal2-container .swal2-popup')?.textContent).toContain(dictionary[kind === 'controlled' ? 'controlledSavedWithAttachment' : 'storageSaved']);
+    if (kind !== 'controlled') { expect(panel.text()).toContain(dictionary.storageSaved); }
 });

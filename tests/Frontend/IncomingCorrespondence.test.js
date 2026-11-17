@@ -127,7 +127,7 @@ describe('incoming correspondence', () => {
         expect(call[1].headers['X-CSRF-TOKEN']).toBe('sample-csrf');
         expect(JSON.parse(call[1].body)).toMatchObject({ subject: 'New subject', classification: 'normal', site_id: 7, department_id: 12 });
         expect(JSON.parse(call[1].body)).not.toHaveProperty('internal_number');
-        expect(wrapper.find('#incoming-draft-form').exists()).toBe(false); expect(wrapper.text()).toContain('Draft saved.');
+        expect(wrapper.find('#incoming-draft-form').exists()).toBe(false); expect(document.querySelector('.swal2-container .swal2-popup')?.textContent).toContain('Draft saved.');
     });
     it('edits a draft without changing its security classification', async () => {
         const fetch = server(); const wrapper = await render(); await openDetail(wrapper);
@@ -164,7 +164,7 @@ describe('incoming correspondence', () => {
         for (const key of Object.keys(en).filter(key => key.startsWith('incoming'))) { expect(lo[key], key).toBeTruthy(); expect(lo[key]).not.toBe(en[key]); }
         server(); const wrapper = await render(); await openDetail(wrapper);
         await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
-        expect(wrapper.text()).toContain('ທະບຽນເອກະສານຂາເຂົ້າ'); expect(wrapper.text()).toContain('ຈົດໝາຍ');
+        expect(wrapper.get('[data-page-back]').attributes('title')).toContain('ທະບຽນເອກະສານຂາເຂົ້າ'); expect(wrapper.text()).toContain('ຈົດໝາຍ');
         expect(wrapper.text()).toContain(lo.incomingReceivingDepartment); expect(wrapper.text()).toContain(lo.documentCategory);
         expect(wrapper.text()).not.toContain('incomingStatus-');
         expect(wrapper.find('table').exists()).toBe(false);
