@@ -120,7 +120,7 @@ class UserManagementController extends Controller
         $rules = [
             'access' => ['sometimes', 'array:company_id,site_id,department_id,role_id,confirm_regrant', 'required_array_keys:company_id,site_id,role_id'],
             'access.company_id' => ['required_with:access', 'integer', 'min:1'],
-            'access.site_id' => ['required_with:access', 'integer', 'min:1'],
+            'access.site_id' => ['nullable', 'integer', 'min:1'],
             'access.department_id' => ['sometimes', 'nullable', 'integer', 'min:1'],
             'access.role_id' => ['required_with:access', 'integer', 'min:1'],
             'access.confirm_regrant' => ['sometimes', 'boolean'],

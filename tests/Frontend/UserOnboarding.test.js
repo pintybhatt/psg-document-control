@@ -10,13 +10,15 @@ afterEach(() => vi.unstubAllGlobals());
 const endpoint = '/users';
 const accessEndpoints = { units: '/units', roles: '/roles', permissions: '/permissions' };
 const names = (id, name) => ({ id, name_en: name, name_lo: `ຕົວຢ່າງ ${id}` });
-const role = { ...names(10, 'Document Controller'), code: 'DOCUMENT_CONTROLLER', active: true, assignable: true, permission_keys: ['organization.access', 'documents.metadata.view'] };
+const role = { ...names(10, 'Document Controller'), code: 'DOCUMENT_CONTROLLER', description: 'Manages document registers.', scope_key: 'global', active: true, assignable: true, permission_keys: [] };
+const companyRole = { ...role, ...names(14, 'Company Viewer'), code: 'COMPANY_VIEWER', scope_key: 'company:1', permission_keys: ['organization.access'] };
+const siteRole = { ...role, ...names(11, 'Site Viewer'), code: 'SITE_VIEWER', scope_key: 'site:2' };
 const existingUser = { id: 2, name: 'Existing User', email: 'existing@example.test', preferred_language: 'en', active: true };
 
-function server({ user = null, failSave = false, unconfiguredRoles = false } = {}) {
+function server({ user = null, failSave = false, noAssignableRoles = false, failRoles = false, failEmail = false } = {}) {
     const users = user ? [structuredClone(user)] : [];
     const currentAccess = { memberships: [{ ...names(20, 'Membership'), company: names(1, 'Example Company'), site: names(2, 'Existing Site'), effective: true, revoke_url: '/memberships/20?scope_type=site' }],
-        assignments: [{ id: 30, role, scope_key: 'site:2', effective: true, revoke_url: '/assignments/30?scope_type=site' }] };
+        assignments: [{ id: 30, role, company: names(1, 'Example Company'), site: names(2, 'Existing Site'), scope_key: 'site:2', effective: true, revoke_url: '/assignments/30?scope_type=site' }] };
     const response = (data, status = 200) => ({ ok: status < 400, status, json: async () => structuredClone(data) });
     const fetch = vi.fn(async (url, options = {}) => {
         const parsed = new URL(url, 'http://localhost');
@@ -27,6 +29,7 @@ function server({ user = null, failSave = false, unconfiguredRoles = false } = {
         }
         if (method !== 'GET') {
             if (failSave) { return response({ errors: { 'access.role_id': ['userAccessInvalidRole'] } }, 422); }
+            if (failEmail) { return response({ errors: { email: ['The email has already been taken.'] } }, 422); }
             const body = JSON.parse(options.body);
             if (method === 'POST') { users.push({ ...existingUser, name: body.name, email: body.email }); }
             return response({ data: users[0] }, method === 'POST' ? 201 : 200);
@@ -39,10 +42,12 @@ function server({ user = null, failSave = false, unconfiguredRoles = false } = {
             return response({ data: rows, last_page: 1 });
         }
         if (parsed.pathname === '/roles') {
-            if (unconfiguredRoles) { return response({ data: [{ ...role, permission_keys: [] }], meta: { last_page: 1 } }); }
-            return response({ data: [role, { ...role, id: 14, code: 'DEPARTMENT_USER' }, { ...role, id: 11, permission_keys: [] }, { ...role, id: 12, code: 'SECURITY_ADMINISTRATOR' }, { ...role, id: 13, active: false }], meta: { last_page: 1 } });
+            if (failRoles) { return response({}, 500); }
+            const excluded = [{ ...role, id: 12, code: 'SECURITY_ADMINISTRATOR' }, { ...role, id: 13, active: false }, { ...role, id: 15, permission_keys: ['documents.view'] }];
+            const candidates = parsed.searchParams.get('scope_type') === 'site' ? [role, companyRole, siteRole] : [role, companyRole];
+            return response({ data: noAssignableRoles ? excluded : [...candidates, ...excluded], meta: { last_page: 1 } });
         }
-        if (parsed.pathname === '/permissions') { return response({ data: role.permission_keys.map(key => ({ key, available: true, delegatable: true })) }); }
+        if (parsed.pathname === '/permissions') { return response({ data: [{ key: 'organization.access', available: true, delegatable: true }, { key: 'documents.view', available: false, delegatable: false }] }); }
         if (parsed.pathname.endsWith('/access')) { return response(currentAccess); }
         return response({ data: users, last_page: 1 });
     });
@@ -64,22 +69,41 @@ function field(wrapper, name) {
 }
 async function selectSite(wrapper) {
     await field(wrapper, 'Company').setValue(1); await flushPromises();
-    await field(wrapper, 'Site').setValue(2); await flushPromises();
+    await field(wrapper, 'Access scope').setValue(2); await flushPromises();
     await field(wrapper, 'Role').setValue(10);
 }
 
 describe('combined user onboarding', () => {
-    it('explains why an unconfigured Document Controller is excluded and describes combined onboarding', async () => {
-        const fetch = server({ unconfiguredRoles: true });
+    it.each([false, true])('shows the empty message only after a successful role lookup (lookup failed %s)', async failRoles => {
+        const fetch = server({ noAssignableRoles: true, failRoles });
         const wrapper = await render();
         await button(wrapper, 'Create user').trigger('click'); await flushPromises();
         await field(wrapper, 'Company').setValue(1); await flushPromises();
-        await field(wrapper, 'Site').setValue(2); await flushPromises();
+        await field(wrapper, 'Access scope').setValue(2); await flushPromises();
         expect(field(wrapper, 'Role').findAll('option')).toHaveLength(1);
-        expect(wrapper.text()).toContain('No eligible workspace roles');
-        expect(wrapper.text()).toContain('membership and role together');
-        expect(wrapper.text()).not.toContain('after creating their account');
+        expect(wrapper.text().includes('No roles can be assigned for this selection.')).toBe(!failRoles);
+        expect(wrapper.find('[role="alert"]').exists()).toBe(failRoles);
         expect(fetch.mock.calls.every(([, options]) => options.method === 'GET')).toBe(true);
+    });
+
+    it('shows searchable roles from the selected site and its parent scopes without requiring metadata access', async () => {
+        server();
+        const wrapper = await render();
+        await button(wrapper, 'Create user').trigger('click'); await flushPromises();
+        await selectSite(wrapper);
+        expect(wrapper.text()).toContain('Manages document registers.');
+        const roleField = field(wrapper, 'Role');
+        expect(roleField.findAll('option').slice(1).map(option => option.text())).toEqual([
+            'Document Controller · Group / Global', 'Company Viewer · Company', 'Site Viewer · Site',
+        ]);
+
+        const combobox = wrapper.get(`[role="combobox"][aria-controls="select2-${roleField.element.id}-container"]`);
+        combobox.element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', which: 13, bubbles: true }));
+        const search = document.querySelector('.select2-container--open .select2-search__field');
+        expect(search).not.toBeNull();
+        search.value = 'Company Viewer';
+        search.dispatchEvent(new Event('input', { bubbles: true }));
+        expect(Array.from(document.querySelectorAll('.select2-results__option')).map(option => option.textContent)).toEqual(['Company Viewer · Company']);
     });
     it.each([false, true])('submits account, exact membership and role together (department %s)', async department => {
         const fetch = server();
@@ -95,7 +119,7 @@ describe('combined user onboarding', () => {
             expect(field(wrapper, 'Role').element.value).toBe('');
             await field(wrapper, 'Role').setValue(14);
         }
-        expect(field(wrapper, 'Role').findAll('option')).toHaveLength(department ? 2 : 3);
+        expect(field(wrapper, 'Role').findAll('option').map(option => option.element.value)).toEqual(department ? ['', '14', '11'] : ['', '10', '14', '11']);
         await wrapper.findAll('form')[1].trigger('submit'); await flushPromises();
         const mutations = fetch.mock.calls.filter(([, options]) => options.method !== 'GET');
         expect(mutations).toHaveLength(1);
@@ -110,10 +134,10 @@ describe('combined user onboarding', () => {
         await selectSite(wrapper);
         await field(wrapper, 'Department').setValue(3);
         await field(wrapper, 'Company').setValue(4); await flushPromises();
-        expect(field(wrapper, 'Site').element.value).toBe('');
+        expect(field(wrapper, 'Access scope').element.value).toBe('');
         expect(field(wrapper, 'Department').element.value).toBe('');
         expect(field(wrapper, 'Role').element.value).toBe('');
-        expect(field(wrapper, 'Site').findAll('option').map(item => item.element.value)).toEqual(['', '5']);
+        expect(field(wrapper, 'Access scope').findAll('option').map(item => item.element.value)).toEqual(['', 'company', '5']);
     });
 
     it('shows existing access and sends only an explicit addition when editing', async () => {
@@ -121,13 +145,19 @@ describe('combined user onboarding', () => {
         const wrapper = await render();
         await button(wrapper, 'Edit').trigger('click'); await flushPromises();
         expect(wrapper.text()).toContain('Existing Site');
-        expect(wrapper.text()).toContain('site:2');
-        await selectSite(wrapper);
+        expect(wrapper.text()).toContain('Example Company / Existing Site');
+        await field(wrapper, 'Company').setValue(1); await flushPromises();
+        expect(field(wrapper, 'Role').element.disabled).toBe(true);
+        await field(wrapper, 'Access scope').setValue('company'); await flushPromises();
+        expect(field(wrapper, 'Department').element.disabled).toBe(true);
+        expect(field(wrapper, 'Role').findAll('option').map(option => option.element.value)).toEqual(['', '10', '14']);
+        await field(wrapper, 'Role').setValue(14);
         await wrapper.findAll('form')[1].trigger('submit'); await flushPromises();
         const updates = fetch.mock.calls.filter(([, options]) => options.method !== 'GET');
         expect(updates).toHaveLength(1);
         expect(updates[0][0]).toBe('/users/2');
         expect(updates[0][1].method).toBe('PATCH');
+        expect(JSON.parse(updates[0][1].body).access).toEqual({ company_id: 1, site_id: null, department_id: null, role_id: 14, confirm_regrant: false });
         expect(JSON.parse(updates[0][1].body)).not.toHaveProperty('revoke');
     });
 
@@ -141,7 +171,7 @@ describe('combined user onboarding', () => {
         const deletions = fetch.mock.calls.filter(([, options]) => options.method === 'DELETE');
         expect(deletions).toHaveLength(1);
         expect(deletions[0][0]).toBe('/memberships/20?scope_type=site');
-        expect(wrapper.text()).toContain('site:2');
+        expect(wrapper.text()).toContain('Example Company / Existing Site');
     });
 
     it('keeps the editor open and explains incompatible role validation', async () => {
@@ -150,7 +180,7 @@ describe('combined user onboarding', () => {
         await button(wrapper, 'Edit').trigger('click'); await flushPromises();
         await selectSite(wrapper);
         await wrapper.findAll('form')[1].trigger('submit'); await flushPromises();
-        expect(wrapper.get('[role="alert"]').text()).toContain('active, authorized workspace role');
+        expect(wrapper.get('[role="alert"]').text()).toContain('active role you can assign at this scope');
         expect(wrapper.findAll('form')).toHaveLength(2);
     });
 
@@ -160,6 +190,20 @@ describe('combined user onboarding', () => {
         await button(wrapper, 'ແກ້ໄຂ').trigger('click'); await flushPromises();
         expect(wrapper.text()).toContain('ເພີ່ມສິດເຂົ້າໃຊ້ອົງກອນ');
         expect(wrapper.text()).toContain('ສະມາຊິກ ແລະ ບົດບາດປັດຈຸບັນ');
+        await field(wrapper, 'ບໍລິສັດ').setValue(1); await flushPromises();
+        expect(field(wrapper, 'ຂອບເຂດການເຂົ້າເຖິງ').text()).toContain('ສິດລະດັບບໍລິສັດ');
+        await field(wrapper, 'ຂອບເຂດການເຂົ້າເຖິງ').setValue('company'); await flushPromises();
+        expect(field(wrapper, 'ບົດບາດ').text()).toContain(role.name_lo);
         expect(wrapper.text()).not.toContain('userAccess');
+    });
+
+    it('shows a rejected email in Lao without changing the account API response', async () => {
+        server({ user: existingUser, failEmail: true });
+        const wrapper = await render('lo');
+        await button(wrapper, 'ແກ້ໄຂ').trigger('click'); await flushPromises();
+        await wrapper.findAll('form')[1].trigger('submit'); await flushPromises();
+        const email = wrapper.get('input[type="email"]');
+        expect(email.attributes('aria-invalid')).toBe('true');
+        expect(wrapper.get(`#${email.attributes('aria-describedby')}`).text()).toBe('ອີເມວນີ້ຖືກໃຊ້ແລ້ວ.');
     });
 });

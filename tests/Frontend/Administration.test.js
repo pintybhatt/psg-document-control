@@ -81,10 +81,10 @@ function server({ contexts = [globalScope], roles = [sampleRole], assignments = 
     return fetch;
 }
 
-async function render(workspace = null, openRoles = true) {
+async function render(workspace = null, openRoles = true, extraEndpoints = {}) {
     const wrapper = mount({
         components: { AdministrationPage, LanguageSwitcher },
-        setup: () => { if (workspace) { provideWorkspace(workspace); } return { endpoints }; },
+        setup: () => { if (workspace) { provideWorkspace(workspace); } return { endpoints: { ...endpoints, ...extraEndpoints } }; },
         template: '<div id="dcms-app"><LanguageSwitcher /><AdministrationPage :endpoints="endpoints" csrf-token="sample-csrf" /></div>',
     }, { attachTo: document.body, global: { plugins: [createLocalization()] } });
     await flushPromises();
@@ -93,6 +93,11 @@ async function render(workspace = null, openRoles = true) {
         await flushPromises();
     }
     return wrapper;
+}
+
+async function openAssignments(wrapper) {
+    await wrapper.get('[data-admin-tab="security"]').trigger('click');
+    await flushPromises();
 }
 
 function button(wrapper, text) {
@@ -123,9 +128,29 @@ describe('scoped role administration', () => {
         await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(wrapper.get('#admin-overview-heading').text()).toBe('ພາບລວມ');
         await wrapper.get('[data-admin-shortcut="roles"]').trigger('click');
+        await flushPromises();
         expect(wrapper.get('[data-admin-tab="access"]').attributes('aria-pressed')).toBe('true');
+        expect(document.activeElement).toBe(wrapper.get('[data-admin-tab="access"]').element);
         expect(wrapper.get('section[aria-labelledby="roles-heading"]').isVisible()).toBe(true);
         expect(fetch.mock.calls.every(([, options]) => !options.method || options.method === 'GET')).toBe(true);
+    });
+
+    it('groups available settings and keeps advanced assignments and history under Security & Audit', async () => {
+        const companyScope = { ...globalScope, scope_key: 'company:7', scope_type: 'company', company_id: 7,
+            company: { name_en: 'Example Company', name_lo: 'ບໍລິສັດ' }, permissions: [...allKeys, 'memberships.view', 'master-data.view', 'numbering.view', 'security.audit.view'] };
+        server({ contexts: [{ ...globalScope, permissions: [...allKeys, 'users.manage'] }, companyScope], canManageOrganization: true });
+        const wrapper = await render(null, false, { history: '/history', masterData: {}, numbering: {}, userManagement: '/accounts' });
+        const shortcuts = label => wrapper.get(`section[aria-label="${label}"]`).findAll('[data-admin-shortcut]').map(item => item.attributes('data-admin-shortcut'));
+        expect(shortcuts('Users & Access')).toEqual(['users', 'roles']);
+        expect(shortcuts('Organization')).toEqual(['organization']);
+        expect(shortcuts('Security & Audit')).toEqual(['assignments']);
+        expect(wrapper.find('section[aria-label="Document Settings"]').exists()).toBe(false);
+        await control(wrapper, 'Authorization scope').setValue('company:7');
+        await flushPromises();
+        expect(shortcuts('Users & Access')).toEqual(['users', 'roles', 'people']);
+        expect(shortcuts('Document Settings')).toEqual(['documents', 'categories', 'registers', 'numbering']);
+        expect(shortcuts('Security & Audit')).toEqual(['assignments', 'history']);
+        expect(wrapper.find('[data-admin-tab="history"]').exists()).toBe(false);
     });
 
     it('shows only the Roles section for a custom administrator with role-view permission', async () => {
@@ -264,12 +289,12 @@ describe('scoped role administration', () => {
         expect(panel.text()).toContain('may affect users across companies and sites');
         expect(panel.get('dl').text()).toContain('owned by one company');
         expect(panel.get('dl').text()).toContain('owned by one site');
-        expect(wrapper.get('[data-roles-scope]').text()).toContain('Roles & Permissions — current scope: Group / Global');
+        expect(wrapper.get('[data-roles-scope]').text()).toContain('Editing scope · Group / Global');
         await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
         expect(panel.text()).toContain('ບໍລິສັດ / ສະຖານທີ່');
         expect(panel.text()).toContain('ຂອບເຂດປັດຈຸບັນ');
         expect(panel.get('dl').text()).toContain('ບໍລິສັດ');
-        expect(wrapper.get('[data-roles-scope]').text()).toContain('ບົດບາດ ແລະ ສິດ');
+        expect(wrapper.get('[data-roles-scope]').text()).toContain('ຂອບເຂດການແກ້ໄຂ');
         expect(panel.text()).not.toContain('rbacScope');
     });
 
@@ -302,7 +327,7 @@ describe('scoped role administration', () => {
         expect(wrapper.get('form').text()).toContain('ທ່ານບໍ່ມີສິດແກ້ໄຂ');
     });
 
-    it('groups business permissions and explains workspace setup without selecting or saving grants automatically', async () => {
+    it('groups business permissions and leaves workspace permissions optional', async () => {
         const catalog = [...permissionRows,
             { key: 'organization.access', area: 'organization', name_en: 'Use a workspace', name_lo: 'ພື້ນທີ່ເຮັດວຽກ', available: true, delegatable: true },
             { key: 'documents.metadata.view', area: 'document-security', name_en: 'View details', name_lo: 'ລາຍລະອຽດ', available: true, delegatable: true },
@@ -317,11 +342,11 @@ describe('scoped role administration', () => {
         const wrapper = await render();
         const list = wrapper.get('section[aria-labelledby="roles-heading"]');
         expect(list.text()).toContain('Document Controller');
-        expect(list.text()).toContain('Authorization scope');
+        expect(list.findAll('th').map(cell => cell.text())).toEqual(['Role name', 'Scope', 'Status', 'Description', 'Actions']);
+        expect(list.text()).toContain('Fictional configuration');
         expect(list.text()).toContain('Group / Global');
-        expect(list.text()).toContain('Workspace setup needed');
+        expect(list.text()).not.toContain('Workspace setup needed');
         await button(wrapper, 'Edit').trigger('click');
-        expect(wrapper.get('form [role="status"]').text()).toContain('cannot be selected during user creation');
         expect(wrapper.findAll('form input[value]').every(input => !input.element.checked)).toBe(true);
         const workspaceGroup = wrapper.get('[data-permission-group="workspace"]');
         expect(workspaceGroup.attributes('open')).toBeDefined();
@@ -342,7 +367,6 @@ describe('scoped role administration', () => {
         await wrapper.get('input[value="organization.access"]').setValue(true);
         await wrapper.get('input[value="documents.metadata.view"]').setValue(true);
         expect(workspaceGroup.text()).toContain('2 of 2 selected');
-        expect(wrapper.get('form [role="status"]').text()).toContain('Workspace permissions are configured');
         await wrapper.get('form').trigger('submit'); await flushPromises();
         const updates = fetch.mock.calls.filter(([, options]) => options.method === 'PATCH');
         expect(updates).toHaveLength(1);
@@ -391,10 +415,12 @@ describe('scoped role administration', () => {
         server({ roles: [systemRole], assignments: [{ ...sampleAssignment, role: systemRole }] });
         const wrapper = await render();
 
-        expect(wrapper.text()).toContain('System Administrator');
+        expect(wrapper.get('[aria-labelledby="roles-heading"]').text()).toContain('System Administrator');
         expect(wrapper.text()).toContain('Confidential and Highly Confidential documents');
+        await openAssignments(wrapper);
+        expect(wrapper.get('[aria-labelledby="assignments-heading"]').text()).toContain('System Administrator');
         await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
-        expect(wrapper.text()).toContain('ຜູ້ບໍລິຫານລະບົບ');
+        expect(wrapper.get('[aria-labelledby="assignments-heading"]').text()).toContain('ຜູ້ບໍລິຫານລະບົບ');
     });
 
     it('excludes a protected global role from assignment choices when the server refuses delegation', async () => {
@@ -402,6 +428,7 @@ describe('scoped role administration', () => {
         server({ roles: [sampleRole, systemRole] });
         const wrapper = await render();
 
+        await openAssignments(wrapper);
         await wrapper.get('[data-open-assign]').trigger('click');
         await button(wrapper, 'Find eligible accounts and roles').trigger('click');
         await flushPromises();
@@ -417,7 +444,7 @@ describe('scoped role administration', () => {
 
         expect(wrapper.text()).not.toContain('Document master data');
         expect(wrapper.text()).not.toContain('Document numbering');
-        expect(wrapper.text()).toContain('Roles');
+        expect(wrapper.text()).toContain('Roles & Permissions');
     });
 
     it('loads the Administration section through the existing authenticated application shell', async () => {
@@ -451,8 +478,10 @@ describe('scoped role administration', () => {
         server({ contexts: [{ ...globalScope, permissions: ['roles.view', 'assignments.view'] }], roles: [], assignments: [] });
         const wrapper = await render();
 
-        expect(wrapper.findAll('table')).toHaveLength(2);
-        expect(wrapper.text()).toContain('No records to display.');
+        expect(wrapper.get('[aria-labelledby="roles-heading"]').text()).toContain('No records to display.');
+        expect(wrapper.find('[aria-labelledby="assignments-heading"]').exists()).toBe(false);
+        await openAssignments(wrapper);
+        expect(wrapper.get('[aria-labelledby="assignments-heading"]').text()).toContain('No records to display.');
         expect(wrapper.text()).not.toContain('Create role');
         expect(wrapper.text()).not.toContain('Find eligible accounts and roles');
     });
@@ -473,9 +502,13 @@ describe('scoped role administration', () => {
         server({ roles: [{ ...sampleRole, active: false }], assignments: [{ ...sampleAssignment, active: false }] });
         const wrapper = await render();
 
-        expect(wrapper.findAll('td').filter(cell => cell.text() === 'Inactive')).toHaveLength(2);
+        expect(wrapper.get('[aria-labelledby="roles-heading"]').text()).toContain('Inactive');
+        await openAssignments(wrapper);
+        expect(wrapper.get('[aria-labelledby="assignments-heading"]').text()).toContain('Inactive');
         await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
-        expect(wrapper.findAll('td').filter(cell => cell.text() === 'ປິດການໃຊ້ງານ')).toHaveLength(2);
+        expect(wrapper.get('[aria-labelledby="assignments-heading"]').text()).toContain('ປິດການໃຊ້ງານ');
+        await wrapper.get('[data-admin-tab="access"]').trigger('click');
+        expect(wrapper.get('[aria-labelledby="roles-heading"]').text()).toContain('ປິດການໃຊ້ງານ');
     });
 
     it('creates a bilingual role using catalog permissions and CSRF while keeping planned capabilities disabled', async () => {
@@ -570,6 +603,7 @@ describe('scoped role administration', () => {
     it('requires explicit scoped confirmation before assigning a role', async () => {
         const fetch = server();
         const wrapper = await render();
+        await openAssignments(wrapper);
         await wrapper.get('[data-open-assign]').trigger('click');
         await button(wrapper, 'Find eligible accounts and roles').trigger('click');
         await flushPromises();
@@ -595,6 +629,7 @@ describe('scoped role administration', () => {
     it('supports revocation confirmation and does not show a revoke control for protected rows', async () => {
         const fetch = server({ assignments: [sampleAssignment, { ...sampleAssignment, id: 21, revocable: false }] });
         const wrapper = await render();
+        await openAssignments(wrapper);
         expect(wrapper.findAll('button').filter(item => item.text() === 'Revoke role')).toHaveLength(1);
         await button(wrapper, 'Revoke role').trigger('click');
         await flushPromises();
@@ -640,6 +675,7 @@ describe('scoped role administration', () => {
     it('closes confirmation and exposes a revocation rejection instead of leaving the error behind a modal', async () => {
         server({ assignments: [sampleAssignment], mutationError: { status: 422, body: { errors: { authorization: ['rbacLastAdministrator'] } } } });
         const wrapper = await render();
+        await openAssignments(wrapper);
         await button(wrapper, 'Revoke role').trigger('click');
         await flushPromises();
         await swalConfirm();
@@ -653,9 +689,11 @@ describe('scoped role administration', () => {
         const companyScope = { ...globalScope, scope_key: 'company:7', scope_type: 'company', company_id: 7, company: { name_en: 'Example Company', name_lo: 'ບໍລິສັດຕົວຢ່າງ' }, permissions: ['roles.view'] };
         const fetch = server({ contexts: [globalScope, companyScope] });
         const wrapper = await render();
+        await openAssignments(wrapper);
         await wrapper.get('[data-open-assign]').trigger('click');
         await button(wrapper, 'Find eligible accounts and roles').trigger('click');
         await flushPromises();
+        await wrapper.get('[data-admin-tab="access"]').trigger('click');
         await newRole(wrapper);
         await control(wrapper, 'Authorization scope').setValue('company:7');
         await flushPromises();
@@ -690,10 +728,10 @@ describe('scoped role administration', () => {
         const wrapper = await render();
         await wrapper.get('[data-admin-tab="organization"]').trigger('click');
         await flushPromises();
-        expect(wrapper.text()).toContain('Global System Administrators maintain structure here.');
+        expect(wrapper.get('#org-heading').text()).toBe('Companies');
         await control(wrapper, 'Authorization scope').setValue('company:7');
         await flushPromises();
-        expect(wrapper.text()).not.toContain('Organization structure');
+        expect(wrapper.find('#org-heading').exists()).toBe(false);
     });
 
 });

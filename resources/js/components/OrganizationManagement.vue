@@ -19,6 +19,8 @@ const base = props.endpoint.replace(/\/companies$/, '');
 const kind = ref('companies');
 const company = ref(null);
 const site = ref(null);
+const search = ref('');
+const appliedSearch = ref('');
 const rows = ref([]);
 const page = ref(1);
 const total = ref(0);
@@ -35,7 +37,7 @@ const confirmDelete = ref(false);
 let controller;
 let disposed = false;
 const label = record => record?.[language.value === 'lo' ? 'name_lo' : 'name_en'] ?? '';
-const columns = computed(() => [{ key: 'code', label: t('orgCode'), type: 'reference' }, { key: 'label', label: t('orgName') }, { key: 'status', label: t('uiStatus') }, { key: 'actions', label: t('rbacActions') }]);
+const columns = computed(() => [{ key: 'label', label: t('orgName') }, { key: 'code', label: t('orgCode'), type: 'reference' }, { key: 'status', label: t('uiStatus') }, { key: 'actions', label: t('rbacActions') }]);
 const displayRows = computed(() => rows.value.map(row => ({ ...row, label: label(row), status_key: row.active ? 'active' : 'inactive', status: t(row.active ? 'rbacActive' : 'rbacInactive') })));
 function handleError(failure) {
     if (disposed || failure.name === 'AbortError') { return; }
@@ -47,20 +49,39 @@ async function load() {
     controller?.abort(); controller = new AbortController();
     const signal = controller.signal;
     rows.value = []; total.value = 0; loading.value = true; errorKey.value = '';
-    const parameters = new URLSearchParams({ page: page.value, per_page: 10 });
-    if (kind.value !== 'companies') { parameters.set('company_id', company.value.id); }
-    if (kind.value === 'departments') { parameters.set('site_id', site.value.id); }
+    const listing = kind.value;
+    const term = appliedSearch.value;
+    const parameters = new URLSearchParams({ page: term ? 1 : page.value, per_page: term ? 50 : 10 });
+    if (listing !== 'companies') { parameters.set('company_id', company.value.id); }
+    if (listing === 'departments') { parameters.set('site_id', site.value.id); }
     try {
-        const response = await request(`${base}/${kind.value}?${parameters}`, { signal });
-        if (!signal.aborted) { rows.value = response.data; total.value = response.meta.total; }
+        const matches = [];
+        let response;
+        do {
+            response = await request(`${base}/${listing}?${parameters}`, { signal });
+            if (signal.aborted) { return; }
+            matches.push(...(term ? response.data.filter(record =>
+                [record.code, record.name_en, record.name_lo].some(value => value?.toLowerCase().includes(term))) : response.data));
+            parameters.set('page', Number(parameters.get('page')) + 1);
+        } while (term && Number(parameters.get('page')) <= response.meta.last_page);
+        rows.value = matches;
+        total.value = term ? matches.length : response.meta.total;
     } catch (failure) { if (!signal.aborted) { handleError(failure); } }
     finally { if (!signal.aborted) { loading.value = false; } }
 }
+function searchRecords() {
+    appliedSearch.value = search.value.trim().toLowerCase();
+    page.value = 1;
+    load();
+}
 function navigate(target, parent = null) {
     if (saving.value) { return; }
-    if (target === 'sites' && parent) { company.value = parent; site.value = null; }
+    if (target === 'companies') { company.value = null; site.value = null; }
+    if (target === 'sites') { company.value = parent ?? company.value; site.value = null; }
     if (target === 'departments' && parent) { site.value = parent; }
-    kind.value = target; page.value = 1; form.value = null; confirm.value = false; fields.value = {}; load();
+    kind.value = target; form.value = null; confirm.value = false; fields.value = {};
+    search.value = '';
+    searchRecords();
 }
 async function edit(record = null) {
     editing.value = record;
@@ -110,21 +131,32 @@ onBeforeUnmount(() => { disposed = true; controller?.abort(); });
 
 <template>
     <section class="flex flex-col gap-4" aria-labelledby="org-heading">
-        <h3 id="org-heading" class="font-semibold">{{ t('orgTitle') }}</h3>
-        <p class="text-sm text-slate-600">{{ t('orgNotice') }}</p>
-        <nav class="flex flex-wrap items-center gap-2" :aria-label="t('orgTitle')">
-            <UiButton variant="secondary" :disabled="saving" @click="navigate('companies')">{{ t('orgCompanies') }}</UiButton>
-            <UiButton v-if="company && kind !== 'companies'" variant="secondary" :disabled="saving" @click="navigate('sites')">{{ label(company) }} / {{ t('orgSites') }}</UiButton>
-            <span v-if="site && kind === 'departments'" class="text-sm font-medium">{{ label(site) }} / {{ t('orgDepartments') }}</span>
-        </nav>
-        <p v-if="errorKey" role="alert" class="rounded-lg bg-red-50 p-3 text-sm text-red-800">{{ t(errorKey) }}</p>
-        <div class="flex flex-wrap items-center justify-between gap-3"><h4 class="font-medium">{{ t(`org-${kind}`) }}</h4><UiButton :disabled="saving || loading" @click="edit()">{{ t('orgCreate') }}</UiButton></div>
-        <DataTable v-model:page="page" :rows="displayRows" :columns="columns" :caption="t(`org-${kind}`)" :loading="loading" server-side :total="total" :per-page="10" @change="load">
+        <p v-if="errorKey && !form" role="alert" class="rounded-lg bg-red-50 p-3 text-sm text-red-800">{{ t(errorKey) }}</p>
+        <div class="flex flex-wrap items-start justify-between gap-3">
+            <div class="min-w-0">
+                <nav v-if="kind !== 'companies'" class="mb-1 flex flex-wrap items-center gap-x-2 text-sm text-slate-600" :aria-label="t('orgTitle')">
+                    <button type="button" :disabled="saving" class="min-h-8 rounded text-teal-800 underline" @click="navigate('companies')">{{ t('orgCompanies') }}</button>
+                    <span aria-hidden="true">/</span>
+                    <button v-if="kind === 'departments'" type="button" :disabled="saving" class="min-h-8 rounded text-left text-teal-800 underline" @click="navigate('sites')">{{ label(company) }}</button>
+                    <span v-else>{{ label(company) }}</span>
+                    <template v-if="kind === 'departments'"><span aria-hidden="true">/</span><span>{{ label(site) }}</span></template>
+                </nav>
+                <h3 id="org-heading" class="text-lg font-semibold">{{ t(`org-${kind}`) }}</h3>
+                <p class="mt-1 text-sm text-slate-600">{{ t(`orgHelp-${kind}`) }}</p>
+            </div>
+            <UiButton :disabled="saving || loading" @click="edit()">{{ t(`orgAdd-${kind}`) }}</UiButton>
+        </div>
+        <form class="flex flex-wrap items-end gap-2" @submit.prevent="searchRecords">
+            <TextInput v-model="search" type="search" :label="t(`orgSearch-${kind}`)" :placeholder="t('orgSearchPlaceholder')" />
+            <UiButton type="submit" variant="secondary" :loading="loading">{{ t('userFind') }}</UiButton>
+        </form>
+        <DataTable v-model:page="page" :rows="displayRows" :columns="columns" :caption="t(`org-${kind}`)" :loading="loading" :server-side="!appliedSearch" :total="total" :per-page="10" @change="!appliedSearch && load()">
             <template #cell-status="{ row }"><StatusBadge :status="row.status_key" :label="row.status" /></template>
             <template #cell-actions="{ row }"><div class="flex flex-wrap gap-2"><IconButton action="edit" :label="t('rbacEdit')" :disabled="saving" @click="edit(row)" /><IconButton v-if="kind === 'departments'" action="delete" :label="t('orgDelete')" :disabled="saving" @click="prepareDelete(row)" /><UiButton v-if="kind !== 'departments'" variant="secondary" :disabled="saving" @click="navigate(kind === 'companies' ? 'sites' : 'departments', row)">{{ t(kind === 'companies' ? 'orgSites' : 'orgDepartments') }}</UiButton></div></template>
         </DataTable>
-        <FormModal v-if="form" size="md" :title="`${t(editing ? 'orgEdit' : 'orgCreate')} · ${t(`org-${kind}`)}`" :subtitle="editing ? t('orgIdentityNotice') : ''" :busy="saving" @close="form = null">
+        <FormModal v-if="form" size="md" :title="t(`org${editing ? 'Edit' : 'Add'}-${kind}`)" :subtitle="editing ? t('orgIdentityNotice') : [label(company), label(site)].filter(Boolean).join(' / ')" :busy="saving" @close="form = null">
         <form ref="editor" novalidate class="flex flex-col gap-4" @submit.prevent="prepareSave">
+            <p v-if="errorKey" role="alert" class="text-sm text-red-700">{{ t(errorKey) }}</p>
             <div class="grid grid-cols-1 gap-4">
                 <TextInput v-model="form.code" name="org-code" :label="t('orgCode')" :readonly="!!editing" :disabled="saving" :error-key="fields.code?.[0]" required maxlength="32" />
                 <TextInput v-model="form.name_en" name="org-name-en" :label="t('rbacNameEn')" :disabled="saving" :error-key="fields.name_en?.[0]" required lang="en" maxlength="255" />
