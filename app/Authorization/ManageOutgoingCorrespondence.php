@@ -31,7 +31,7 @@ class ManageOutgoingCorrespondence
             abort_unless($this->roles->allows($actor, $permission, $scope->authorizationScope(), $scope->departmentId), 403, 'rbacForbidden');
         }
         abort_unless(in_array('documents.metadata.view', $this->roles->grantedPermissions($actor, $scope->authorizationScope()), true)
-            && ($this->roles->isSystemAdministrator($actor) || app(MembershipAccess::class)->matches($actor, $scope->authorizationScope(), $scope->departmentId)), 403, 'rbacForbidden');
+            && ($this->roles->isSystemAdministrator($actor) || app(MembershipAccess::class)->matchesWorkspace($actor, $scope->authorizationScope(), $scope->departmentId)), 403, 'rbacForbidden');
     }
 
     /** @return Builder<OutgoingCorrespondence> */

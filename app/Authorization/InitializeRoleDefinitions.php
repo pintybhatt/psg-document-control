@@ -22,15 +22,15 @@ class InitializeRoleDefinitions
                 ]);
             }
             $templates = [
-                Role::SYSTEM_ADMINISTRATOR_CODE => ['System Administrator', 'ຜູ້ບໍລິຫານລະບົບ', Role::SYSTEM_ADMINISTRATOR_DESCRIPTION],
-                'DOCUMENT_CONTROLLER' => ['Document Controller', 'ຜູ້ຄວບຄຸມເອກະສານ', 'Manages correspondence and controlled documents within assigned workspaces.'],
-                'DEPARTMENT_USER' => ['Department User', 'ຜູ້ໃຊ້ພະແນກ', 'Prepares drafts and attachments within assigned workspaces.'],
-                'VIEWER' => ['Viewer', 'ຜູ້ເບິ່ງຂໍ້ມູນ', 'Reads and searches authorized documents and reports.'],
+                Role::SYSTEM_ADMINISTRATOR_CODE => ['System Administrator', 'ຜູ້ບໍລິຫານລະບົບ'],
+                'DOCUMENT_CONTROLLER' => ['Document Controller', 'ຜູ້ຄວບຄຸມເອກະສານ'],
+                'DEPARTMENT_USER' => ['Department User', 'ຜູ້ໃຊ້ພະແນກ'],
+                'VIEWER' => ['Viewer', 'ຜູ້ເບິ່ງຂໍ້ມູນ'],
             ];
-            foreach ($templates as $code => [$english, $lao, $description]) {
+            foreach ($templates as $code => [$english, $lao]) {
                 $role = Role::query()->firstOrCreate(['code' => $code], [
                     'scope_id' => $scope->id, 'name_en' => $english, 'name_lo' => $lao,
-                    'description' => $description,
+                    'description' => Role::STANDARD_DESCRIPTIONS[$code],
                 ]);
                 if ($role->wasRecentlyCreated) {
                     $role->permissions()->sync(Permission::query()->whereIn('key', PermissionCatalog::standardRoleDefaults($code))->where('active', true)->pluck('id')->all());

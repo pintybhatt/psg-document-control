@@ -230,11 +230,11 @@ Identity and creator fields are immutable through normal model writes. Revoked r
 | Operational context | Required membership | Role authorization |
 | --- | --- | --- |
 | Company | Exact company-level membership | Permission effective at that company through an explicit company/global assignment |
-| Site | Exact site-level membership | Permission effective at that site under existing RBAC inheritance |
+| Site document workspace | Membership at the site or its parent company | Relevant workspace permission effective at that site under existing RBAC inheritance |
 | Department | Exact department membership, with matching company/site | Permission effective at the owning site; the caller supplies the department ID |
 | Global | Never an operational membership context | Always denied for operational access |
 
-Membership levels do not substitute for one another: company membership does not replace site/department membership, site membership does not replace company/department membership, and department membership does not widen to its site or a sibling department. Multiple explicit memberships are supported. Existing global → company → site **role** inheritance is unchanged.
+Company membership covers site-level document workspaces within the company. Master-data and numbering configuration, template catalogue access, and confidentiality administration retain their existing exact membership rules. Department documents require membership in that department. Multiple explicit memberships are supported. Existing global → company → site **role** inheritance is unchanged.
 
 `permissions()` and `allows()` return effective capabilities. `allowsOperational()` additionally rejects administrative keys. Laravel Gates accept `[scope, departmentId]` where department scoping is required. `grantedPermissions()` reports only underlying role configuration, for permission-delegation checks; it is not an operational authorization decision. Administrative configuration/delegation still requires explicit administrative permissions and may configure only catalog permissions already granted to the actor. Future resource handlers must derive company/site/department context from the resource, rather than trusting client IDs or a prior context selection.
 
@@ -310,7 +310,7 @@ This phase adds security infrastructure only. There are no document registration
 
 `DocumentAccess::allows()` returns a decision and records an audit; `authorize()` throws the same generic `Document access denied.` message for every denial. Laravel Gates for the three permission keys require a `DocumentSecurityDescriptor`. Scope-only `AccessControl::allows()`, `allowsOperational()` and capability lists deliberately exclude these resource-only abilities. Underlying `grantedPermissions()` remains available for controlled role configuration, not as proof of document access. Legacy planned `documents.view/register/control` keys remain unavailable.
 
-Every operation requires a currently active account/profile/organization, an active RBAC grant effective at the resource's owning site under existing scope inheritance, and exact effective site membership or owning-department membership when a department is present. Company membership alone does not replace site/department affiliation. Confidentiality and document restrictions then apply:
+Every operation requires a currently active account/profile/organization and an active RBAC grant effective at the resource's owning site. Site-level documents require effective membership at the site or its parent company. Department documents require effective membership in the owning department. Confidentiality and document restrictions then apply:
 
 | Classification | Additional requirements |
 | --- | --- |

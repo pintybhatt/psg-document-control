@@ -58,7 +58,7 @@ const workspaceWarning = computed(() => {
     if (missingWorkspaceGrant.value) {
         return selectedRole.value.standard ? 'userAccessStandardWorkspaceMissing' : 'userAccessCustomWorkspaceMissing';
     }
-    return selectedRole.value && !hasSite.value ? 'userAccessSiteMembershipRequired' : '';
+    return selectedRole.value && !hasSite.value ? 'userAccessCompanyWorkspace' : '';
 });
 const accessLocation = row => row.scope_key === 'global' ? t('rbacGlobal') : [label(row.company), label(row.site), label(row.department)].filter(Boolean).join(' / ');
 const accessLabel = row => [label(row.role), accessLocation(row)].filter(Boolean).join(' · ');

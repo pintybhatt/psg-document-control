@@ -117,6 +117,23 @@ class DashboardTest extends TestCase
         }
     }
 
+    public function test_company_document_controller_can_create_and_view_site_correspondence(): void
+    {
+        [, $site] = $this->workspace();
+        $sibling = Site::factory()->for($site->company)->create();
+        $user = User::factory()->create();
+        OrganizationMembership::factory()->for($user)->for($site->company)->create();
+        $role = Role::query()->where('code', 'DOCUMENT_CONTROLLER')->sole();
+        $scope = AuthorizationScope::context('company', $site->company_id)->persist();
+        UserRoleAssignment::factory()->for($user)->for($role)->for($scope, 'scope')->create();
+        $this->signIn($user);
+
+        $this->draft($site, 'incoming', 'Company-scoped incoming draft');
+        $this->draft($sibling, 'outgoing', 'Company-scoped outgoing draft');
+        $this->getJson($this->url($site))->assertOk()->assertJsonPath('totals.incoming', 1);
+        $this->getJson($this->url($sibling))->assertOk()->assertJsonPath('totals.outgoing', 1);
+    }
+
     public function test_forged_workspace_and_revoked_membership_cannot_read_dashboard(): void
     {
         [, $site] = $this->workspace();

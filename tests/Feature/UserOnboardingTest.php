@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Authorization\AccessControl;
+use App\Authorization\ManageMemberships;
 use App\Authorization\RbacMutation;
 use App\Models\AuthorizationScope;
 use App\Models\Department;
@@ -116,34 +117,45 @@ class UserOnboardingTest extends TestCase
             $this->assertSame($keys, app(AccessControl::class)->grantedPermissions(User::query()->findOrFail($userId), $scope));
         }
         $this->assertSame($keys, $role->permissions()->pluck('key')->all());
+        $this->signIn($edited);
+        $this->getJson('/api/v1/incoming-correspondence/contexts')->assertOk()->assertExactJson(['data' => []]);
     }
 
-    #[TestWith(['company'])]
-    #[TestWith(['site'])]
-    public function test_standard_role_scope_and_exact_memberships_control_workspace_visibility(string $assignmentType): void
+    #[TestWith(['company', 'VIEWER'])]
+    #[TestWith(['company', 'DOCUMENT_CONTROLLER'])]
+    #[TestWith(['site', 'VIEWER'])]
+    public function test_onboarding_provides_workspaces_at_the_selected_access_scope(string $assignmentType, string $roleCode): void
     {
-        $this->administrator();
+        $administrator = $this->administrator();
         $site = Site::factory()->create();
         $sibling = Site::factory()->for($site->company)->create();
+        Site::factory()->for($site->company)->create(['active' => false]);
         $foreign = Site::factory()->create();
-        $role = Role::query()->where('code', 'DOCUMENT_CONTROLLER')->sole();
+        $department = Department::factory()->for($site)->create();
+        $role = Role::query()->where('code', $roleCode)->sole();
         $data = $this->account($site, $role);
-        if ($assignmentType === 'company') {
-            $data['access']['site_id'] = null;
-        }
+        $companyLevel = $assignmentType === 'company';
+        $data['access']['site_id'] = $companyLevel ? null : $site->id;
         $user = User::query()->findOrFail($this->postJson('/api/v1/user-management', $data)->assertCreated()->json('data.id'));
-        $this->signIn($user);
-        $this->getJson('/api/v1/incoming-correspondence/contexts')->assertOk()->assertJsonCount($assignmentType === 'company' ? 0 : 1, 'data');
-        foreach ([$site, $sibling, $foreign] as $memberSite) {
-            if ($memberSite->id !== $site->id || $assignmentType === 'company') {
-                OrganizationMembership::factory()->for($user)->atSite($memberSite)->create();
-            }
-        }
-        $siteIds = $this->getJson('/api/v1/incoming-correspondence/contexts')->assertOk()->json('data.*.site_id');
-        $this->assertEqualsCanonicalizing($assignmentType === 'company' ? [$site->id, $sibling->id] : [$site->id], $siteIds);
+        $membership = $user->memberships()->sole();
+        $this->assertSame($assignmentType, $membership->membership_type);
+        $this->assertSame($data['access']['site_id'], $membership->site_id);
+        $this->assertSame($membership->authorizationScope()->scope_key, $user->roleAssignments()->sole()->scope->scope_key);
 
-        Permission::query()->where('key', 'documents.metadata.view')->sole()->update(['active' => false]);
+        $this->signIn($user);
+        foreach (['incoming-correspondence', 'outgoing-correspondence', 'controlled-documents'] as $module) {
+            $contexts = $this->getJson('/api/v1/'.$module.'/contexts')->assertOk();
+            $this->assertEqualsCanonicalizing($companyLevel ? [$site->id, $sibling->id] : [$site->id], $contexts->json('data.*.site_id'));
+            $this->getJson('/api/v1/'.$module.'?'.http_build_query(['company_id' => $site->company_id, 'site_id' => $site->id]))->assertOk();
+        }
+        $siblingQuery = http_build_query(['company_id' => $sibling->company_id, 'site_id' => $sibling->id]);
+        $this->getJson('/api/v1/dashboard?'.$siblingQuery)->assertStatus($companyLevel ? 200 : 403);
+        $this->getJson('/api/v1/dashboard?'.http_build_query(['company_id' => $foreign->company_id, 'site_id' => $foreign->id]))->assertForbidden();
+        $this->getJson('/api/v1/incoming-correspondence?'.http_build_query(['company_id' => $site->company_id, 'site_id' => $site->id, 'department_id' => $department->id]))->assertForbidden();
+
+        app(ManageMemberships::class)->revoke($administrator, $membership->authorizationScope(), $membership);
         $this->getJson('/api/v1/incoming-correspondence/contexts')->assertOk()->assertExactJson(['data' => []]);
+        $this->getJson('/api/v1/dashboard?'.http_build_query(['company_id' => $site->company_id, 'site_id' => $site->id]))->assertForbidden();
     }
 
     #[TestWith(['company'])]

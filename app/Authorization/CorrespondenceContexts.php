@@ -21,6 +21,7 @@ class CorrespondenceContexts
         $roles = $this->roles;
         $isSystemAdministrator = $roles->isSystemAdministrator($actor);
         $memberships = $this->memberships->effectiveQuery()->where('user_id', $actor->id)->get();
+        $companyMemberships = $memberships->where('membership_type', 'company')->keyBy('company_id');
         $sites = Site::query()->where('active', true)->whereHas('company', fn (Builder $query): Builder => $query->where('active', true))
             ->when(empty($filters['all_sites']) && isset($filters['company_id']), fn (Builder $query): Builder => $query->where('company_id', $filters['company_id']))
             ->when(empty($filters['all_sites']) && isset($filters['site_id']), fn (Builder $query): Builder => $query->whereKey($filters['site_id']))
@@ -34,18 +35,20 @@ class CorrespondenceContexts
             }
             $siteMemberships = $memberships->where('company_id', $site->company_id)->where('site_id', $site->id);
             $hasSiteMembership = $siteMemberships->contains(fn (OrganizationMembership $membership): bool => $membership->membership_type === 'site' && $membership->department_id === null);
+            $hasSiteWorkspace = $hasSiteMembership || $companyMemberships->has($site->company_id);
             foreach ([null, ...$site->departments->all()] as $department) {
                 if (array_key_exists('all_departments', $filters) && empty($filters['all_departments'])
                     && $department?->id !== (isset($filters['department_id']) ? (int) $filters['department_id'] : null)) {
                     continue;
                 }
-                $hasMembership = $department === null ? $hasSiteMembership : $siteMemberships->contains(fn (OrganizationMembership $membership): bool => $membership->membership_type === 'department' && $membership->department_id === $department->id);
+                $hasMembership = $department === null ? $hasSiteWorkspace : $siteMemberships->contains(fn (OrganizationMembership $membership): bool => $membership->membership_type === 'department' && $membership->department_id === $department->id);
                 if (! $isSystemAdministrator && ! $hasMembership) {
                     continue;
                 }
                 $permissions = array_values(array_filter($granted, fn (string $key): bool => ! PermissionCatalog::requiresDocument($key)
-                    && ($isSystemAdministrator || ! PermissionCatalog::administrative($key) || $department === null)));
-                if (! $isSystemAdministrator && ! $hasSiteMembership) {
+                    && ($isSystemAdministrator || (PermissionCatalog::administrative($key) ? $department === null
+                        : $department !== null || $hasSiteMembership || PermissionCatalog::acceptsCompanyWorkspaceMembership($key)))));
+                if (! $isSystemAdministrator && ! $hasSiteWorkspace) {
                     $permissions = array_values(array_diff($permissions, ['numbering.issue']));
                 }
                 $contexts[] = ['key' => $site->id.':'.($department?->id ?? 'site'), 'company_id' => $site->company_id, 'site_id' => $site->id,

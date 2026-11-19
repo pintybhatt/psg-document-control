@@ -60,6 +60,25 @@ class DocumentAccessTest extends TestCase
         $this->assertSame($allowed, $this->permits($reader, $profile));
     }
 
+    public function test_company_membership_needs_role_and_site_specific_clearance_and_allowlist(): void
+    {
+        $this->definitions();
+        $site = Site::factory()->create();
+        $reader = User::factory()->create();
+        OrganizationMembership::factory()->for($reader)->for($site->company)->create();
+        $normal = DocumentSecurityProfile::factory()->atSite($site)->create();
+        $restricted = DocumentSecurityProfile::factory()->atSite($site)->classified(Confidentiality::HighlyConfidential)->create();
+        $this->assertFalse($this->permits($reader, $normal));
+
+        $this->grant($reader, AuthorizationScope::context('company', $site->company_id), ['documents.metadata.view']);
+        $this->assertTrue($this->permits($reader, $normal));
+        $this->assertFalse($this->permits($reader, $restricted));
+        ConfidentialityClearance::factory()->for($reader)->forProfile($restricted)->create();
+        $this->assertFalse($this->permits($reader, $restricted));
+        DocumentAccessGrant::factory()->for($reader)->create(['profile_id' => $restricted->id, 'operation' => DocumentOperation::Metadata]);
+        $this->assertTrue($this->permits($reader, $restricted));
+    }
+
     #[TestWith(['metadata'])]
     #[TestWith(['preview'])]
     #[TestWith(['download'])]

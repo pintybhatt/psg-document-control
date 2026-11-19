@@ -126,6 +126,19 @@ class RoleRecommendationsTest extends TestCase
         $this->assertDatabaseCount('rbac_audits', 0);
     }
 
+    public function test_role_listing_replaces_only_the_obsolete_seed_description(): void
+    {
+        $this->administrator();
+        $role = Role::query()->where('code', 'VIEWER')->sole();
+        $legacy = 'Document capabilities remain unavailable until their operations are implemented.';
+        $role->update(['description' => $legacy]);
+        $url = '/api/v1/roles/'.$role->id.'?scope_type=global';
+        $this->getJson($url)->assertOk()->assertJsonPath('data.description', 'Reads and searches authorized documents and reports.');
+        $this->assertSame($legacy, $role->refresh()->description);
+        $role->update(['description' => 'Custom role description']);
+        $this->getJson($url)->assertOk()->assertJsonPath('data.description', 'Custom role description');
+    }
+
     public function test_recommended_permissions_do_not_bypass_scope_ownership_or_delegation(): void
     {
         $this->administrator();

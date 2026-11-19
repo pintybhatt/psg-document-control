@@ -11,9 +11,11 @@ const context = { key: '2:site', company_id: 1, site_id: 2, department_id: null,
 enableAutoUnmount(afterEach);
 beforeEach(() => localStorage.clear());
 afterEach(() => { vi.unstubAllGlobals(); });
-function render(language = 'en') {
-    const workspace = createWorkspace(1, '', 'token');
-    workspace.contexts.value = [context]; workspace.siteKey.value = '1:2';
+function render(language = 'en', initialContext = context) {
+    const workspace = createWorkspace(1, '/contexts', 'token');
+    if (initialContext) {
+        workspace.contexts.value = [initialContext]; workspace.siteKey.value = '1:2';
+    }
     const wrapper = mount(defineComponent({
         components: { DashboardPage },
         setup() { provideWorkspace(workspace); },
@@ -21,6 +23,28 @@ function render(language = 'en') {
     }), { global: { plugins: [createLocalization(language)] } });
     return { wrapper, workspace };
 }
+it('selects and switches between eligible company sites and clears the dashboard after revocation', async () => {
+    const sibling = { ...context, key: '3:site', site_id: 3, site: { name_en: 'Other Site', name_lo: 'ສະຖານທີ່ສອງ' } };
+    let contexts = [context, sibling];
+    const fetch = vi.fn(async url => ({ ok: true, status: 200, json: async () => url === '/contexts'
+        ? { data: contexts }
+        : { totals: { incoming: 1, outgoing: 0, overdue: 0, due_soon: 0 }, recent: [], due: [] } }));
+    vi.stubGlobal('fetch', fetch);
+    const { wrapper, workspace } = render('lo', null);
+    await workspace.refresh(); await flushPromises();
+    expect(workspace.sites.value.map(site => site.site_id)).toEqual([2, 3]);
+    expect(wrapper.get('[data-dashboard-hero]').text()).toContain(context.site.name_lo);
+    expect(fetch).toHaveBeenCalledWith('/dashboard-data?company_id=1&site_id=2', expect.any(Object));
+
+    workspace.siteKey.value = '1:3'; await flushPromises();
+    expect(wrapper.get('[data-dashboard-hero]').text()).toContain(sibling.site.name_lo);
+    expect(fetch).toHaveBeenCalledWith('/dashboard-data?company_id=1&site_id=3', expect.any(Object));
+
+    contexts = [];
+    await workspace.refresh(); await flushPromises();
+    expect(wrapper.text()).toContain(lo.workspaceNoContexts);
+    expect(wrapper.text()).toContain(lo.noSite);
+});
 it('shows authorized totals, escaped recent links and explicit empty due state in Lao', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, status: 200, json: async () => ({ totals: { incoming: 1, outgoing: 0, overdue: 0, due_soon: 0 }, due: [], recent: [{ id: 1, kind: 'incoming', subject: '<script>secret</script>', date: '2026-04-03', status: 'draft', href: '/incoming?record=1' }], quick_actions: [] }) })));
     const { wrapper } = render('lo'); await flushPromises();
