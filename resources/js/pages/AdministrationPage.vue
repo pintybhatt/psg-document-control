@@ -145,13 +145,6 @@ const assignmentColumns = computed(() => [
 const businessGroups = ['workspace', 'correspondence', 'controlled', 'document-tools', 'reports', 'administration', 'security'];
 const permissionGroups = computed(() => businessGroups.map(key => ({ key, permissions: permissions.value.filter(permission => permissionGroup(permission) === key) })).filter(group => group.permissions.length));
 const advancedPermissions = computed(() => permissions.value.filter(permission => permissionGroup(permission) === null));
-const workspaceNotice = computed(() => {
-    if (roleForm.code === 'SECURITY_ADMINISTRATOR') { return 'rbacWorkspaceAdministrator'; }
-    if (!roleForm.active) { return 'rbacWorkspaceInactive'; }
-    if (missingWorkspacePermissions(roleForm)) { return 'rbacWorkspaceMissing'; }
-    if (!roleForm.permission_keys.every(key => permissions.value.some(permission => permission.key === key && permission.available && permission.delegatable))) { return 'rbacWorkspaceUnavailable'; }
-    return 'rbacWorkspaceConfigured';
-});
 
 function permissionGroup(permission) {
     if (!permission.available) { return null; }
@@ -171,10 +164,6 @@ function permissionLabel(permission) {
     if (permission.key === 'documents.metadata.view') { return t('rbacWorkspaceDocumentsLabel'); }
     const implementedOrLegacy = permission.available || ['documents.view', 'documents.register', 'documents.control'].includes(permission.key);
     return implementedOrLegacy ? label(permission).replace(/\s*\((planned|ຢູ່ໃນແຜນ)\)/g, '') : label(permission);
-}
-
-function missingWorkspacePermissions(role) {
-    return ['organization.access', 'documents.metadata.view'].some(key => !role.permission_keys.includes(key) || !permissions.value.some(permission => permission.key === key && permission.available));
 }
 
 function roleScopeLabel(role) {
@@ -469,7 +458,7 @@ onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
                 <p v-if="selected" data-roles-scope class="rounded-lg border border-teal-200 bg-teal-50 px-4 py-3 text-sm font-semibold text-teal-900">{{ t('rbacRolesScope', { scope: scopeLabel(selected) }) }}</p>
                 <DataTable v-model:page="rolePage" :rows="roleRows" :columns="roleColumns" :caption="t('rbacRoles')" :loading="loading" server-side :total="roleTotal" :per-page="10" @change="changeRolePage">
                     <template #cell-status="{ row }"><StatusBadge :status="row.status_key" :label="row.status" /></template>
-                    <template #cell-display_name="{ row }"><span class="font-semibold">{{ row.display_name }}</span><span v-if="row.code !== 'SECURITY_ADMINISTRATOR' && missingWorkspacePermissions(row)" class="block text-xs text-amber-800">{{ t('rbacWorkspaceSetupNeeded') }}</span></template>
+                    <template #cell-display_name="{ row }"><span class="font-semibold">{{ row.display_name }}</span></template>
                     <template #cell-actions="{ row }"><IconButton :action="row.editable ? 'edit' : 'view'" :label="t(row.editable ? 'rbacEdit' : 'rbacDetails')" :disabled="saving" @click="showRole(row)" /></template>
                 </DataTable>
             </section>
@@ -508,7 +497,7 @@ onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
                     </div>
                     <p v-if="recommendationApplied" role="status" class="text-sm text-teal-900">{{ t('rbacRecommendationApplied') }}</p>
                 </section>
-                <p class="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm leading-7" role="status">{{ t(workspaceNotice) }}</p>
+                <p v-if="roleForm.code === 'SECURITY_ADMINISTRATOR' || !roleForm.active" class="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm leading-7" role="status">{{ t(roleForm.code === 'SECURITY_ADMINISTRATOR' ? 'rbacWorkspaceAdministrator' : 'rbacWorkspaceInactive') }}</p>
                 <p class="text-sm text-slate-600">{{ t('rbacPermissionHelp') }}</p>
                 <details v-for="group in permissionGroups" :key="group.key" :open="group.key === 'workspace'" :data-permission-group="group.key" class="rounded-lg border border-slate-200 p-4">
                     <summary class="cursor-pointer text-sm font-semibold">{{ t(`rbacGroup-${group.key}`) }} <span class="font-normal text-slate-500">· {{ t('rbacPermissionCount', { selected: selectedPermissions(group.permissions), total: group.permissions.length }) }}</span></summary>

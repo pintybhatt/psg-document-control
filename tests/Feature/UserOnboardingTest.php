@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Authorization\AccessControl;
 use App\Authorization\RbacMutation;
 use App\Models\AuthorizationScope;
 use App\Models\Department;
@@ -79,12 +80,52 @@ class UserOnboardingTest extends TestCase
         }
     }
 
+    #[TestWith(['global', 'company'])]
+    #[TestWith(['global', 'site'])]
+    #[TestWith(['company', 'company'])]
+    #[TestWith(['company', 'site'])]
+    #[TestWith(['site', 'site'])]
+    public function test_create_and_edit_assign_existing_roles_without_metadata_permission(string $owner, string $assignmentType): void
+    {
+        $this->administrator();
+        $site = Site::factory()->create();
+        $role = match ($owner) {
+            'global' => Role::query()->where('code', 'VIEWER')->sole(),
+            'company' => Role::factory()->create(['scope_id' => AuthorizationScope::context('company', $site->company_id)->persist()->id]),
+            'site' => Role::factory()->create(['scope_id' => AuthorizationScope::context('site', $site->company_id, $site->id)->persist()->id]),
+        };
+        $keys = $owner === 'global' ? [] : ['organization.access'];
+        if ($keys !== []) {
+            app(RbacMutation::class)->run(fn () => $role->permissions()->sync(Permission::query()->whereIn('key', $keys)->pluck('id')->all()));
+        }
+        $data = $this->account($site, $role);
+        $siteId = $assignmentType === 'site' ? $site->id : null;
+        $data['access']['site_id'] = $siteId;
+        $scope = AuthorizationScope::context($assignmentType, $site->company_id, $siteId);
+        $this->getJson('/api/v1/roles?'.http_build_query($scope->only(['scope_type', 'company_id', 'site_id'])))
+            ->assertOk()->assertJsonFragment(['id' => $role->id, 'scope_key' => $role->scope->scope_key, 'permission_keys' => $keys]);
+
+        $createdId = $this->postJson('/api/v1/user-management', $data)->assertCreated()->json('data.id');
+        $edited = User::factory()->create();
+        $this->patchJson('/api/v1/user-management/'.$edited->id, ['access' => $data['access']])->assertOk();
+        $scope = AuthorizationScope::context($assignmentType, $site->company_id, $siteId);
+
+        foreach ([$createdId, $edited->id] as $userId) {
+            $this->assertDatabaseHas('organization_memberships', ['user_id' => $userId, 'membership_type' => $assignmentType, 'company_id' => $site->company_id, 'site_id' => $siteId, 'department_id' => null]);
+            $this->assertDatabaseHas('user_role_assignments', ['user_id' => $userId, 'role_id' => $role->id, 'scope_id' => $scope->id, 'active' => true]);
+            $this->assertSame($keys, app(AccessControl::class)->grantedPermissions(User::query()->findOrFail($userId), $scope));
+        }
+        $this->assertSame($keys, $role->permissions()->pluck('key')->all());
+    }
+
     #[TestWith(['company'])]
     #[TestWith(['department'])]
     #[TestWith(['role'])]
+    #[TestWith(['foreign-company-role'])]
+    #[TestWith(['site-role-at-company'])]
+    #[TestWith(['department-without-site'])]
     #[TestWith(['inactive-role'])]
-    #[TestWith(['empty-role'])]
-    #[TestWith(['missing-metadata'])]
+    #[TestWith(['unavailable-permission'])]
     #[TestWith(['department-controller'])]
     #[TestWith(['administrator'])]
     #[TestWith(['incomplete'])]
@@ -102,12 +143,18 @@ class UserOnboardingTest extends TestCase
             $data['access']['department_id'] = Department::factory()->create(['company_id' => $foreign->company_id, 'site_id' => $foreign->id])->id;
         } elseif ($invalid === 'role') {
             $data['access']['role_id'] = Role::factory()->create(['scope_id' => AuthorizationScope::context('site', $foreign->company_id, $foreign->id)->persist()->id])->id;
+        } elseif ($invalid === 'foreign-company-role') {
+            $data['access']['role_id'] = Role::factory()->create(['scope_id' => AuthorizationScope::context('company', $foreign->company_id)->persist()->id])->id;
+        } elseif ($invalid === 'site-role-at-company') {
+            $data['access']['site_id'] = null;
+            $data['access']['role_id'] = Role::factory()->create(['scope_id' => AuthorizationScope::context('site', $site->company_id, $site->id)->persist()->id])->id;
+        } elseif ($invalid === 'department-without-site') {
+            $data['access']['site_id'] = null;
+            $data['access']['department_id'] = Department::factory()->create(['company_id' => $site->company_id, 'site_id' => $site->id])->id;
         } elseif ($invalid === 'inactive-role') {
             $role->update(['active' => false]);
-        } elseif ($invalid === 'empty-role') {
-            $data['access']['role_id'] = Role::query()->where('code', 'VIEWER')->sole()->id;
-        } elseif ($invalid === 'missing-metadata') {
-            app(RbacMutation::class)->run(fn () => $role->permissions()->sync(Permission::query()->where('key', 'organization.access')->pluck('id')->all()));
+        } elseif ($invalid === 'unavailable-permission') {
+            app(RbacMutation::class)->run(fn () => $role->permissions()->attach(Permission::query()->where('key', 'documents.view')->sole()->id));
         } elseif ($invalid === 'department-controller') {
             $data['access']['department_id'] = Department::factory()->create(['company_id' => $site->company_id, 'site_id' => $site->id])->id;
         } elseif ($invalid === 'administrator') {
@@ -197,7 +244,7 @@ class UserOnboardingTest extends TestCase
         $id = $this->postJson('/api/v1/user-management', $this->account($site, $role))->assertCreated()->json('data.id');
         $other = Site::factory()->create();
         $invalid = $this->account($other, $role)['access'];
-        $invalid['role_id'] = Role::query()->where('code', 'VIEWER')->sole()->id;
+        $invalid['role_id'] = Role::query()->where('code', Role::SYSTEM_ADMINISTRATOR_CODE)->sole()->id;
         $this->patchJson('/api/v1/user-management/'.$id, ['name' => 'Must roll back', 'access' => $invalid])->assertUnprocessable();
         $this->assertDatabaseHas('users', ['id' => $id, 'name' => 'Synthetic onboarded user']);
         $this->assertSame(1, OrganizationMembership::query()->where('user_id', $id)->count());

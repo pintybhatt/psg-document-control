@@ -3,7 +3,6 @@
 namespace App\Authorization;
 
 use App\Models\OrganizationMembership;
-use App\Models\Permission;
 use App\Models\Role;
 use App\Models\User;
 use Illuminate\Validation\ValidationException;
@@ -12,11 +11,12 @@ class ManageUserOnboarding
 {
     public function __construct(private AccessControl $access, private MembershipAccess $membershipAccess, private ManageMemberships $memberships, private ManageRoles $roles) {}
 
-    /** @param array{company_id: int, site_id: int, department_id?: ?int, role_id: int, confirm_regrant?: bool} $data */
+    /** @param array{company_id: int, site_id: ?int, department_id?: ?int, role_id: int, confirm_regrant?: bool} $data */
     public function assign(User $actor, User $target, array $data): void
     {
         $membership = new OrganizationMembership([
-            'user_id' => $target->id, 'membership_type' => empty($data['department_id']) ? 'site' : 'department',
+            'user_id' => $target->id,
+            'membership_type' => $data['site_id'] === null ? 'company' : (empty($data['department_id']) ? 'site' : 'department'),
             'company_id' => $data['company_id'], 'site_id' => $data['site_id'], 'department_id' => $data['department_id'] ?? null,
         ]);
         $this->membershipAccess->validateUnit($membership);
@@ -28,13 +28,12 @@ class ManageUserOnboarding
             throw ValidationException::withMessages(['access' => 'userAccessInactive']);
         }
         $role = $this->access->visibleRoles($scope)->whereKey($data['role_id'])->with('permissions')->first();
-        $workspacePermissions = $role?->permissions->filter(fn (Permission $permission): bool => $permission->active)->pluck('key')->all() ?? [];
         if (! $role || ! $role->active || $role->code === Role::SYSTEM_ADMINISTRATOR_CODE
-            || ! $role->scope->covers($scope) || array_diff(['organization.access', 'documents.metadata.view'], $workspacePermissions) !== []) {
+            || ! $role->scope->covers($scope)) {
             throw ValidationException::withMessages(['access.role_id' => 'userAccessInvalidRole']);
         }
         if ($membership->department_id !== null && ($role->code === 'DOCUMENT_CONTROLLER'
-            || array_intersect(['numbering.issue', 'numbering.view', 'numbering.manage', 'master-data.view', 'master-data.manage'], $workspacePermissions) !== [])) {
+            || array_intersect(['numbering.issue', 'numbering.view', 'numbering.manage', 'master-data.view', 'master-data.manage'], $role->permissions->pluck('key')->all()) !== [])) {
             throw ValidationException::withMessages(['access.department_id' => 'userAccessSiteRole']);
         }
         $existing = OrganizationMembership::query()->where($membership->only(['user_id', 'membership_type', 'company_id', 'site_id', 'department_id']))->whereNull('revoked_at')->first();

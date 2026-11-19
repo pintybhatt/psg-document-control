@@ -302,7 +302,7 @@ describe('scoped role administration', () => {
         expect(wrapper.get('form').text()).toContain('ທ່ານບໍ່ມີສິດແກ້ໄຂ');
     });
 
-    it('groups business permissions and explains workspace setup without selecting or saving grants automatically', async () => {
+    it('groups business permissions and leaves workspace permissions optional', async () => {
         const catalog = [...permissionRows,
             { key: 'organization.access', area: 'organization', name_en: 'Use a workspace', name_lo: 'ພື້ນທີ່ເຮັດວຽກ', available: true, delegatable: true },
             { key: 'documents.metadata.view', area: 'document-security', name_en: 'View details', name_lo: 'ລາຍລະອຽດ', available: true, delegatable: true },
@@ -319,9 +319,8 @@ describe('scoped role administration', () => {
         expect(list.text()).toContain('Document Controller');
         expect(list.text()).toContain('Authorization scope');
         expect(list.text()).toContain('Group / Global');
-        expect(list.text()).toContain('Workspace setup needed');
+        expect(list.text()).not.toContain('Workspace setup needed');
         await button(wrapper, 'Edit').trigger('click');
-        expect(wrapper.get('form [role="status"]').text()).toContain('cannot be selected during user creation');
         expect(wrapper.findAll('form input[value]').every(input => !input.element.checked)).toBe(true);
         const workspaceGroup = wrapper.get('[data-permission-group="workspace"]');
         expect(workspaceGroup.attributes('open')).toBeDefined();
@@ -342,7 +341,6 @@ describe('scoped role administration', () => {
         await wrapper.get('input[value="organization.access"]').setValue(true);
         await wrapper.get('input[value="documents.metadata.view"]').setValue(true);
         expect(workspaceGroup.text()).toContain('2 of 2 selected');
-        expect(wrapper.get('form [role="status"]').text()).toContain('Workspace permissions are configured');
         await wrapper.get('form').trigger('submit'); await flushPromises();
         const updates = fetch.mock.calls.filter(([, options]) => options.method === 'PATCH');
         expect(updates).toHaveLength(1);
