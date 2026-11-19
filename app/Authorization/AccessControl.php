@@ -61,10 +61,12 @@ class AccessControl
         $isSystemAdministrator = $this->isSystemAdministrator($user);
         $granted = $this->grantedPermissions($user, $scope);
         $hasMembership = $isSystemAdministrator || ($granted !== [] && $membership->matches($user, $scope, $departmentId));
+        $hasWorkspaceMembership = ! $hasMembership && $departmentId === null && $scope->scope_type === 'site'
+            && array_any($granted, PermissionCatalog::acceptsCompanyWorkspaceMembership(...)) && $membership->matchesWorkspace($user, $scope);
 
         return array_values(array_filter($granted,
             fn (string $key): bool => ! PermissionCatalog::requiresDocument($key) && ($isSystemAdministrator || (PermissionCatalog::administrative($key)
-                ? $departmentId === null : $hasMembership))));
+                ? $departmentId === null : $hasMembership || ($hasWorkspaceMembership && PermissionCatalog::acceptsCompanyWorkspaceMembership($key))))));
     }
 
     public function allows(User $user, string $permission, AuthorizationScope $scope, ?int $departmentId = null): bool

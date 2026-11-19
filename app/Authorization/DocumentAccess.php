@@ -64,7 +64,7 @@ class DocumentAccess
         if (! in_array($operation->permission(), $this->roles->grantedPermissions($user, $scope->authorizationScope()), true)) {
             return 'permission_denied';
         }
-        if (! $this->memberships->matches($user, $scope->authorizationScope(), $scope->departmentId)) {
+        if (! $this->memberships->matchesWorkspace($user, $scope->authorizationScope(), $scope->departmentId)) {
             return 'membership_denied';
         }
         if ($classification !== Confidentiality::Normal && ! ConfidentialityClearance::query()->where('user_id', $user->id)

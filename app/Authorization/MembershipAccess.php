@@ -52,10 +52,39 @@ class MembershipAccess
             ->where('company_id', $scope->company_id)->where('site_id', $scope->site_id)->where('active', true)->exists())) {
             return false;
         }
-        $type = $departmentId !== null ? 'department' : $scope->scope_type;
 
-        return $this->effectiveQuery()->where('user_id', $user->id)->where('membership_type', $type)
-            ->where('company_id', $scope->company_id)->where('site_id', $scope->site_id)->where('department_id', $departmentId)->exists();
+        return $this->effectiveUnitQuery($scope->company_id, $scope->site_id, $departmentId)->where('user_id', $user->id)->exists();
+    }
+
+    public function matchesWorkspace(User $user, AuthorizationScope $scope, ?int $departmentId = null): bool
+    {
+        if ($scope->scope_type !== 'site' || $departmentId !== null) {
+            return $this->matches($user, $scope, $departmentId);
+        }
+
+        return $scope->isActive() && $this->effectiveWorkspaceQuery($scope->company_id, $scope->site_id)->where('user_id', $user->id)->exists();
+    }
+
+    /** @return Builder<OrganizationMembership> */
+    public function effectiveWorkspaceQuery(int $companyId, int $siteId, ?int $departmentId = null): Builder
+    {
+        if ($departmentId !== null) {
+            return $this->effectiveUnitQuery($companyId, $siteId, $departmentId);
+        }
+
+        return $this->effectiveQuery()->where('company_id', $companyId)->whereNull('department_id')
+            ->where(fn (Builder $query): Builder => $query
+                ->where(fn (Builder $site): Builder => $site->where('membership_type', 'site')->where('site_id', $siteId))
+                ->orWhere(fn (Builder $company): Builder => $company->where('membership_type', 'company')->whereNull('site_id')));
+    }
+
+    /** @return Builder<OrganizationMembership> */
+    private function effectiveUnitQuery(int $companyId, ?int $siteId, ?int $departmentId): Builder
+    {
+        $type = $departmentId !== null ? 'department' : ($siteId !== null ? 'site' : 'company');
+
+        return $this->effectiveQuery()->where('membership_type', $type)
+            ->where('company_id', $companyId)->where('site_id', $siteId)->where('department_id', $departmentId);
     }
 
     /** @return Builder<OrganizationMembership> */

@@ -651,7 +651,7 @@ class NumberingTest extends TestCase
         $this->assertDatabaseCount('numbering_counters', 0);
     }
 
-    public function test_company_configuration_and_numbering_require_exact_company_membership(): void
+    public function test_company_membership_allows_site_issuance_while_configuration_stays_exactly_scoped(): void
     {
         [$actor, $siteScope, $siteRegister] = $this->actor();
         $siteSeries = $this->series($actor, $siteScope, $siteRegister);
@@ -664,8 +664,7 @@ class NumberingTest extends TestCase
         $series = $this->series($actor, $scope, $register, ['prefix' => 'EXAMPLE/COMPANY']);
         $this->assertSame('EXAMPLE/COMPANY/2026/000001', $this->issue($actor, $scope, $series)->number);
         $this->getJson($this->scopedUrl('numbering-series', $siteScope))->assertForbidden();
-        $this->expectException(HttpException::class);
-        $this->issue($actor, $siteScope, $siteSeries);
+        $this->assertSame('EXAMPLE/OUT/2026/000001', $this->issue($actor, $siteScope, $siteSeries)->number);
     }
 
     #[TestWith(['configuration'])]

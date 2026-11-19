@@ -20,6 +20,13 @@ class PermissionCatalog
         return in_array($key, array_map(fn (DocumentOperation $operation): string => $operation->permission(), DocumentOperation::cases()), true);
     }
 
+    public static function acceptsCompanyWorkspaceMembership(string $key): bool
+    {
+        return str_starts_with($key, 'incoming.') || str_starts_with($key, 'outgoing.') || str_starts_with($key, 'controlled.')
+            || in_array($key, ['organization.access', 'reports.view', 'documents.audit.view', 'documents.attachments.manage',
+                'documents.custody.manage', 'storage-locations.manage', 'numbering.issue'], true);
+    }
+
     /** @return array<string, array{area: string, name_en: string, name_lo: string, available: bool}> */
     public static function definitions(): array
     {

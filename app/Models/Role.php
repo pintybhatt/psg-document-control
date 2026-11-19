@@ -24,6 +24,13 @@ class Role extends Model
 
     public const SYSTEM_ADMINISTRATOR_DESCRIPTION = 'An active global assignment grants full system and document access. Scoped assignments use configured permissions.';
 
+    public const STANDARD_DESCRIPTIONS = [
+        self::SYSTEM_ADMINISTRATOR_CODE => self::SYSTEM_ADMINISTRATOR_DESCRIPTION,
+        'DOCUMENT_CONTROLLER' => 'Manages correspondence and controlled documents within assigned workspaces.',
+        'DEPARTMENT_USER' => 'Prepares drafts and attachments within assigned workspaces.',
+        'VIEWER' => 'Reads and searches authorized documents and reports.',
+    ];
+
     public function displayName(string $language): string
     {
         if ($this->code === self::SYSTEM_ADMINISTRATOR_CODE) {
@@ -35,7 +42,11 @@ class Role extends Model
 
     public function displayDescription(): ?string
     {
-        return $this->code === self::SYSTEM_ADMINISTRATOR_CODE ? self::SYSTEM_ADMINISTRATOR_DESCRIPTION : $this->description;
+        if ($this->code === self::SYSTEM_ADMINISTRATOR_CODE || $this->description === 'Document capabilities remain unavailable until their operations are implemented.') {
+            return self::STANDARD_DESCRIPTIONS[$this->code] ?? $this->description;
+        }
+
+        return $this->description;
     }
 
     protected static function booted(): void

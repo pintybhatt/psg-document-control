@@ -49,7 +49,7 @@ class MembershipAuthorizationTest extends TestCase
         $this->getJson('/api/v1/organization-contexts')->assertOk()->assertExactJson(['data' => []]);
     }
 
-    public function test_company_role_and_membership_allow_only_explicitly_matched_membership_levels(): void
+    public function test_company_membership_extends_to_site_workspaces_but_not_site_configuration_or_departments(): void
     {
         $this->definitions();
         $site = Site::factory()->create();
@@ -57,17 +57,23 @@ class MembershipAuthorizationTest extends TestCase
         $user = User::factory()->create();
         $company = AuthorizationScope::context('company', $site->company_id);
         $siteScope = AuthorizationScope::context('site', $site->company_id, $site->id);
-        $this->grant($user, $company, ['organization.access']);
+        $this->grant($user, $company, ['organization.access', 'reports.view', 'master-data.manage', 'security.audit.view', 'documents.metadata.view']);
         OrganizationMembership::factory()->for($user)->create(['company_id' => $site->company_id]);
         $access = app(AccessControl::class);
 
         $this->assertTrue($access->allowsOperational($user, 'organization.access', $company));
-        $this->assertFalse($access->allowsOperational($user, 'organization.access', $siteScope));
+        $this->assertTrue($access->allowsOperational($user, 'organization.access', $siteScope));
+        $this->assertTrue($access->allowsOperational($user, 'reports.view', $siteScope));
+        $this->assertFalse($access->allowsOperational($user, 'master-data.manage', $siteScope));
         $this->assertFalse($access->allowsOperational($user, 'organization.access', $siteScope, $department->id));
         $this->assertFalse($access->allowsOperational($user, 'organization.access', AuthorizationScope::context('global')));
+        $this->signIn($user);
+        $this->getJson('/api/v1/incoming-correspondence/contexts')->assertOk()->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.permissions', fn (array $permissions): bool => array_diff(['organization.access', 'reports.view'], $permissions) === []
+                && count($permissions) === 2);
 
         OrganizationMembership::factory()->for($user)->atSite($site)->create();
-        $this->assertTrue($access->allowsOperational($user, 'organization.access', $siteScope));
+        $this->assertTrue($access->allowsOperational($user, 'master-data.manage', $siteScope));
         $this->assertFalse($access->allowsOperational($user, 'organization.access', $siteScope, $department->id));
     }
 

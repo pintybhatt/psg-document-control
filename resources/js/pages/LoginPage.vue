@@ -72,7 +72,7 @@ async function validate(event) {
 
 <template>
     <main class="flex min-h-dvh flex-col bg-slate-50 text-slate-800 lg:flex-row">
-        <section class="relative isolate flex flex-col justify-between gap-8 overflow-hidden bg-linear-to-br from-slate-950 via-[#06213a] to-teal-950 px-6 py-8 text-white lg:w-5/12 lg:p-12">
+        <section class="relative isolate flex min-w-0 flex-col justify-between gap-8 overflow-hidden bg-linear-to-br from-slate-950 via-[#06213a] to-teal-950 px-6 py-8 text-white lg:w-1/2 lg:px-8 lg:py-12 xl:px-10">
             <div aria-hidden="true" class="pointer-events-none absolute inset-0 -z-10">
                 <div class="absolute -top-32 -left-24 size-96 rounded-full bg-teal-500/25 blur-3xl"></div>
                 <div class="absolute top-1/3 -right-32 size-[28rem] rounded-full bg-sky-500/20 blur-3xl"></div>
@@ -83,10 +83,10 @@ async function validate(event) {
                 <img src="/logo/psg.png" alt="PSG" class="size-10 rounded-xl object-contain" />
                 <span class="text-sm font-semibold">Phonesack Group</span>
             </div>
-            <div class="@container min-w-0 rounded-3xl border border-white/10 bg-white/[0.06] p-6 shadow-2xl shadow-black/20 ring-1 ring-white/5 backdrop-blur-xl sm:p-8">
-                <p class="mb-3 inline-flex items-center gap-2 rounded-full border border-teal-300/20 bg-teal-300/10 px-3 py-1 text-xs font-semibold tracking-wider text-teal-200">DCMS</p>
-                <h1 class="text-[clamp(0.875rem,5.5cqi,1.875rem)] leading-relaxed font-semibold" :class="{ 'whitespace-nowrap': language === 'en' }">{{ t('appDescription') }}</h1>
-                <p class="mt-4 max-w-lg text-sm leading-7 text-slate-300">{{ t('authWelcome') }}</p>
+            <div class="@container min-w-0 rounded-3xl border border-white/10 bg-white/[0.06] p-4 shadow-2xl shadow-black/20 ring-1 ring-white/5 backdrop-blur-xl sm:px-6">
+                <p class="mb-2 inline-flex items-center gap-2 rounded-full border border-teal-300/20 bg-teal-300/10 px-3 py-1 text-xs font-semibold tracking-wider text-teal-200">DCMS</p>
+                <h1 class="text-[clamp(1.125rem,4.7cqi,1.5625rem)] leading-snug font-semibold text-balance wrap-break-word">{{ t('appDescription') }}</h1>
+                <p class="mt-2 text-sm/6 text-slate-300">{{ t('authWelcome') }}</p>
             </div>
             <p class="hidden text-xs text-slate-400 lg:block">{{ t('footer') }}</p>
         </section>
@@ -107,8 +107,7 @@ async function validate(event) {
                     <TextInput v-model="email" name="email" type="email" autocomplete="username" autocapitalize="none" spellcheck="false" :label="t('authEmail')" :placeholder="t('authEmailPlaceholder')" :icon="mailIcon" class="min-h-11 rounded-xl" :error-key="errors.email" required @update:model-value="errors.email = ''" />
                     <TextInput v-model="password" name="password" type="password" autocomplete="current-password" :label="t('authPassword')" :placeholder="t('authPasswordPlaceholder')" :icon="lockKeyholeIcon" class="min-h-11 rounded-xl" :error-key="errors.password" required @update:model-value="errors.password = ''" />
                     <p v-if="errors.language" role="alert" class="text-sm text-red-700">{{ t(errors.language) }}</p>
-                    <UiButton type="submit" :loading="submitting" class="mt-1 min-h-11 w-full rounded-xl shadow-md shadow-teal-700/20">
-                        <Icon v-if="!submitting" :icon="logInIcon" aria-hidden="true" class="size-4" />
+                    <UiButton type="submit" :icon="logInIcon" :loading="submitting" class="mt-1 min-h-11 w-full rounded-xl shadow-md shadow-teal-700/20">
                         {{ t('authSignIn') }}
                     </UiButton>
                 </form>

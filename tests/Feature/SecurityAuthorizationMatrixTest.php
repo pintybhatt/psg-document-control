@@ -34,7 +34,7 @@ class SecurityAuthorizationMatrixTest extends TestCase
             'no roles' => ['no_roles', [false, false, false, false, false, false]],
             'membership only' => ['membership_only', [false, false, false, false, false, false]],
             'roles without membership' => ['roles_only', [true, true, false, false, false, false]],
-            'company membership only' => ['company_only', [true, true, false, false, false, false]],
+            'company membership with clearance and allowlist' => ['company_only', [true, true, false, true, true, true]],
             'company role and site membership' => ['company_with_site', [true, true, true, true, true, true]],
             'site role and membership' => ['site', [true, true, true, true, true, true]],
             'owning department membership' => ['department', [true, true, true, true, true, true]],

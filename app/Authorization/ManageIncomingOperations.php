@@ -104,8 +104,7 @@ class ManageIncomingOperations
         $this->incoming->authorizeContext($actor, $scope, 'incoming.operations.manage');
         $record = $this->incoming->find($actor, $scope, $id);
         abort_unless($record->isFormallyRegistered(), 422, 'incomingRegisteredOnly');
-        $members = $this->memberships->effectiveQuery()->where('company_id', $scope->companyId)->where('site_id', $scope->siteId)
-            ->where('department_id', $scope->departmentId)->select('user_id');
+        $members = $this->memberships->effectiveWorkspaceQuery($scope->companyId, $scope->siteId, $scope->departmentId)->select('user_id');
         $users = User::query()->where('active', true)->where(fn (Builder $query): Builder => $query->whereIn('id', $members)
             ->orWhereHas('roleAssignments', fn (Builder $assignment): Builder => $assignment->where('active', true)
                 ->whereHas('scope', fn (Builder $scope): Builder => $scope->where('scope_key', 'global'))

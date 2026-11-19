@@ -80,7 +80,7 @@ class ManageControlledDocuments
         $canonical = $scope->authorizationScope();
         abort_unless(($permission === null || $this->roles->allows($actor, $permission, $canonical, $scope->departmentId))
             && in_array('documents.metadata.view', $this->roles->grantedPermissions($actor, $canonical), true)
-            && ($this->roles->isSystemAdministrator($actor) || $this->memberships->matches($actor, $canonical, $scope->departmentId)), 403, 'rbacForbidden');
+            && ($this->roles->isSystemAdministrator($actor) || $this->memberships->matchesWorkspace($actor, $canonical, $scope->departmentId)), 403, 'rbacForbidden');
     }
 
     /** @return Builder<ControlledDocument> */
@@ -428,8 +428,7 @@ class ManageControlledDocuments
     /** @return Builder<User> */
     public function people(DocumentScope $scope): Builder
     {
-        return User::query()->where('active', true)->whereIn('id', $this->memberships->effectiveQuery()->where('membership_type', $scope->departmentId === null ? 'site' : 'department')
-            ->where('company_id', $scope->companyId)->where('site_id', $scope->siteId)->where('department_id', $scope->departmentId)->select('user_id'));
+        return User::query()->where('active', true)->whereIn('id', $this->memberships->effectiveWorkspaceQuery($scope->companyId, $scope->siteId, $scope->departmentId)->select('user_id'));
     }
 
     /** @param array<string, mixed> $data */
