@@ -58,7 +58,7 @@ class UserOnboardingTest extends TestCase
         $site = Site::factory()->create();
         $other = Site::factory()->create(['company_id' => $site->company_id]);
         $department = $departmentAccess ? Department::factory()->create(['company_id' => $site->company_id, 'site_id' => $site->id]) : null;
-        $role = $this->workspaceRole($departmentAccess ? 'DEPARTMENT_USER' : 'DOCUMENT_CONTROLLER');
+        $role = Role::query()->where('code', $departmentAccess ? 'DEPARTMENT_USER' : 'DOCUMENT_CONTROLLER')->sole();
         $id = $this->postJson('/api/v1/user-management', $this->account($site, $role, $department))->assertCreated()->json('data.id');
         $this->assertDatabaseHas('organization_memberships', ['user_id' => $id, 'membership_type' => $departmentAccess ? 'department' : 'site', 'site_id' => $site->id, 'department_id' => $department?->id, 'active' => true]);
         $this->assertDatabaseCount('organization_memberships', 1);
@@ -90,7 +90,7 @@ class UserOnboardingTest extends TestCase
         $this->administrator();
         $site = Site::factory()->create();
         $role = match ($owner) {
-            'global' => Role::query()->where('code', 'VIEWER')->sole(),
+            'global' => Role::factory()->create(['scope_id' => AuthorizationScope::context('global')->id]),
             'company' => Role::factory()->create(['scope_id' => AuthorizationScope::context('company', $site->company_id)->persist()->id]),
             'site' => Role::factory()->create(['scope_id' => AuthorizationScope::context('site', $site->company_id, $site->id)->persist()->id]),
         };
@@ -119,12 +119,41 @@ class UserOnboardingTest extends TestCase
     }
 
     #[TestWith(['company'])]
+    #[TestWith(['site'])]
+    public function test_standard_role_scope_and_exact_memberships_control_workspace_visibility(string $assignmentType): void
+    {
+        $this->administrator();
+        $site = Site::factory()->create();
+        $sibling = Site::factory()->for($site->company)->create();
+        $foreign = Site::factory()->create();
+        $role = Role::query()->where('code', 'DOCUMENT_CONTROLLER')->sole();
+        $data = $this->account($site, $role);
+        if ($assignmentType === 'company') {
+            $data['access']['site_id'] = null;
+        }
+        $user = User::query()->findOrFail($this->postJson('/api/v1/user-management', $data)->assertCreated()->json('data.id'));
+        $this->signIn($user);
+        $this->getJson('/api/v1/incoming-correspondence/contexts')->assertOk()->assertJsonCount($assignmentType === 'company' ? 0 : 1, 'data');
+        foreach ([$site, $sibling, $foreign] as $memberSite) {
+            if ($memberSite->id !== $site->id || $assignmentType === 'company') {
+                OrganizationMembership::factory()->for($user)->atSite($memberSite)->create();
+            }
+        }
+        $siteIds = $this->getJson('/api/v1/incoming-correspondence/contexts')->assertOk()->json('data.*.site_id');
+        $this->assertEqualsCanonicalizing($assignmentType === 'company' ? [$site->id, $sibling->id] : [$site->id], $siteIds);
+
+        Permission::query()->where('key', 'documents.metadata.view')->sole()->update(['active' => false]);
+        $this->getJson('/api/v1/incoming-correspondence/contexts')->assertOk()->assertExactJson(['data' => []]);
+    }
+
+    #[TestWith(['company'])]
     #[TestWith(['department'])]
     #[TestWith(['role'])]
     #[TestWith(['foreign-company-role'])]
     #[TestWith(['site-role-at-company'])]
     #[TestWith(['department-without-site'])]
     #[TestWith(['inactive-role'])]
+    #[TestWith(['standard-without-workspace'])]
     #[TestWith(['unavailable-permission'])]
     #[TestWith(['department-controller'])]
     #[TestWith(['administrator'])]
@@ -153,6 +182,8 @@ class UserOnboardingTest extends TestCase
             $data['access']['department_id'] = Department::factory()->create(['company_id' => $site->company_id, 'site_id' => $site->id])->id;
         } elseif ($invalid === 'inactive-role') {
             $role->update(['active' => false]);
+        } elseif ($invalid === 'standard-without-workspace') {
+            app(RbacMutation::class)->run(fn () => $role->permissions()->detach(Permission::query()->where('key', 'documents.metadata.view')->sole()->id));
         } elseif ($invalid === 'unavailable-permission') {
             app(RbacMutation::class)->run(fn () => $role->permissions()->attach(Permission::query()->where('key', 'documents.view')->sole()->id));
         } elseif ($invalid === 'department-controller') {

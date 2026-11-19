@@ -53,6 +53,13 @@ const roleOptions = computed(() => options(eligibleRoles.value, 'userAccessChoos
     return `${label(role)} · ${t(scope)}`;
 }));
 const selectedRole = computed(() => eligibleRoles.value.find(role => String(role.id) === String(accessForm.role_id)));
+const missingWorkspaceGrant = computed(() => selectedRole.value && !selectedRole.value.permission_keys.includes('documents.metadata.view'));
+const workspaceWarning = computed(() => {
+    if (missingWorkspaceGrant.value) {
+        return selectedRole.value.standard ? 'userAccessStandardWorkspaceMissing' : 'userAccessCustomWorkspaceMissing';
+    }
+    return selectedRole.value && !hasSite.value ? 'userAccessSiteMembershipRequired' : '';
+});
 const accessLocation = row => row.scope_key === 'global' ? t('rbacGlobal') : [label(row.company), label(row.site), label(row.department)].filter(Boolean).join(' / ');
 const accessLabel = row => [label(row.role), accessLocation(row)].filter(Boolean).join(' · ');
 const validationKeys = {
@@ -296,6 +303,7 @@ onBeforeUnmount(() => { editorController?.abort(); siteController?.abort(); scop
                 <SelectInput v-model="accessForm.department_id" :label="t('userAccessDepartment')" :options="options(departments, 'userAccessNoDepartment')" :disabled="!hasSite" :error-key="fields['access.department_id']?.[0]" />
                 <SelectInput v-model="accessForm.role_id" :label="t('userAccessRole')" :options="roleOptions" :disabled="!eligibleRoles.length" :required="!!accessForm.company_id" :error-key="fields['access.role_id']?.[0]" />
                 <p v-if="selectedRole?.description" class="line-clamp-2 text-sm text-slate-600 sm:col-span-2">{{ selectedRole.description }}</p>
+                <p v-if="workspaceWarning" role="status" class="text-sm text-amber-900 sm:col-span-2">{{ t(workspaceWarning) }}</p>
                 <p v-if="roles && !eligibleRoles.length" role="status" class="text-sm text-slate-600 sm:col-span-2">{{ t('userAccessNoRoles') }}</p>
                 <div v-if="editing.id !== null && accessForm.company_id" class="sm:col-span-2"><CheckboxInput v-model="accessForm.confirm_regrant" :label="t('userAccessConfirmRegrant')" /></div>
             </fieldset>

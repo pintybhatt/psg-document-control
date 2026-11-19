@@ -15,7 +15,7 @@ const companyRole = { ...role, ...names(14, 'Company Viewer'), code: 'COMPANY_VI
 const siteRole = { ...role, ...names(11, 'Site Viewer'), code: 'SITE_VIEWER', scope_key: 'site:2' };
 const existingUser = { id: 2, name: 'Existing User', email: 'existing@example.test', preferred_language: 'en', active: true };
 
-function server({ user = null, failSave = false, noAssignableRoles = false, failRoles = false, failEmail = false } = {}) {
+function server({ user = null, failSave = false, noAssignableRoles = false, failRoles = false, failEmail = false, legacyStandard = false } = {}) {
     const users = user ? [structuredClone(user)] : [];
     const currentAccess = { memberships: [{ ...names(20, 'Membership'), company: names(1, 'Example Company'), site: names(2, 'Existing Site'), effective: true, revoke_url: '/memberships/20?scope_type=site' }],
         assignments: [{ id: 30, role, company: names(1, 'Example Company'), site: names(2, 'Existing Site'), scope_key: 'site:2', effective: true, revoke_url: '/assignments/30?scope_type=site' }] };
@@ -28,6 +28,7 @@ function server({ user = null, failSave = false, noAssignableRoles = false, fail
             return response(null, 204);
         }
         if (method !== 'GET') {
+            if (legacyStandard) { return response({ errors: { 'access.role_id': ['userAccessStandardWorkspaceMissing'] } }, 422); }
             if (failSave) { return response({ errors: { 'access.role_id': ['userAccessInvalidRole'] } }, 422); }
             if (failEmail) { return response({ errors: { email: ['The email has already been taken.'] } }, 422); }
             const body = JSON.parse(options.body);
@@ -44,10 +45,11 @@ function server({ user = null, failSave = false, noAssignableRoles = false, fail
         if (parsed.pathname === '/roles') {
             if (failRoles) { return response({}, 500); }
             const excluded = [{ ...role, id: 12, code: 'SECURITY_ADMINISTRATOR' }, { ...role, id: 13, active: false }, { ...role, id: 15, permission_keys: ['documents.view'] }];
-            const candidates = parsed.searchParams.get('scope_type') === 'site' ? [role, companyRole, siteRole] : [role, companyRole];
+            const controller = { ...role, standard: true, permission_keys: legacyStandard ? [] : ['documents.metadata.view'] };
+            const candidates = parsed.searchParams.get('scope_type') === 'site' ? [controller, companyRole, siteRole] : [controller, companyRole];
             return response({ data: noAssignableRoles ? excluded : [...candidates, ...excluded], meta: { last_page: 1 } });
         }
-        if (parsed.pathname === '/permissions') { return response({ data: [{ key: 'organization.access', available: true, delegatable: true }, { key: 'documents.view', available: false, delegatable: false }] }); }
+        if (parsed.pathname === '/permissions') { return response({ data: ['organization.access', 'documents.metadata.view'].map(key => ({ key, available: true, delegatable: true })).concat({ key: 'documents.view', available: false, delegatable: false }) }); }
         if (parsed.pathname.endsWith('/access')) { return response(currentAccess); }
         return response({ data: users, last_page: 1 });
     });
@@ -182,6 +184,19 @@ describe('combined user onboarding', () => {
         await wrapper.findAll('form')[1].trigger('submit'); await flushPromises();
         expect(wrapper.get('[role="alert"]').text()).toContain('active role you can assign at this scope');
         expect(wrapper.findAll('form')).toHaveLength(2);
+    });
+
+    it('warns about a legacy standard role and shows the server rejection in Lao', async () => {
+        server({ user: existingUser, legacyStandard: true });
+        const wrapper = await render('lo');
+        await button(wrapper, 'ແກ້ໄຂ').trigger('click'); await flushPromises();
+        await field(wrapper, 'ບໍລິສັດ').setValue(1); await flushPromises();
+        await field(wrapper, 'ຂອບເຂດການເຂົ້າເຖິງ').setValue(2); await flushPromises();
+        await field(wrapper, 'ບົດບາດ').setValue(10);
+        expect(wrapper.get('[role="status"]').text()).toContain('ຂາດສິດໃຊ້ພື້ນທີ່ເອກະສານ');
+        await wrapper.findAll('form')[1].trigger('submit'); await flushPromises();
+        expect(wrapper.get('[role="alert"]').text()).toContain('ຂາດສິດໃຊ້ພື້ນທີ່ເອກະສານ');
+        expect(wrapper.get('[role="dialog"]').exists()).toBe(true);
     });
 
     it('translates the onboarding and current-access controls into Lao', async () => {

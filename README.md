@@ -127,11 +127,11 @@ Inheritance is deliberate:
 | Company | That company and its sites | Another company or the global context |
 | Site | Only that exact company/site pair | Its parent company, a sibling site or global scope |
 
-Role definitions have their own immutable owning scope. A definition may be assigned only within that scope or its descendants. Global templates can be read/assigned in scoped contexts, but can be edited only in global context by an authorized actor. A company/site administrator can create and edit definitions owned by their own scope. New role permissions must be a subset of the actor's effective permissions at that owning scope. Editing an existing role also requires authority over its current permissions, preventing a partial manager from altering a more powerful definition.
+Role definitions have their own immutable owning scope. A definition may be assigned only within that scope or its descendants. The four standard definitions are global and protected. Custom roles are editable in their owning scope by an authorized actor. New role permissions must be a subset of the actor's effective permissions at that owning scope. Editing an existing custom role also requires authority over its current permissions, preventing a partial manager from altering a more powerful definition.
 
 Permission checks query current database state and ignore stale loaded relationships. They require an active user, role, assignment, company and site as applicable, plus an available catalog key and active permission row. Role/assignment revocation takes effect on the next protected administrative request without logging out an otherwise active user. Parent deactivation makes its scopes unavailable; reopening a parent restores still-active assignments. Revoking an assignment is a separate explicit action.
 
-`PermissionCatalog` controls the machine keys and availability. Currently operational keys are `users.view`, `roles.view`, `roles.manage`, `assignments.view` and `assignments.manage`. `users.view` exposes only eligible identity fields for role assignment. `users.manage` and the document view/register/control keys are reserved, unavailable and ungrantable through the APIs. Even a forged database permission row cannot introduce an unknown ability. There are no permission-create/update APIs, wildcard abilities or broad administrator bypasses.
+`PermissionCatalog` controls the grant keys and their availability. `users.view` exposes eligible identity fields for role assignment. Custom role edits cannot grant an unknown or unavailable key. Effective access for an active global System Administrator assignment follows the existing System Administrator contract.
 
 ### Definition initialization and the initial administrator
 
@@ -141,7 +141,27 @@ These are operator-only procedures for a reviewed deployment; neither command is
 php artisan rbac:initialize --no-interaction
 ```
 
-This initializes bilingual permission labels and four unassigned role templates: Security Administrator, Document Controller, Department User and Viewer. Existing labels, permissions and active flags on role definitions are preserved on reruns. Security Administrator initially has only the five identity-visibility/authorization permissions above. The other templates intentionally have no effective document grants until document operations are implemented. Newly introduced catalog keys are not silently added to existing roles.
+This initializes bilingual permission labels and four unassigned global roles with defaults from `PermissionCatalog`. System Administrator uses the existing advanced assignment workflow. Document Controller, Department User and Viewer receive their operational defaults when first created. Existing labels, grants and active flags are preserved on reruns.
+
+### Reviewed activation for existing standard roles
+
+On the approved installation, run the report once per standard code (`SECURITY_ADMINISTRATOR`, `DOCUMENT_CONTROLLER`, `DEPARTMENT_USER`, `VIEWER`). The report contains user identities. Keep it with the restricted change record.
+
+```sh
+php artisan rbac:standard-grants DOCUMENT_CONTROLLER --no-interaction
+```
+
+Review current grants, proposed additions, assignment scopes, active users, and effective memberships. The shared global role affects all existing assignments, including other companies and sites. For XPPL, compare the affected user's company and site memberships with their assignments and verify whether `documents.metadata.view` is already effective at the site.
+
+After explicit approval of the additions and their impact, an authorized host operator can apply that role's report on the same installation.
+
+```sh
+php artisan rbac:standard-grants DOCUMENT_CONTROLLER --apply='REVIEWED_FINGERPRINT' --operator='APPROVED OPERATOR' --no-interaction
+```
+
+The command rejects changed reports and unavailable defaults. It adds only missing grants and records the operator, fingerprint and grant delta in the role audit. A retry with all grants already present makes no grant or audit changes. System Administrator is report-only through this command. After activation, verify the dashboard with the existing user, check sibling and cross-company access boundaries, and verify that restricted documents still require their existing clearances and allowlists.
+
+### Assign the initial administrator
 
 The Phase 2.2B `user:bootstrap-admin` command still creates only an unprivileged identity. To assign the initial security administrator, use an explicitly verified, existing active account. For a site-scoped initialization:
 

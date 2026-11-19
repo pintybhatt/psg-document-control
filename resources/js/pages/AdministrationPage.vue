@@ -106,6 +106,8 @@ const scopePanel = ref(null);
 const editingRole = ref(null);
 const readOnly = computed(() => editingRole.value !== null && !editingRole.value.editable);
 const securityReadOnly = computed(() => readOnly.value || editingRole.value?.security_editable === false);
+const standardWorkspaceMissing = computed(() => editingRole.value?.standard && roleForm.active && roleForm.code !== 'SECURITY_ADMINISTRATOR'
+    && !(roleForm.permission_keys.includes('documents.metadata.view') && permissions.value.some(permission => permission.key === 'documents.metadata.view' && permission.available)));
 const owningScope = computed(() => readOnly.value && editingRole.value?.scope_key !== selectedKey.value
     ? contexts.value.find(scope => scope.scope_key === editingRole.value?.scope_key && scope.permissions.includes('roles.view') && scope.permissions.includes('roles.manage')) : null);
 const roleForm = reactive({ code: '', name_en: '', name_lo: '', description: '', active: true, permission_keys: [] });
@@ -466,8 +468,10 @@ onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
             <FormModal v-if="editorOpen && section === 'roles'" size="xl" :title="t(editingRole ? 'rbacRoleDetails' : 'rbacCreateRole')" :subtitle="editingRole ? `${label(editingRole)} · ${t('rbacRoleOwner', { scope: roleScopeLabel(editingRole) })}` : ''" :busy="saving" @close="editorOpen = false">
             <form ref="roleEditor" novalidate class="flex flex-col gap-5" @submit.prevent="saveRole">
                 <p v-if="errorKey" role="alert" class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">{{ t(errorKey) }}</p>
-                <p v-if="readOnly || securityReadOnly" class="text-sm text-slate-500">{{ t(readOnly ? 'rbacInheritedReadOnly' : 'rbacSelfRoleReadOnly', { scope: roleScopeLabel(editingRole) }) }}</p>
-                <div v-if="readOnly && editingRole?.scope_key !== selectedKey" class="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+                <p v-if="editingRole?.standard" class="text-sm text-slate-600">{{ t('rbacStandardRoleProtected') }}</p>
+                <p v-else-if="readOnly || securityReadOnly" class="text-sm text-slate-500">{{ t(readOnly ? 'rbacInheritedReadOnly' : 'rbacSelfRoleReadOnly', { scope: roleScopeLabel(editingRole) }) }}</p>
+                <p v-if="standardWorkspaceMissing" class="text-sm text-amber-900">{{ t('userAccessStandardWorkspaceMissing') }}</p>
+                <div v-if="readOnly && !editingRole?.standard && editingRole?.scope_key !== selectedKey" class="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
                     <UiButton v-if="owningScope" :disabled="loading || saving || confirmationOpen" @click="switchToOwningScope">{{ t('rbacSwitchOwnerScope', { scope: scopeLabel(owningScope) }) }}</UiButton>
                     <p v-else>{{ t('rbacOwnerScopeNoEdit') }}</p>
                 </div>

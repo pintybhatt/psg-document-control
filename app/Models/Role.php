@@ -20,6 +20,8 @@ class Role extends Model
 
     public const SYSTEM_ADMINISTRATOR_CODE = 'SECURITY_ADMINISTRATOR';
 
+    public const STANDARD_CODES = [self::SYSTEM_ADMINISTRATOR_CODE, 'DOCUMENT_CONTROLLER', 'DEPARTMENT_USER', 'VIEWER'];
+
     public const SYSTEM_ADMINISTRATOR_DESCRIPTION = 'An active global assignment grants full system and document access. Scoped assignments use configured permissions.';
 
     public function displayName(string $language): string
@@ -38,11 +40,26 @@ class Role extends Model
 
     protected static function booted(): void
     {
+        static::creating(function (Role $role): void {
+            if ($role->isStandard() && $role->scope?->scope_key !== 'global') {
+                throw ValidationException::withMessages(['code' => 'rbacStandardRoleProtected']);
+            }
+        });
+        static::deleting(function (Role $role): void {
+            if ($role->isStandard()) {
+                throw ValidationException::withMessages(['role' => 'rbacStandardRoleProtected']);
+            }
+        });
         static::updating(function (Role $role): void {
             if ($role->isDirty(['code', 'scope_id'])) {
                 throw ValidationException::withMessages(['code' => 'rbacRoleIdentityImmutable']);
             }
         });
+    }
+
+    public function isStandard(): bool
+    {
+        return in_array($this->code, self::STANDARD_CODES, true);
     }
 
     public function save(array $options = []): bool
