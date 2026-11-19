@@ -41,16 +41,16 @@ describe('Organization structure maintenance', () => {
         expect(fetch.mock.calls.at(-1)[0]).toContain('company_id=1');
         await button(wrapper, 'Departments').trigger('click'); await flushPromises();
         expect(fetch.mock.calls.at(-1)[0]).toContain('site_id=2');
-        await button(wrapper, 'Create record').trigger('click'); await flushPromises();
+        await button(wrapper, 'Add department').trigger('click'); await flushPromises();
         expect(document.activeElement).toBe(wrapper.get('input[name="org-code"]').element);
         expect(wrapper.get('input[type="checkbox"]').element.checked).toBe(false);
-        await wrapper.get('form').trigger('submit'); await flushPromises();
+        await wrapper.get('[role="dialog"] form').trigger('submit'); await flushPromises();
         expect(wrapper.get('[aria-invalid="true"]').attributes('name')).toBe('org-code');
         expect(fetch.mock.calls.some(([, options]) => options.method && options.method !== 'GET')).toBe(false);
         await wrapper.get('input[name="org-code"]').setValue('NEW');
         await wrapper.get('input[name="org-name-en"]').setValue('New department');
         await wrapper.get('input[name="org-name-lo"]').setValue('ພະແນກໃໝ່');
-        await wrapper.get('form').trigger('submit'); await flushPromises();
+        await wrapper.get('[role="dialog"] form').trigger('submit'); await flushPromises();
         const [url, options] = fetch.mock.calls.find(([, options]) => options.method === 'POST');
         expect(url).toBe('/api/v1/organization/departments');
         expect(JSON.parse(options.body)).toMatchObject({ code: 'NEW', company_id: 1, site_id: 2, active: false });
@@ -62,12 +62,34 @@ describe('Organization structure maintenance', () => {
         await button(wrapper, 'Edit').trigger('click'); await flushPromises();
         expect(wrapper.get('input[name="org-code"]').element.readOnly).toBe(true);
         await wrapper.get('input[name="org-name-en"]').setValue('Renamed company');
-        await wrapper.get('form').trigger('submit'); await flushPromises();
+        await wrapper.get('[role="dialog"] form').trigger('submit'); await flushPromises();
         const [, options] = fetch.mock.calls.find(([, options]) => options.method === 'PATCH');
         expect(JSON.parse(options.body)).toEqual({ name_en: 'Renamed company', name_lo: company.name_lo, active: true });
         await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
-        expect(wrapper.text()).toContain('ໂຄງສ້າງອົງກອນ');
+        expect(wrapper.get('#org-heading').text()).toBe('ບໍລິສັດ');
         expect(wrapper.text()).not.toContain('org-');
+    });
+
+    it('searches across the selected organization’s pages by Lao name and clears the filter on navigation', async () => {
+        const matchingSite = { ...site, id: 3, name_lo: 'ໂຄງການພູເຂົາ', code: 'SECOND' };
+        const fetch = vi.fn(async url => {
+            const request = new URL(url, 'http://localhost');
+            if (request.pathname.endsWith('/companies')) { return reply({ data: [company], meta: { total: 1, last_page: 1 } }); }
+            const isSecondPage = request.searchParams.get('page') === '2';
+            return reply({ data: [isSecondPage ? matchingSite : site], meta: { total: 2, last_page: 2 } });
+        });
+        vi.stubGlobal('fetch', fetch);
+        const wrapper = render(); await flushPromises();
+        await button(wrapper, 'Sites').trigger('click'); await flushPromises();
+        expect(wrapper.get('#org-heading').text()).toBe('Sites');
+        await wrapper.get('input[type="search"]').setValue('ພູເຂົາ');
+        await wrapper.get('form').trigger('submit'); await flushPromises();
+        expect(wrapper.findAll('tbody tr')).toHaveLength(1);
+        expect(wrapper.get('tbody').text()).toContain('SECOND');
+        expect(fetch.mock.calls.at(-1)[0]).toContain('page=2&per_page=50&company_id=1');
+        await button(wrapper, 'Companies').trigger('click'); await flushPromises();
+        expect(wrapper.get('input[type="search"]').element.value).toBe('');
+        expect(wrapper.get('tbody').text()).toContain('SYNTHETIC');
     });
 
     it('clears records and emits unauthorized when server authority is revoked', async () => {

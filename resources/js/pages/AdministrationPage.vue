@@ -24,18 +24,6 @@ import ApprovalWorkflows from '../components/ApprovalWorkflows.vue';
 import { showSuccess } from '../utilities/alerts.js';
 import { useLocalization } from '../localization/index.js';
 import { createJsonClient } from '../utilities/jsonClient.js';
-import { Icon } from '@iconify/vue';
-import buildingIcon from '@iconify-icons/flowbite/building-outline';
-import usersGroupIcon from '@iconify-icons/flowbite/users-group-outline';
-import userSettingsIcon from '@iconify-icons/flowbite/user-settings-outline';
-import filePenIcon from '@iconify-icons/flowbite/file-pen-outline';
-import listIcon from '@iconify-icons/flowbite/list-outline';
-import lockIcon from '@iconify-icons/flowbite/lock-outline';
-import bookIcon from '@iconify-icons/flowbite/book-open-outline';
-import clipboardCheckIcon from '@iconify-icons/flowbite/clipboard-check-outline';
-import clockArrowIcon from '@iconify-icons/flowbite/clock-arrow-outline';
-import shieldCheckIcon from '@iconify-icons/flowbite/shield-check-outline';
-
 const props = defineProps({ endpoints: { type: Object, required: true }, csrfToken: { type: String, required: true } });
 const { t, language } = useLocalization();
 const request = createJsonClient(props.csrfToken);
@@ -49,36 +37,43 @@ const selected = computed(() => contexts.value.find(scope => scope.scope_key ===
 const can = permission => selected.value?.permissions.includes(permission) ?? false;
 const canManageUsers = computed(() => canManageOrganization.value && contexts.value.some(scope => scope.scope_type === 'global' && scope.permissions.includes('users.manage')));
 const sections = computed(() => [
-    { key: 'organization', label: 'orgTitle', icon: buildingIcon, available: !!props.endpoints.organization && canManageOrganization.value && selected.value?.scope_type === 'global' },
-    { key: 'users', label: 'userManagementTitle', icon: userSettingsIcon, available: !!props.endpoints.userManagement && canManageUsers.value },
-    { key: 'people', label: 'adminMemberships', icon: usersGroupIcon, available: can('memberships.view') },
-    { key: 'roles', label: 'adminRoles', icon: shieldCheckIcon, available: can('roles.view') || can('assignments.view') },
-    { key: 'documents', label: 'master-types', icon: filePenIcon, available: !!props.endpoints.masterData && selected.value?.scope_type !== 'global' && can('master-data.view') },
-    { key: 'categories', label: 'master-categories', icon: filePenIcon, available: !!props.endpoints.masterData && selected.value?.scope_type !== 'global' && can('master-data.view') },
-    { key: 'registers', label: 'master-registers', icon: filePenIcon, available: !!props.endpoints.masterData && selected.value?.scope_type !== 'global' && can('master-data.view') },
-    { key: 'numbering', label: 'adminNumbering', icon: listIcon, available: !!props.endpoints.numbering && selected.value?.scope_type !== 'global' && can('numbering.view') },
-    { key: 'approvalWorkflows', label: 'workflowTitle', icon: clipboardCheckIcon, available: !!props.endpoints.approvalWorkflows && selected.value?.scope_type !== 'global' && can('master-data.view') },
-    { key: 'templates', label: 'templateTitle', icon: bookIcon, available: !!props.endpoints.templates && selected.value?.scope_type === 'site' && selected.value?.can_access_templates === true && can('templates.view') },
-    { key: 'confidentiality', label: 'confidentialityTitle', icon: lockIcon, available: !!props.endpoints.confidentiality && selected.value?.can_manage_document_security === true },
-    { key: 'history', label: 'adminHistory', icon: clockArrowIcon, available: !!props.endpoints.history && can('security.audit.view') },
+    { key: 'users', group: 'access', label: 'userManagementTitle', available: !!props.endpoints.userManagement && canManageUsers.value },
+    { key: 'roles', group: 'access', label: 'adminRoles', available: can('roles.view') },
+    { key: 'people', group: 'access', label: 'adminMemberships', available: can('memberships.view') },
+    { key: 'organization', group: 'organization', label: 'orgTitle', available: !!props.endpoints.organization && canManageOrganization.value && selected.value?.scope_type === 'global' },
+    { key: 'documents', group: 'documents', label: 'master-types', available: !!props.endpoints.masterData && selected.value?.scope_type !== 'global' && can('master-data.view') },
+    { key: 'categories', group: 'documents', label: 'master-categories', available: !!props.endpoints.masterData && selected.value?.scope_type !== 'global' && can('master-data.view') },
+    { key: 'registers', group: 'documents', label: 'master-registers', available: !!props.endpoints.masterData && selected.value?.scope_type !== 'global' && can('master-data.view') },
+    { key: 'numbering', group: 'documents', label: 'adminNumbering', available: !!props.endpoints.numbering && selected.value?.scope_type !== 'global' && can('numbering.view') },
+    { key: 'approvalWorkflows', group: 'documents', label: 'workflowTitle', available: !!props.endpoints.approvalWorkflows && selected.value?.scope_type !== 'global' && can('master-data.view') },
+    { key: 'templates', group: 'documents', label: 'templateTitle', available: !!props.endpoints.templates && selected.value?.scope_type === 'site' && selected.value?.can_access_templates === true && can('templates.view') },
+    { key: 'assignments', group: 'security', label: 'adminAdvancedAssignments', available: can('assignments.view') },
+    { key: 'confidentiality', group: 'security', label: 'confidentialityTitle', available: !!props.endpoints.confidentiality && selected.value?.can_manage_document_security === true },
+    { key: 'history', group: 'security', label: 'adminHistory', available: !!props.endpoints.history && can('security.audit.view') },
 ].filter(item => item.available));
-const sectionGroup = key => ['users', 'people', 'roles'].includes(key) ? 'access'
-    : ['documents', 'categories', 'registers', 'numbering', 'approvalWorkflows', 'templates'].includes(key) ? 'documents'
-        : key === 'confidentiality' ? 'security' : key;
 const groups = computed(() => [
-    { key: 'overview', label: 'adminOverview', icon: listIcon },
-    { key: 'access', label: 'adminUsersAccess', icon: usersGroupIcon },
-    { key: 'organization', label: 'adminOrganization', icon: buildingIcon },
-    { key: 'documents', label: 'adminDocuments', icon: filePenIcon },
-    { key: 'security', label: 'adminSecurity', icon: lockIcon },
-    { key: 'history', label: 'adminHistory', icon: clockArrowIcon },
-].filter(item => item.key === 'overview' || sections.value.some(section => sectionGroup(section.key) === item.key)));
-const localSections = computed(() => sections.value.filter(item => sectionGroup(item.key) === group.value));
+    { key: 'overview', label: 'adminOverview' },
+    { key: 'access', label: 'adminUsersAccess' },
+    { key: 'organization', label: 'adminOrganization' },
+    { key: 'documents', label: 'adminDocuments' },
+    { key: 'security', label: 'adminSecurity' },
+].map(item => ({ ...item, sections: sections.value.filter(section => section.group === item.key) }))
+    .filter(item => item.key === 'overview' || item.sections.length));
+const localSections = computed(() => groups.value.find(item => item.key === group.value)?.sections ?? []);
 const masterKind = computed(() => ['categories', 'registers'].includes(section.value) ? section.value : 'types');
-function openSection(key) { section.value = key; group.value = sectionGroup(key); }
+const navigation = ref(null);
+function openSection(key) {
+    const item = sections.value.find(item => item.key === key);
+    section.value = item?.key ?? '';
+    group.value = item?.group ?? 'overview';
+}
 function openGroup(key) {
-    group.value = key;
-    section.value = key === 'overview' ? '' : sections.value.find(item => sectionGroup(item.key) === key)?.key ?? '';
+    openSection(groups.value.find(item => item.key === key)?.sections[0]?.key);
+}
+async function openShortcut(key) {
+    openSection(key);
+    await nextTick();
+    navigation.value?.querySelector('[aria-pressed="true"]')?.focus();
 }
 watch(sections, values => {
     if (section.value && !values.some(item => item.key === section.value)) { openGroup(groups.value.some(item => item.key === group.value) ? group.value : 'overview'); }
@@ -134,13 +129,13 @@ const scopeLabel = scope => scope.scope_type === 'global' ? t('rbacGlobal')
 const scopeOptions = computed(() => contexts.value.map(scope => ({ value: scope.scope_key, label: scopeLabel(scope) })));
 const roleRows = computed(() => roles.value.map(role => ({ ...role, display_name: label(role), display_scope: roleScopeLabel(role), status_key: role.active ? 'active' : 'inactive', status: t(role.active ? 'rbacActive' : 'rbacInactive') })));
 const roleColumns = computed(() => [
-    { key: 'display_name', label: t('rbacRole') }, { key: 'display_scope', label: t('rbacScope') },
-    { key: 'status', label: t('uiStatus') }, { key: 'actions', label: t('rbacActions') },
+    { key: 'display_name', label: t('rbacRoleName') }, { key: 'display_scope', label: t('adminScope') },
+    { key: 'status', label: t('uiStatus') }, { key: 'description', label: t('rbacDescription') }, { key: 'actions', label: t('rbacActions') },
 ]);
 const assignmentRows = computed(() => assignments.value.map(assignment => ({ ...assignment, user_name: assignment.user.name, role_name: label(assignment.role), status_key: assignment.active ? 'active' : 'inactive', status: t(assignment.active ? 'rbacActive' : 'rbacInactive') })));
 const assignmentColumns = computed(() => [
     { key: 'user_name', label: t('rbacAccount') }, { key: 'role_name', label: t('rbacRole') },
-    { key: 'scope_key', label: t('rbacScope') }, { key: 'status', label: t('uiStatus') }, { key: 'actions', label: t('rbacActions') },
+    { key: 'scope_key', label: t('adminScope') }, { key: 'status', label: t('uiStatus') }, { key: 'actions', label: t('rbacActions') },
 ]);
 const businessGroups = ['workspace', 'correspondence', 'controlled', 'document-tools', 'reports', 'administration', 'security'];
 const permissionGroups = computed(() => businessGroups.map(key => ({ key, permissions: permissions.value.filter(permission => permissionGroup(permission) === key) })).filter(group => group.permissions.length));
@@ -397,7 +392,7 @@ onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
 </script>
 
 <template>
-    <section class="flex flex-col gap-6" aria-labelledby="rbac-heading">
+    <section class="flex min-w-0 flex-col gap-4" aria-labelledby="rbac-heading">
         <h2 id="rbac-heading" class="sr-only">{{ t('administration') }}</h2>
 
         <p v-if="errorKey && !assignOpen && !editorOpen" role="alert" class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">{{ t(errorKey) }}</p>
@@ -409,40 +404,44 @@ onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
                     <div><p class="text-sm font-semibold text-teal-800">{{ t('adminContext') }}</p><p v-if="selected" class="mt-1 font-semibold wrap-anywhere" aria-live="polite">{{ t('rbacCurrentScope', { scope: scopeLabel(selected) }) }}</p></div>
                     <SelectInput v-model="selectedKey" :label="t('rbacScope')" :options="scopeOptions" :disabled="saving || confirmationOpen" />
                 </div>
-                <p class="mt-3 text-sm leading-6" :class="selected?.scope_type === 'global' ? 'rounded-lg bg-amber-50 p-3 font-medium text-amber-900' : 'text-slate-600'">{{ t(selected?.scope_type === 'global' ? 'rbacGlobalWarning' : 'rbacScopeNotice') }}</p>
+                <p v-if="selected?.scope_type === 'global' && ['roles', 'assignments'].includes(section)" class="mt-3 text-sm text-amber-900">{{ t('rbacGlobalWarning') }}</p>
                 <details class="mt-2 text-sm text-slate-600"><summary class="cursor-pointer font-medium">{{ t('rbacScopeGuide') }}</summary>
+                    <p class="mt-2">{{ t('rbacScopeNotice') }}</p>
                     <p class="mt-2 leading-6">{{ t('rbacInheritance') }}</p>
                     <dl class="mt-2 grid gap-2 sm:grid-cols-3"><div><dt class="font-semibold">{{ t('rbacGlobal') }}</dt><dd>{{ t('rbacScopeGlobalHelp') }}</dd></div><div><dt class="font-semibold">{{ t('company') }}</dt><dd>{{ t('rbacScopeCompanyHelp') }}</dd></div><div><dt class="font-semibold">{{ t('site') }}</dt><dd>{{ t('rbacScopeSiteHelp') }}</dd></div></dl>
                 </details>
             </div>
 
-            <nav :aria-label="t('administration')" data-admin-tabs class="-mx-1 overflow-x-auto px-1 pb-1 [scrollbar-width:thin]">
-                <div class="flex w-max gap-1 rounded-2xl border border-slate-200/80 bg-white/70 p-1.5 shadow-sm shadow-slate-900/5 backdrop-blur-md sm:w-auto sm:flex-wrap">
-                    <button v-for="item in groups" :key="item.key" type="button" :data-admin-tab="item.key" :title="t(item.label)" :aria-pressed="group === item.key" class="group inline-flex shrink-0 items-center gap-2 rounded-xl py-2 pr-3.5 pl-2 text-sm font-medium whitespace-nowrap transition-all duration-150 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600 motion-reduce:transition-none" :class="group === item.key ? 'bg-linear-to-br from-teal-600 to-sky-700 text-white shadow-md shadow-teal-700/25' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'" @click="openGroup(item.key)">
-                        <span aria-hidden="true" class="inline-flex size-7 items-center justify-center rounded-lg transition-colors" :class="group === item.key ? 'bg-white/20 text-white' : 'bg-slate-100 text-slate-500 group-hover:bg-white group-hover:text-teal-700'"><Icon :icon="item.icon" class="size-4" /></span>
-                        <span>{{ t(item.label) }}</span>
-                    </button>
-                </div>
+            <nav ref="navigation" :aria-label="t('administration')" data-admin-tabs class="flex flex-wrap gap-1 rounded-xl border border-slate-200 bg-white p-1.5">
+                <button v-for="item in groups" :key="item.key" type="button" :data-admin-tab="item.key" :aria-pressed="group === item.key"
+                    class="min-h-10 rounded-lg px-3 py-2 text-left text-sm font-semibold focus-visible:outline-2 focus-visible:outline-teal-700"
+                    :class="group === item.key ? 'bg-teal-700 text-white' : 'text-slate-700 hover:bg-slate-100'" @click="openGroup(item.key)">
+                    {{ t(item.label) }}
+                </button>
             </nav>
-            <section v-if="group === 'overview'" aria-labelledby="admin-overview-heading" class="flex flex-col gap-4">
-                <div><h3 id="admin-overview-heading" class="text-lg font-semibold">{{ t('adminOverview') }}</h3><p class="mt-1 text-sm text-slate-600">{{ t('adminOverviewHelp') }}</p></div>
+
+            <section v-if="group === 'overview'" aria-labelledby="admin-overview-heading" class="flex flex-col gap-3">
+                <h3 id="admin-overview-heading" class="text-lg font-semibold">{{ t('adminOverview') }}</h3>
                 <p v-if="canManageOrganization && selected?.scope_type !== 'global'" class="text-sm text-slate-600">{{ t('adminGlobalHelp') }}</p>
                 <p v-if="!sections.length" role="status" class="rounded-xl border border-slate-200 bg-white p-4 text-sm text-slate-600">{{ t('adminNoTasks') }}</p>
                 <p v-if="selected?.scope_type === 'site' && can('templates.view') && selected?.can_access_templates === false" role="status" class="text-sm text-slate-600">{{ t('adminTemplateScopeRestricted') }}</p>
-                <div class="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                    <button v-for="item in sections" :key="item.key" type="button" :data-admin-shortcut="item.key" class="flex items-start gap-3 rounded-xl border border-slate-200 bg-white p-4 text-left transition hover:border-teal-500 hover:bg-teal-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-teal-600" @click="openSection(item.key)">
-                        <Icon :icon="item.icon" class="mt-1 size-5 shrink-0 text-teal-700" aria-hidden="true" />
-                        <span><span class="block font-semibold">{{ t(item.label) }}</span><span class="mt-1 block text-sm text-slate-600">{{ t(`adminHelp-${sectionGroup(item.key)}`) }}</span></span>
-                    </button>
+                <div v-if="sections.length" class="grid gap-3 sm:grid-cols-2">
+                    <section v-for="item in groups.filter(item => item.sections.length)" :key="item.key" :aria-label="t(item.label)" class="rounded-xl border border-slate-200 bg-white p-3">
+                        <h4 class="px-2 pb-1 text-sm font-semibold">{{ t(item.label) }}</h4>
+                        <button v-for="task in item.sections" :key="task.key" type="button" :data-admin-shortcut="task.key"
+                            class="block min-h-9 w-full rounded-lg px-2 py-1.5 text-left text-sm text-teal-800 hover:bg-teal-50 focus-visible:outline-2 focus-visible:outline-teal-700" @click="openShortcut(task.key)">
+                            {{ t(task.label) }}
+                        </button>
+                    </section>
                 </div>
             </section>
-            <template v-if="group !== 'overview'">
-                <p v-if="group === 'access'" class="text-sm leading-6 text-slate-600">{{ t('adminAccessHelp') }}</p>
-                <p v-if="group === 'organization'" class="text-sm text-slate-600">{{ t('adminGlobalHelp') }}</p>
-                <nav v-if="localSections.length > 1" :aria-label="t('adminTaskNavigation')" class="flex flex-wrap gap-2 border-b border-slate-200 pb-3">
-                    <UiButton v-for="item in localSections" :key="item.key" :data-admin-task="item.key" :variant="section === item.key ? 'primary' : 'secondary'" :aria-pressed="section === item.key" @click="openSection(item.key)">{{ t(item.label) }}</UiButton>
-                </nav>
-            </template>
+            <nav v-else-if="localSections.length > 1" :aria-label="t('adminTaskNavigation')" class="flex flex-wrap gap-1 border-b border-slate-200 pb-2">
+                <button v-for="item in localSections" :key="item.key" type="button" :data-admin-task="item.key" :aria-pressed="section === item.key"
+                    class="min-h-9 rounded-lg px-3 py-1.5 text-left text-sm font-medium focus-visible:outline-2 focus-visible:outline-teal-700"
+                    :class="section === item.key ? 'bg-teal-50 text-teal-900 ring-1 ring-inset ring-teal-200' : 'text-slate-700 hover:bg-slate-100'" @click="openSection(item.key)">
+                    {{ t(item.label) }}
+                </button>
+            </nav>
             <OrganizationManagement v-if="section === 'organization' && canManageOrganization && selected?.scope_type === 'global'" :endpoint="endpoints.organization" :csrf-token="csrfToken" @saved="organizationSaved" @unauthorized="handleError" />
             <ConfidentialityAccess v-if="section === 'confidentiality' && selected?.can_manage_document_security" :key="selectedKey" :scope="selected" :endpoint="endpoints.confidentiality" :csrf-token="csrfToken" @unauthorized="handleError" />
             <AdministrationHistory v-if="section === 'history' && selected && can('security.audit.view')" :scope="selected" :endpoint="endpoints.history" :can-manage-organization="canManageOrganization" :csrf-token="csrfToken" @unauthorized="handleError" />
@@ -454,11 +453,12 @@ onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
             <ApprovalWorkflows v-if="section === 'approvalWorkflows' && selected && selected.scope_type !== 'global' && can('master-data.view')" :scope="selected" :endpoint="endpoints.approvalWorkflows" :csrf-token="csrfToken" @unauthorized="handleError" />
 
             <section v-show="section === 'roles'" v-if="can('roles.view')" class="flex flex-col gap-4" aria-labelledby="roles-heading">
-                <div class="flex flex-wrap items-center justify-between gap-3"><h3 id="roles-heading" class="font-semibold">{{ t('rbacRoles') }}</h3><UiButton v-if="can('roles.manage')" :disabled="loading || saving" @click="showRole()">{{ t('rbacCreateRole') }}</UiButton></div>
-                <p v-if="selected" data-roles-scope class="rounded-lg border border-teal-200 bg-teal-50 px-4 py-3 text-sm font-semibold text-teal-900">{{ t('rbacRolesScope', { scope: scopeLabel(selected) }) }}</p>
+                <div class="flex flex-wrap items-center justify-between gap-3"><h3 id="roles-heading" class="text-lg font-semibold">{{ t('adminRoles') }}</h3><UiButton v-if="can('roles.manage')" :disabled="loading || saving" @click="showRole()">{{ t('rbacCreateRole') }}</UiButton></div>
+                <p v-if="selected" data-roles-scope class="text-sm text-slate-600">{{ t('rbacRolesScope', { scope: scopeLabel(selected) }) }}</p>
                 <DataTable v-model:page="rolePage" :rows="roleRows" :columns="roleColumns" :caption="t('rbacRoles')" :loading="loading" server-side :total="roleTotal" :per-page="10" @change="changeRolePage">
                     <template #cell-status="{ row }"><StatusBadge :status="row.status_key" :label="row.status" /></template>
                     <template #cell-display_name="{ row }"><span class="font-semibold">{{ row.display_name }}</span></template>
+                    <template #cell-description="{ row }"><span class="line-clamp-2 max-w-96 text-slate-700 wrap-anywhere">{{ row.description || '—' }}</span></template>
                     <template #cell-actions="{ row }"><IconButton :action="row.editable ? 'edit' : 'view'" :label="t(row.editable ? 'rbacEdit' : 'rbacDetails')" :disabled="saving" @click="showRole(row)" /></template>
                 </DataTable>
             </section>
@@ -472,7 +472,7 @@ onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
                     <p v-else>{{ t('rbacOwnerScopeNoEdit') }}</p>
                 </div>
                 <div class="grid grid-cols-1 gap-5 sm:grid-cols-2">
-                    <div class="sm:col-span-2"><TextInput v-model="roleForm.code" name="role-code" :label="t('rbacCode')" :helper="t('rbacCodeHelp')" :readonly="!!editingRole || readOnly" :error-key="fieldError('code')" required maxlength="64" /></div>
+                    <div v-if="!editingRole" class="sm:col-span-2"><TextInput v-model="roleForm.code" name="role-code" :label="t('rbacCode')" :helper="t('rbacCodeHelp')" :readonly="!!editingRole || readOnly" :error-key="fieldError('code')" required maxlength="64" /></div>
                     <TextInput v-model="roleForm.name_en" name="role-name-en" :label="t('rbacNameEn')" :readonly="readOnly" :error-key="fieldError('name_en')" required lang="en" maxlength="255" />
                     <TextInput v-model="roleForm.name_lo" name="role-name-lo" :label="t('rbacNameLo')" :readonly="readOnly" :error-key="fieldError('name_lo')" required lang="lo" maxlength="255" />
                     <div class="sm:col-span-2"><TextareaInput v-model="roleForm.description" :label="t('rbacDescription')" :readonly="readOnly" maxlength="2000" /></div>
@@ -498,7 +498,7 @@ onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
                     <p v-if="recommendationApplied" role="status" class="text-sm text-teal-900">{{ t('rbacRecommendationApplied') }}</p>
                 </section>
                 <p v-if="roleForm.code === 'SECURITY_ADMINISTRATOR' || !roleForm.active" class="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm leading-7" role="status">{{ t(roleForm.code === 'SECURITY_ADMINISTRATOR' ? 'rbacWorkspaceAdministrator' : 'rbacWorkspaceInactive') }}</p>
-                <p class="text-sm text-slate-600">{{ t('rbacPermissionHelp') }}</p>
+                <h4 class="font-semibold">{{ t('rbacPermissions') }}</h4>
                 <details v-for="group in permissionGroups" :key="group.key" :open="group.key === 'workspace'" :data-permission-group="group.key" class="rounded-lg border border-slate-200 p-4">
                     <summary class="cursor-pointer text-sm font-semibold">{{ t(`rbacGroup-${group.key}`) }} <span class="font-normal text-slate-500">· {{ t('rbacPermissionCount', { selected: selectedPermissions(group.permissions), total: group.permissions.length }) }}</span></summary>
                     <fieldset class="mt-4 grid gap-4 sm:grid-cols-2" :disabled="securityReadOnly">
@@ -511,6 +511,7 @@ onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
                 </details>
                 <details data-permission-advanced class="rounded-lg border border-slate-200 p-4">
                     <summary class="cursor-pointer text-sm font-semibold">{{ t('rbacPermissionAdvanced') }}</summary>
+                    <p v-if="editingRole" class="mt-3 text-sm">{{ t('rbacCode') }} · <span class="font-mono">{{ roleForm.code }}</span></p>
                     <p class="mt-3 text-sm text-slate-600">{{ t('rbacPermissionAdvancedHelp') }}</p>
                     <div class="mt-3 overflow-x-auto"><table class="w-full text-left text-sm">
                         <caption class="sr-only">{{ t('rbacPermissionAdvanced') }}</caption>
@@ -530,15 +531,16 @@ onBeforeUnmount(() => { disposed = true; scopeController?.abort(); });
             </form>
             </FormModal>
 
-            <section v-show="section === 'roles'" v-if="can('assignments.view')" class="flex flex-col gap-4" aria-labelledby="assignments-heading">
-                <div class="flex flex-wrap items-center justify-between gap-3"><h3 id="assignments-heading" class="font-semibold">{{ t('rbacAssignments') }}</h3><UiButton v-if="can('assignments.manage') && can('users.view') && can('roles.view')" data-open-assign :disabled="loading || saving" @click="errorKey = ''; assignOpen = true">{{ t('rbacAssignRole') }}</UiButton></div>
+            <section v-if="section === 'assignments' && can('assignments.view')" class="flex flex-col gap-4" aria-labelledby="assignments-heading">
+                <div class="flex flex-wrap items-center justify-between gap-3"><h3 id="assignments-heading" class="text-lg font-semibold">{{ t('adminAdvancedAssignments') }}</h3><UiButton v-if="can('assignments.manage') && can('users.view') && can('roles.view')" data-open-assign :disabled="loading || saving" @click="errorKey = ''; assignOpen = true">{{ t('rbacAssignRole') }}</UiButton></div>
                 <DataTable v-model:page="assignmentPage" :rows="assignmentRows" :columns="assignmentColumns" :caption="t('rbacAssignments')" :loading="loading" server-side :total="assignmentTotal" :per-page="10" @change="changeAssignmentPage">
                     <template #cell-status="{ row }"><StatusBadge :status="row.status_key" :label="row.status" /></template>
+                    <template #cell-scope_key>{{ scopeLabel(selected) }}</template>
                     <template #cell-actions="{ row }"><IconButton v-if="can('assignments.manage') && row.active && row.revocable" action="delete" :label="t('rbacRevoke')" :disabled="saving" @click="prepareRevoke(row)" /></template>
                 </DataTable>
             </section>
 
-            <FormModal v-if="assignOpen && section === 'roles' && can('assignments.manage') && can('users.view') && can('roles.view')" :title="t('rbacAssignRole')" :subtitle="t('rbacEligibleNotice')" :busy="saving" @close="assignOpen = false">
+            <FormModal v-if="assignOpen && section === 'assignments' && can('assignments.manage') && can('users.view') && can('roles.view')" :title="t('rbacAssignRole')" :subtitle="t('rbacEligibleNotice')" :busy="saving" @close="assignOpen = false">
             <section class="flex flex-col gap-5" aria-labelledby="grant-heading">
                 <h4 id="grant-heading" class="sr-only">{{ t('rbacAssignRole') }}</h4>
                 <p v-if="errorKey" role="alert" class="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">{{ t(errorKey) }}</p>

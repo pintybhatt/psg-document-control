@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
 import UiButton from './ui/UiButton.vue';
 import StatusBadge from './ui/StatusBadge.vue';
 import IconButton from './ui/IconButton.vue';
@@ -22,8 +22,8 @@ const lastPage = ref(1);
 const loading = ref(false);
 const saving = ref(false);
 const editing = ref(null);
+const editor = ref(null);
 const error = ref('');
-const saved = ref(false);
 const fields = ref({});
 const form = reactive({ name: '', email: '', preferred_language: 'en', password: '', password_confirmation: '', active: true });
 const accessForm = reactive({ company_id: '', site_id: '', department_id: '', role_id: '', confirm_regrant: false });
@@ -43,16 +43,28 @@ const pending = ref(null);
 const confirming = ref(false);
 const accessEnabled = computed(() => !!props.accessEndpoints.units && editing.value?.id !== props.currentUserId);
 const label = record => record?.[language.value === 'lo' ? 'name_lo' : 'name_en'] ?? '';
-const options = (rows, optionLabel = label) => [{ value: '', label: t('uiChoose') }, ...rows.map(row => ({ value: row.id, label: optionLabel(row) }))];
+const options = (rows, placeholder, optionLabel = label) => [{ value: '', label: t(placeholder) }, ...rows.map(row => ({ value: row.id, label: optionLabel(row) }))];
 const siteOptions = computed(() => {
-    const [placeholder, ...siteChoices] = options(sites.value);
+    const [placeholder, ...siteChoices] = options(sites.value, 'userAccessChooseScope');
     return [placeholder, { value: companyOnly, label: t('userAccessCompanyOnly') }, ...siteChoices];
 });
-const roleOptions = computed(() => options(eligibleRoles.value, role => {
+const roleOptions = computed(() => options(eligibleRoles.value, 'userAccessChooseRole', role => {
     const scope = role.scope_key === 'global' ? 'rbacGlobal' : role.scope_key.startsWith('company:') ? 'userAccessCompany' : 'userAccessSite';
     return `${label(role)} · ${t(scope)}`;
 }));
-const accessLabel = row => [label(row.company), label(row.site), label(row.department), label(row.role), row.scope_key].filter(Boolean).join(' · ');
+const selectedRole = computed(() => eligibleRoles.value.find(role => String(role.id) === String(accessForm.role_id)));
+const accessLocation = row => row.scope_key === 'global' ? t('rbacGlobal') : [label(row.company), label(row.site), label(row.department)].filter(Boolean).join(' / ');
+const accessLabel = row => [label(row.role), accessLocation(row)].filter(Boolean).join(' · ');
+const validationKeys = {
+    'The name field is required.': 'rbacRequired',
+    'The email field is required.': 'rbacRequired',
+    'The password field is required.': 'rbacRequired',
+    'The email field must be a valid email address.': 'userEmailInvalid',
+    'The email has already been taken.': 'userEmailTaken',
+    'The password field must be at least 8 characters.': 'userPasswordMin',
+    'The password field confirmation does not match.': 'profilePasswordMismatch',
+    'Password must be no more than 72 bytes and contain no null bytes.': 'userPasswordInvalid',
+};
 let editorController;
 let siteController;
 let scopeController;
@@ -63,8 +75,9 @@ watch(() => accessForm.department_id, () => {
 
 function handleError(exception) {
     if (exception.name === 'AbortError') { return; }
-    fields.value = exception.fields ?? {};
-    error.value = t(Object.values(fields.value).flat()[0] ?? exception.message ?? 'userRequestFailed');
+    fields.value = Object.fromEntries(Object.entries(exception.fields ?? {}).map(([field, messages]) =>
+        [field, messages.map(message => Object.hasOwn(validationKeys, message) ? validationKeys[message] : message)]));
+    error.value = Object.values(fields.value).flat()[0] ?? exception.message ?? 'userRequestFailed';
     if ([401, 403, 419].includes(exception.status)) {
         editorController?.abort(); siteController?.abort(); scopeController?.abort();
         existingAccess.value = { memberships: [], assignments: [] };
@@ -156,7 +169,6 @@ async function open(user = null) {
     accessLoading.value = false; Object.assign(loadingOptions, { companies: false, sites: false, scope: false }); pending.value = null; confirming.value = false;
     Object.assign(form, { name: user?.name ?? '', email: user?.email ?? '', preferred_language: user?.preferred_language ?? 'en', password: '', password_confirmation: '', active: user?.active ?? true });
     fields.value = {};
-    saved.value = false;
     error.value = '';
     if (!props.accessEndpoints.units) { return; }
     loadingOptions.companies = true;
@@ -187,11 +199,13 @@ async function save() {
     try {
         await request(updating ? `${props.endpoint}/${editing.value.id}` : props.endpoint, { method: updating ? 'PATCH' : 'POST', body });
         editing.value = null;
-        saved.value = true;
         showSuccess(t('uiSaveSuccess'), t('userSaved'));
         await load();
     } catch (exception) {
         handleError(exception);
+        await nextTick();
+        const invalidField = editor.value?.querySelector('[aria-invalid="true"]');
+        (invalidField ?? editor.value?.querySelector('[data-user-error]'))?.focus();
     } finally { saving.value = false; }
 }
 
@@ -225,14 +239,14 @@ onBeforeUnmount(() => { editorController?.abort(); siteController?.abort(); scop
 <template>
     <section class="flex flex-col gap-4" aria-labelledby="users-heading">
         <div class="flex flex-wrap items-center justify-between gap-3">
-            <h3 id="users-heading" class="font-semibold">{{ t('userManagementTitle') }}</h3>
+            <h3 id="users-heading" class="text-lg font-semibold">{{ t('userManagementTitle') }}</h3>
             <UiButton :disabled="saving" @click="open()">{{ t('userCreate') }}</UiButton>
         </div>
         <form class="flex flex-wrap items-end gap-3" @submit.prevent="page = 1; load()">
-            <TextInput v-model="search" :label="t('userSearch')" />
+            <TextInput v-model="search" type="search" :label="t('userSearch')" :placeholder="t('userSearchPlaceholder')" />
             <UiButton type="submit" variant="secondary" :loading="loading">{{ t('userFind') }}</UiButton>
         </form>
-        <p v-if="error && !editing" role="alert" class="text-sm text-red-700">{{ error }}</p>
+        <p v-if="error && !editing" role="alert" class="text-sm text-red-700">{{ t(error) }}</p>
         <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white">
             <table class="w-full text-left text-sm">
                 <thead class="bg-slate-50"><tr><th class="p-3">{{ t('userName') }}</th><th class="p-3">{{ t('userEmail') }}</th><th class="p-3">{{ t('uiStatus') }}</th><th class="p-3">{{ t('rbacActions') }}</th></tr></thead>
@@ -242,44 +256,53 @@ onBeforeUnmount(() => { editorController?.abort(); siteController?.abort(); scop
         </div>
         <div class="flex items-center gap-3"><UiButton variant="secondary" :disabled="page <= 1 || loading" @click="changePage(-1)">{{ t('userPrevious') }}</UiButton><span class="text-sm">{{ page }} / {{ lastPage }}</span><UiButton variant="secondary" :disabled="page >= lastPage || loading" @click="changePage(1)">{{ t('userNext') }}</UiButton></div>
         <FormModal v-if="editing" :title="t(editing.id === null ? 'userCreate' : 'userEdit')" :subtitle="editing.id === null ? '' : editing.email" :busy="saving" @close="closeEditor">
-        <form @submit.prevent="save">
-            <p v-if="error" role="alert" class="mb-4 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800">{{ error }}</p>
-            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <TextInput v-model="form.name" :label="t('userName')" required maxlength="255" :error="fields.name?.[0]" />
-                <TextInput v-model="form.email" :label="t('userEmail')" type="email" required maxlength="255" :error="fields.email?.[0]" />
+        <form ref="editor" @submit.prevent="save">
+            <p v-if="error" data-user-error role="alert" tabindex="-1" class="mb-3 rounded-lg bg-red-50 p-3 text-sm text-red-800">{{ t(error) }}</p>
+            <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <TextInput v-model="form.name" :label="t('userName')" required maxlength="255" :error-key="fields.name?.[0]" />
+                <TextInput v-model="form.email" :label="t('userEmail')" type="email" required maxlength="255" :error-key="fields.email?.[0]" />
                 <div :class="{ 'sm:col-span-2': editing.id === null || editing.id === currentUserId }"><SelectInput v-model="form.preferred_language" :label="t('userLanguage')" :options="[{ value: 'en', label: 'English' }, { value: 'lo', label: 'ລາວ' }]" /></div>
                 <div v-if="editing.id !== null && editing.id !== currentUserId" class="flex items-end"><div class="w-full rounded-xl border border-slate-200 bg-slate-50 px-4 py-2.5"><CheckboxInput v-model="form.active" :label="t('userActive')" /></div></div>
-                <TextInput v-model="form.password" type="password" autocomplete="new-password" :label="t(editing.id === null ? 'userInitialPassword' : 'userResetPassword')" :required="editing.id === null" :error="fields.password?.[0]" />
+                <TextInput v-model="form.password" type="password" autocomplete="new-password" :label="t(editing.id === null ? 'userInitialPassword' : 'userResetPassword')" :required="editing.id === null" :error-key="fields.password?.[0]" />
                 <TextInput v-model="form.password_confirmation" type="password" autocomplete="new-password" :label="t('userConfirmPassword')" :required="editing.id === null || !!form.password" />
+                <p class="text-xs text-slate-600 sm:col-span-2">{{ t('userPasswordHelp') }}</p>
             </div>
-            <fieldset v-if="accessEnabled" :disabled="saving || optionsLoading || accessLoading" class="mt-5 grid grid-cols-1 gap-4 rounded-xl border border-slate-200 bg-slate-50/60 p-4 sm:grid-cols-2">
-                <legend class="px-2 font-semibold">{{ t('userAccessAdd') }}</legend>
-                <p class="text-sm text-slate-600 sm:col-span-2">{{ t('userAccessHelp') }}</p>
-                <SelectInput v-model="accessForm.company_id" :label="t('userAccessCompany')" :options="options(companies)" :error-key="fields['access.company_id']?.[0]" />
-                <SelectInput v-model="accessForm.site_id" :label="t('userAccessSite')" :options="siteOptions" :disabled="!accessForm.company_id" :required="!!accessForm.company_id" :error-key="fields['access.site_id']?.[0]" />
-                <SelectInput v-model="accessForm.department_id" :label="t('userAccessDepartment')" :options="options(departments)" :disabled="!hasSite" :error-key="fields['access.department_id']?.[0]" />
-                <SelectInput v-model="accessForm.role_id" :label="t('userAccessRole')" :options="roleOptions" :disabled="!eligibleRoles.length" :required="!!accessForm.company_id" :error-key="fields['access.role_id']?.[0]" />
-                <p v-if="roles && !eligibleRoles.length" role="status" class="text-sm text-slate-600 sm:col-span-2">{{ t('userAccessNoRoles') }}</p>
-                <div v-if="editing.id !== null && accessForm.company_id" class="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 sm:col-span-2"><CheckboxInput v-model="accessForm.confirm_regrant" :label="t('membershipConfirmRegrant')" /></div>
-            </fieldset>
-            <p v-if="optionsLoading || accessLoading" role="status" class="mt-3 text-sm">{{ t('uiLoading') }}</p>
-            <section v-if="editing.id !== null && accessEndpoints.units" class="mt-5 flex flex-col gap-3" :aria-label="t('userAccessCurrent')">
+            <section v-if="editing.id !== null && accessEndpoints.units" class="mt-4 rounded-xl border border-slate-200 bg-white p-3" :aria-label="t('userAccessCurrent')">
                 <h4 class="font-semibold">{{ t('userAccessCurrent') }}</h4>
-                <p class="text-sm text-slate-600">{{ t('userAccessExistingHelp') }}</p>
-                <div v-for="kind in ['memberships', 'assignments']" :key="kind">
-                    <h5 class="text-sm font-semibold">{{ t(kind === 'memberships' ? 'membershipTitle' : 'rbacAssignments') }}</h5>
-                    <p v-if="!accessLoading && !existingAccess[kind].length" class="text-sm">{{ t('userAccessNone') }}</p>
-                    <ul class="flex flex-col gap-2"><li v-for="row in existingAccess[kind]" :key="row.id" class="flex flex-wrap items-center justify-between gap-2 text-sm">
-                        <span>{{ accessLabel(row) }} · {{ t(row.effective ? 'rbacActive' : 'rbacInactive') }}</span>
-                        <IconButton v-if="row.revoke_url" action="delete" :label="t(kind === 'memberships' ? 'membershipRevoke' : 'rbacRevoke')" :disabled="saving || accessLoading" @click="confirmRevoke(row, kind)" />
-                    </li></ul>
+                <div class="mt-2 grid gap-3 sm:grid-cols-2">
+                    <div v-for="kind in ['memberships', 'assignments']" :key="kind" class="min-w-0">
+                        <h5 class="text-sm font-medium text-slate-600">{{ t(kind === 'memberships' ? 'membershipTitle' : 'userAccessAssignedRoles') }}</h5>
+                        <p v-if="!accessLoading && !existingAccess[kind].length" class="mt-1 text-sm text-slate-600">{{ t('userAccessNone') }}</p>
+                        <ul v-else class="divide-y divide-slate-100">
+                            <li v-for="row in existingAccess[kind]" :key="row.id" class="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+                                <div class="min-w-0 wrap-anywhere">
+                                    <p class="font-medium">{{ kind === 'memberships' ? accessLocation(row) : label(row.role) }}</p>
+                                    <p v-if="kind === 'assignments'" class="text-xs text-slate-600">{{ accessLocation(row) }}</p>
+                                </div>
+                                <div class="flex items-center gap-2">
+                                    <StatusBadge :status="row.effective ? 'active' : 'inactive'" :label="t(row.effective ? 'rbacActive' : 'rbacInactive')" />
+                                    <IconButton v-if="row.revoke_url" action="delete" :label="t(kind === 'memberships' ? 'membershipRevoke' : 'rbacRevoke')" :aria-label="`${t(kind === 'memberships' ? 'membershipRevoke' : 'rbacRevoke')} · ${accessLabel(row)}`" :disabled="saving || accessLoading" @click="confirmRevoke(row, kind)" />
+                                </div>
+                            </li>
+                        </ul>
+                    </div>
                 </div>
             </section>
-            <p class="my-3 text-xs text-slate-600">{{ t('userPasswordHelp') }}</p>
-            <div class="flex flex-wrap justify-end gap-3 border-t border-slate-200 pt-4"><UiButton variant="secondary" :disabled="saving" @click="closeEditor">{{ t('uiCancel') }}</UiButton><UiButton type="submit" :loading="saving" :disabled="optionsLoading || accessLoading || (!!accessForm.company_id && !eligibleRoles.length)">{{ t('userSave') }}</UiButton></div>
+            <fieldset v-if="accessEnabled" :disabled="saving || optionsLoading || accessLoading" class="mt-4 grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-white p-3 sm:grid-cols-2">
+                <legend class="px-2 font-semibold">{{ t('userAccessAdd') }}</legend>
+                <p class="text-sm text-slate-600 sm:col-span-2">{{ t('userAccessHelp') }}</p>
+                <SelectInput v-model="accessForm.company_id" :label="t('userAccessCompany')" :options="options(companies, 'userAccessChooseCompany')" :error-key="fields['access.company_id']?.[0]" />
+                <SelectInput v-model="accessForm.site_id" :label="t('userAccessScope')" :options="siteOptions" :disabled="!accessForm.company_id" :required="!!accessForm.company_id" :error-key="fields['access.site_id']?.[0]" />
+                <SelectInput v-model="accessForm.department_id" :label="t('userAccessDepartment')" :options="options(departments, 'userAccessNoDepartment')" :disabled="!hasSite" :error-key="fields['access.department_id']?.[0]" />
+                <SelectInput v-model="accessForm.role_id" :label="t('userAccessRole')" :options="roleOptions" :disabled="!eligibleRoles.length" :required="!!accessForm.company_id" :error-key="fields['access.role_id']?.[0]" />
+                <p v-if="selectedRole?.description" class="line-clamp-2 text-sm text-slate-600 sm:col-span-2">{{ selectedRole.description }}</p>
+                <p v-if="roles && !eligibleRoles.length" role="status" class="text-sm text-slate-600 sm:col-span-2">{{ t('userAccessNoRoles') }}</p>
+                <div v-if="editing.id !== null && accessForm.company_id" class="sm:col-span-2"><CheckboxInput v-model="accessForm.confirm_regrant" :label="t('userAccessConfirmRegrant')" /></div>
+            </fieldset>
+            <p v-if="optionsLoading || accessLoading" role="status" class="mt-3 text-sm">{{ t('uiLoading') }}</p>
+            <div class="sticky -bottom-5 -mx-6 -mb-5 mt-4 flex flex-wrap justify-end gap-2 border-t border-slate-200 bg-white px-6 py-3"><UiButton variant="secondary" :disabled="saving" @click="closeEditor">{{ t('uiCancel') }}</UiButton><UiButton type="submit" :loading="saving" :disabled="optionsLoading || accessLoading || (!!accessForm.company_id && !eligibleRoles.length)">{{ t('userSave') }}</UiButton></div>
         </form>
         </FormModal>
-        <p class="text-sm text-slate-600">{{ t('userMembershipHelp') }}</p>
         <ConfirmDialog v-if="pending" v-model="confirming" danger :title="t(pending.kind === 'memberships' ? 'membershipRevoke' : 'rbacRevoke')" :message="`${t('userAccessRevokeConfirm')} ${accessLabel(pending)}`" :loading="saving" @confirm="revokeAccess" />
     </section>
 </template>
