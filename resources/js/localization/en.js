@@ -871,7 +871,7 @@ export default {
     rbacRequired: 'This field is required.',
     rbacConfirmGlobal: 'Explicit confirmation is required for a group-wide assignment.',
     login: 'Sign in',
-    authWelcome: 'A secure workspace for your organization’s document control.',
+    authWelcome: 'Manage incoming, outgoing, and controlled documents in one place.',
     authInstructions: 'Sign in with the account provided by your organization.',
     authEmail: 'Email address',
     authPassword: 'Password',

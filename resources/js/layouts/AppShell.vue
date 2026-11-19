@@ -75,11 +75,10 @@ function closeNavigation() {
                     <span :class="{ 'sr-only': sidebarCollapsed }">{{ t(item.key) }}</span>
                 </a>
             </nav>
-            <div v-if="!sidebarCollapsed" aria-hidden="true" data-sidebar-illustration class="mt-auto p-4">
-                <div class="relative flex h-40 items-center justify-center overflow-hidden rounded-3xl border border-white/10 bg-white/5 shadow-2xl shadow-black/20 ring-1 ring-white/5 backdrop-blur-xl">
-                    <div class="absolute size-32 rounded-full bg-teal-400/20 blur-2xl"></div>
-                    <Icon :icon="documentBackIcon" class="absolute size-24 translate-x-5 -translate-y-2 rotate-12 text-sky-300/30" />
-                    <Icon :icon="documentIcon" class="relative size-24 -rotate-6 text-teal-300/80 drop-shadow-[0_8px_16px_rgb(20_184_166/0.35)]" />
+            <div v-if="!sidebarCollapsed" aria-hidden="true" data-sidebar-illustration class="mt-auto px-5 pt-2 pb-5">
+                <div class="relative flex h-24 items-center justify-center rounded-xl border border-teal-200/10 bg-teal-950/30">
+                    <Icon :icon="documentBackIcon" class="absolute size-14 translate-x-2.5 -translate-y-1 rotate-6 text-teal-300/30" />
+                    <Icon :icon="documentIcon" class="relative size-14 -rotate-3 text-teal-300/70" />
                 </div>
             </div>
         </aside>
