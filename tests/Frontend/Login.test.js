@@ -57,6 +57,18 @@ describe('bilingual browser login', () => {
         expect(wrapper.get('button[type="submit"]').text()).toBe('ເຂົ້າສູ່ລະບົບ');
     });
 
+    it('renders one decorative sign-in icon in English and Lao', async () => {
+        const wrapper = renderLogin();
+        const submit = wrapper.get('button[type="submit"]');
+
+        expect(submit.text()).toBe('Sign in');
+        expect(submit.findAll('svg')).toHaveLength(1);
+        await wrapper.get('[data-language-switcher] input[value="lo"]').setValue(true);
+        expect(submit.text()).toBe('ເຂົ້າສູ່ລະບົບ');
+        expect(submit.findAll('svg')).toHaveLength(1);
+        expect(submit.get('svg').attributes('aria-hidden')).toBe('true');
+    });
+
     it('rejects malformed email input and allows a valid native submission without storing the password', async () => {
         const wrapper = renderLogin();
         await wrapper.get('input[name="email"]').setValue('invalid');
@@ -73,6 +85,7 @@ describe('bilingual browser login', () => {
         expect(wrapper.findAll('[role="alert"]')).toHaveLength(0);
         expect(wrapper.get('button[type="submit"]').attributes('aria-busy')).toBe('true');
         expect(wrapper.get('button[type="submit"]').element.disabled).toBe(true);
+        expect(wrapper.get('button[type="submit"]').find('svg').exists()).toBe(false);
         expect(Object.values(localStorage)).not.toContain('Test-only secret 123');
     });
 
