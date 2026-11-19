@@ -18,6 +18,7 @@ use App\Models\Site;
 use App\Models\User;
 use App\Models\UserRoleAssignment;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Validation\ValidationException;
 use PHPUnit\Framework\Attributes\TestWith;
 use Tests\Concerns\InteractsWithRbac;
 use Tests\TestCase;
@@ -106,7 +107,7 @@ class RoleRecommendationsTest extends TestCase
     public function test_recommendations_can_be_manually_adjusted_and_saved_through_the_existing_role_api(string $code): void
     {
         $this->administrator();
-        $role = Role::query()->where('code', $code)->sole();
+        $role = Role::factory()->create(['scope_id' => AuthorizationScope::context('global')->id]);
         $keys = array_values(array_diff([...$this->recommendation($code), 'incoming.operations.reopen'], ['reports.view']));
         $this->patchJson('/api/v1/roles/'.$role->id, $this->roleData($role, $keys))->assertOk();
         $this->assertEqualsCanonicalizing($keys, $role->permissions()->pluck('key')->all());
@@ -130,8 +131,8 @@ class RoleRecommendationsTest extends TestCase
         $this->administrator();
         $site = Site::factory()->create();
         $scope = AuthorizationScope::context('site', $site->company_id, $site->id);
-        $role = Role::query()->where('code', 'DOCUMENT_CONTROLLER')->sole();
-        $keys = $this->recommendation($role->code);
+        $role = Role::factory()->create(['scope_id' => AuthorizationScope::context('global')->id]);
+        $keys = $this->recommendation('DOCUMENT_CONTROLLER');
         $this->patchJson('/api/v1/roles/'.$role->id, array_replace($this->roleData($role, $keys), $this->scopeData($scope)))->assertForbidden();
         $this->assertSame(0, $role->permissions()->count());
         $actor = User::factory()->create();
@@ -146,7 +147,7 @@ class RoleRecommendationsTest extends TestCase
     {
         $this->administrator();
         Permission::query()->where('key', 'documents.attachments.download')->sole()->update(['active' => false]);
-        $role = Role::query()->where('code', 'VIEWER')->sole();
+        $role = Role::factory()->create(['scope_id' => AuthorizationScope::context('global')->id]);
         $response = $this->getJson('/api/v1/permissions?scope_type=global')->assertOk();
         $entry = collect($response->json('data'))->firstWhere('key', 'documents.attachments.download');
         $this->assertFalse($entry['available']);
@@ -155,29 +156,42 @@ class RoleRecommendationsTest extends TestCase
         $this->assertSame(0, $role->permissions()->count());
     }
 
-    public function test_standard_role_creation_uses_existing_validation_and_creates_no_assignment(): void
+    #[TestWith(['SECURITY_ADMINISTRATOR'])]
+    #[TestWith(['DOCUMENT_CONTROLLER'])]
+    #[TestWith(['DEPARTMENT_USER'])]
+    #[TestWith(['VIEWER'])]
+    public function test_standard_roles_are_global_and_protected_from_edits_duplicates_and_deletion(string $code): void
     {
         $this->administrator();
-        $keys = $this->recommendation('VIEWER');
-        $role = Role::query()->where('code', 'VIEWER')->sole();
-        $data = $this->roleData($role, $keys) + ['code' => 'VIEWER'];
-        $this->postJson('/api/v1/roles', $data)->assertUnprocessable()->assertJsonValidationErrors('code');
-        $this->assertSame(0, $role->permissions()->count());
-        $role->delete();
-        $id = $this->postJson('/api/v1/roles', $data)->assertCreated()->json('data.id');
-        $this->assertEqualsCanonicalizing($keys, Role::query()->findOrFail($id)->permissions()->pluck('key')->all());
-        $this->assertDatabaseCount('user_role_assignments', 1);
-        $this->assertDatabaseCount('organization_memberships', 0);
+        $role = Role::query()->where('code', $code)->sole();
+        $defaults = PermissionCatalog::standardRoleDefaults($code);
+        $this->assertEqualsCanonicalizing($defaults, $role->permissions()->pluck('key')->all());
+        $site = Site::factory()->create();
+        $scope = AuthorizationScope::context('site', $site->company_id, $site->id);
+        $this->getJson($this->scopedUrl('roles', $scope))->assertOk()
+            ->assertJsonFragment(['code' => $code, 'scope_key' => 'global', 'standard' => true, 'editable' => false]);
+        $this->patchJson('/api/v1/roles/'.$role->id, $this->roleData($role, []))->assertForbidden();
+        $this->postJson('/api/v1/roles', array_replace($this->roleData($role, []) + ['code' => $code], $this->scopeData($scope)))
+            ->assertUnprocessable()->assertJsonValidationErrors('code');
+
+        try {
+            $role->delete();
+            $this->fail('Standard role deletion succeeded.');
+        } catch (ValidationException $exception) {
+            $this->assertSame(['rbacStandardRoleProtected'], $exception->errors()['role']);
+        }
+        $this->assertModelExists($role);
+        $this->assertDatabaseCount('roles', 4);
+        $this->assertEqualsCanonicalizing($defaults, $role->permissions()->pluck('key')->all());
     }
 
     #[TestWith(['DOCUMENT_CONTROLLER'])]
     #[TestWith(['DEPARTMENT_USER'])]
     #[TestWith(['VIEWER'])]
-    public function test_operational_recommendations_preserve_membership_and_confidentiality_enforcement(string $code): void
+    public function test_operational_defaults_preserve_membership_and_confidentiality_enforcement(string $code): void
     {
         $actor = $this->administrator();
         $role = Role::query()->where('code', $code)->sole();
-        $this->patchJson('/api/v1/roles/'.$role->id, $this->roleData($role, $this->recommendation($code)))->assertOk();
         $site = Site::factory()->create();
         $reader = User::factory()->create();
         OrganizationMembership::factory()->for($reader)->atSite($site)->create();
@@ -190,6 +204,13 @@ class RoleRecommendationsTest extends TestCase
         }
         $foreign = DocumentSecurityProfile::factory()->create();
         $this->assertFalse(app(DocumentAccess::class)->allows($reader, DocumentSecurityDescriptor::fromProfile($foreign), DocumentOperation::Metadata));
+        if ($code === 'VIEWER') {
+            $this->signIn($reader);
+            $scope = ['company_id' => $site->company_id, 'site_id' => $site->id];
+            $this->getJson('/api/v1/incoming-correspondence?'.http_build_query($scope))->assertOk();
+            $this->postJson('/api/v1/incoming-correspondence', $scope)->assertForbidden();
+            $this->assertDatabaseCount('incoming_correspondences', 0);
+        }
         $this->assertDatabaseCount('confidentiality_clearances', 0);
         $this->assertDatabaseCount('document_access_grants', 0);
     }

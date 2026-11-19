@@ -2,6 +2,8 @@
 
 namespace App\Authorization;
 
+use App\Models\Role;
+
 class PermissionCatalog
 {
     public const ADMINISTRATOR_KEYS = ['users.view', 'roles.view', 'roles.manage', 'assignments.view', 'assignments.manage'];
@@ -74,6 +76,16 @@ class PermissionCatalog
     public static function available(string $key): bool
     {
         return self::definitions()[$key]['available'] ?? false;
+    }
+
+    /** @return list<string> */
+    public static function standardRoleDefaults(string $code): array
+    {
+        // The global System Administrator's authority is resolved by AccessControl.
+        // Storing its full effective profile would also change the meaning of scoped assignments.
+        return $code === Role::SYSTEM_ADMINISTRATOR_CODE
+            ? self::ADMINISTRATOR_KEYS
+            : self::recommendations()[$code]['permission_keys'] ?? [];
     }
 
     /** @return array<string, array{permission_keys: list<string>, scope_types: list<string>}> */

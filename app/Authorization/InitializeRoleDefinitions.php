@@ -22,18 +22,18 @@ class InitializeRoleDefinitions
                 ]);
             }
             $templates = [
-                'SECURITY_ADMINISTRATOR' => ['System Administrator', 'ຜູ້ບໍລິຫານລະບົບ'],
-                'DOCUMENT_CONTROLLER' => ['Document Controller', 'ຜູ້ຄວບຄຸມເອກະສານ'],
-                'DEPARTMENT_USER' => ['Department User', 'ຜູ້ໃຊ້ພະແນກ'],
-                'VIEWER' => ['Viewer', 'ຜູ້ເບິ່ງຂໍ້ມູນ'],
+                Role::SYSTEM_ADMINISTRATOR_CODE => ['System Administrator', 'ຜູ້ບໍລິຫານລະບົບ', Role::SYSTEM_ADMINISTRATOR_DESCRIPTION],
+                'DOCUMENT_CONTROLLER' => ['Document Controller', 'ຜູ້ຄວບຄຸມເອກະສານ', 'Manages correspondence and controlled documents within assigned workspaces.'],
+                'DEPARTMENT_USER' => ['Department User', 'ຜູ້ໃຊ້ພະແນກ', 'Prepares drafts and attachments within assigned workspaces.'],
+                'VIEWER' => ['Viewer', 'ຜູ້ເບິ່ງຂໍ້ມູນ', 'Reads and searches authorized documents and reports.'],
             ];
-            foreach ($templates as $code => [$english, $lao]) {
+            foreach ($templates as $code => [$english, $lao, $description]) {
                 $role = Role::query()->firstOrCreate(['code' => $code], [
                     'scope_id' => $scope->id, 'name_en' => $english, 'name_lo' => $lao,
-                    'description' => $code === Role::SYSTEM_ADMINISTRATOR_CODE ? Role::SYSTEM_ADMINISTRATOR_DESCRIPTION : 'Document capabilities remain unavailable until their operations are implemented.',
+                    'description' => $description,
                 ]);
-                if ($role->wasRecentlyCreated && $code === 'SECURITY_ADMINISTRATOR') {
-                    $role->permissions()->sync(Permission::query()->whereIn('key', PermissionCatalog::ADMINISTRATOR_KEYS)->pluck('id')->all());
+                if ($role->wasRecentlyCreated) {
+                    $role->permissions()->sync(Permission::query()->whereIn('key', PermissionCatalog::standardRoleDefaults($code))->where('active', true)->pluck('id')->all());
                 }
             }
         });

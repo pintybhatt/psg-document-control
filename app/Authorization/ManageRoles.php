@@ -24,6 +24,7 @@ class ManageRoles
                 $role->refresh();
                 abort_unless($role->scope_id === $scope->id, 403, 'rbacForbidden');
             }
+            abort_if(in_array($role?->code ?? $data['code'], Role::STANDARD_CODES, true), 403, 'rbacStandardRoleProtected');
             abort_unless($this->access->canManageRole($actor, $role?->code ?? $data['code'], $scope), 403, 'rbacDelegationDenied');
             $this->validateDelegation($actor, $scope, $data['permission_keys']);
             $before = $role ? $this->roleSnapshot($role) : null;

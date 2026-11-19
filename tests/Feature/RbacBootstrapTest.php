@@ -6,6 +6,7 @@ use App\Authorization\AccessControl;
 use App\Authorization\PermissionCatalog;
 use App\Authorization\RbacMutation;
 use App\Models\AuthorizationScope;
+use App\Models\OrganizationMembership;
 use App\Models\Permission;
 use App\Models\RbacAudit;
 use App\Models\Role;
@@ -13,6 +14,7 @@ use App\Models\Site;
 use App\Models\User;
 use App\Models\UserRoleAssignment;
 use Illuminate\Foundation\Testing\LazilyRefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Validation\ValidationException;
 use PHPUnit\Framework\Attributes\TestWith;
 use Tests\Concerns\InteractsWithRbac;
@@ -22,11 +24,54 @@ class RbacBootstrapTest extends TestCase
 {
     use InteractsWithRbac, LazilyRefreshDatabase;
 
+    public function test_standard_grant_report_requires_fresh_approval_and_adds_only_missing_grants(): void
+    {
+        $this->definitions();
+        $role = Role::query()->where('code', 'DOCUMENT_CONTROLLER')->sole();
+        $custom = Role::factory()->create();
+        $site = Site::factory()->create();
+        $scope = AuthorizationScope::context('site', $site->company_id, $site->id)->persist();
+        $user = User::factory()->create();
+        $membership = OrganizationMembership::factory()->for($user)->atSite($site)->create();
+        $customKey = 'incoming.operations.reopen';
+        app(RbacMutation::class)->run(fn () => $role->permissions()->sync(Permission::query()->where('key', $customKey)->pluck('id')->all()));
+
+        $this->assertSame(0, Artisan::call('rbac:standard-grants', ['role' => $role->code, '--no-interaction' => true]));
+        $before = json_decode(Artisan::output(), true, flags: JSON_THROW_ON_ERROR);
+        $this->assertSame([$customKey], array_column($before['current_grants'], 'key'));
+        $this->assertContains('documents.metadata.view', $before['add']);
+        $this->assertDatabaseCount('rbac_audits', 0);
+        $this->assertSame([$customKey], $role->permissions()->pluck('key')->all());
+
+        $assignment = UserRoleAssignment::factory()->create(['user_id' => $user->id, 'role_id' => $role->id, 'scope_id' => $scope->id]);
+        $options = ['role' => $role->code, '--apply' => $before['fingerprint'], '--operator' => 'Test operator'];
+        $this->artisan('rbac:standard-grants', $options)->expectsOutput('The report has changed. Review a new report before applying grants.')->assertFailed();
+        $this->assertSame(0, Artisan::call('rbac:standard-grants', ['role' => $role->code]));
+        $report = json_decode(Artisan::output(), true, flags: JSON_THROW_ON_ERROR);
+        $this->assertSame($user->email, $report['assignments'][0]['user']['email']);
+        $this->assertSame($scope->scope_key, $report['assignments'][0]['scope']);
+        $this->assertTrue($report['assignments'][0]['memberships'][0]['effective']);
+        $this->assertNotContains('documents.metadata.view', app(AccessControl::class)->grantedPermissions($user, $scope));
+
+        $options['--apply'] = $report['fingerprint'];
+        $this->artisan('rbac:standard-grants', $options)->assertSuccessful();
+        $this->artisan('rbac:standard-grants', $options)->expectsOutput('All default grants are already present.')->assertSuccessful();
+        $this->assertEqualsCanonicalizing([...$report['add'], $customKey], $role->permissions()->pluck('key')->all());
+        $this->assertSame([], $custom->permissions()->pluck('key')->all());
+        $this->assertModelExists($user);
+        $this->assertModelExists($membership);
+        $this->assertTrue($assignment->refresh()->active);
+        $this->assertContains('documents.metadata.view', app(AccessControl::class)->grantedPermissions($user, $scope));
+        $this->assertDatabaseCount('rbac_audits', 1);
+        $this->assertDatabaseHas('rbac_audits', ['action' => 'role.standard-grants-applied', 'subject_id' => $role->id]);
+    }
+
     public function test_catalog_and_templates_initialize_repeatably_without_users_or_assignments(): void
     {
         $this->artisan('rbac:initialize')->assertExitCode(0);
         $role = Role::query()->where('code', 'VIEWER')->firstOrFail();
         $role->update(['name_en' => 'Configured name', 'active' => false]);
+        app(RbacMutation::class)->run(fn () => $role->permissions()->sync(Permission::query()->where('key', 'organization.access')->pluck('id')->all()));
 
         $this->artisan('rbac:initialize')->assertExitCode(0);
 
@@ -36,7 +81,7 @@ class RbacBootstrapTest extends TestCase
         $this->assertDatabaseCount('permissions', 46);
         $this->assertDatabaseCount('users', 0);
         $this->assertDatabaseCount('user_role_assignments', 0);
-        $this->assertSame([], Role::query()->where('code', 'DOCUMENT_CONTROLLER')->firstOrFail()->permissions()->pluck('key')->all());
+        $this->assertSame(['organization.access'], $role->permissions()->pluck('key')->all());
         $this->assertFalse(Permission::query()->where('key', 'documents.register')->firstOrFail()->active);
         $this->assertTrue(Permission::query()->where('key', 'incoming.register')->firstOrFail()->active);
         $this->assertTrue(Permission::query()->where('key', 'incoming.drafts.manage')->firstOrFail()->active);

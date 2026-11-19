@@ -32,6 +32,9 @@ class ManageUserOnboarding
             || ! $role->scope->covers($scope)) {
             throw ValidationException::withMessages(['access.role_id' => 'userAccessInvalidRole']);
         }
+        if ($role->isStandard() && ! $role->permissions->where('active', true)->contains('key', 'documents.metadata.view')) {
+            throw ValidationException::withMessages(['access.role_id' => 'userAccessStandardWorkspaceMissing']);
+        }
         if ($membership->department_id !== null && ($role->code === 'DOCUMENT_CONTROLLER'
             || array_intersect(['numbering.issue', 'numbering.view', 'numbering.manage', 'master-data.view', 'master-data.manage'], $role->permissions->pluck('key')->all()) !== [])) {
             throw ValidationException::withMessages(['access.department_id' => 'userAccessSiteRole']);
