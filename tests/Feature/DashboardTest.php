@@ -117,19 +117,21 @@ class DashboardTest extends TestCase
         }
     }
 
-    public function test_company_document_controller_can_create_and_view_site_correspondence(): void
+    public function test_company_document_controller_can_create_and_view_department_correspondence(): void
     {
         [, $site] = $this->workspace();
         $sibling = Site::factory()->for($site->company)->create();
         $user = User::factory()->create();
-        OrganizationMembership::factory()->for($user)->for($site->company)->create();
+        OrganizationMembership::factory()->for($user)->for($site->company)->create(['all_departments' => true]);
         $role = Role::query()->where('code', 'DOCUMENT_CONTROLLER')->sole();
         $scope = AuthorizationScope::context('company', $site->company_id)->persist();
         UserRoleAssignment::factory()->for($user)->for($role)->for($scope, 'scope')->create();
         $this->signIn($user);
 
-        $this->draft($site, 'incoming', 'Company-scoped incoming draft');
-        $this->draft($sibling, 'outgoing', 'Company-scoped outgoing draft');
+        $department = Department::factory()->for($site)->create();
+        $siblingDepartment = Department::factory()->for($sibling)->create();
+        $this->draft($site, 'incoming', 'Company-scoped incoming draft', ['department_id' => $department->id]);
+        $this->draft($sibling, 'outgoing', 'Company-scoped outgoing draft', ['department_id' => $siblingDepartment->id]);
         $this->getJson($this->url($site))->assertOk()->assertJsonPath('totals.incoming', 1);
         $this->getJson($this->url($sibling))->assertOk()->assertJsonPath('totals.outgoing', 1);
     }

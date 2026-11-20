@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Validation\ValidationException;
 
-#[Fillable(['user_id', 'membership_type', 'company_id', 'site_id', 'department_id', 'active'])]
+#[Fillable(['user_id', 'membership_type', 'company_id', 'site_id', 'department_id', 'active', 'all_departments'])]
 class OrganizationMembership extends Model
 {
     /** @use HasFactory<OrganizationMembershipFactory> */
@@ -69,6 +69,6 @@ class OrganizationMembership extends Model
     /** @return array<string, string> */
     protected function casts(): array
     {
-        return ['active' => 'boolean', 'revoked_at' => 'datetime', 'company_id' => 'integer', 'site_id' => 'integer', 'department_id' => 'integer'];
+        return ['active' => 'boolean', 'all_departments' => 'boolean', 'revoked_at' => 'datetime', 'company_id' => 'integer', 'site_id' => 'integer', 'department_id' => 'integer'];
     }
 }

@@ -86,7 +86,7 @@ class UserManagementController extends Controller
         $units = $target->memberships()->whereNull('revoked_at')->with(['company', 'site', 'department'])->get()->map(function (OrganizationMembership $membership) use ($request, $access, $memberships): array {
             $scope = $membership->authorizationScope();
 
-            return $membership->only(['id', 'active']) + [
+            return $membership->only(['id', 'active', 'all_departments']) + [
                 'effective' => $memberships->effective($membership),
                 'company' => $membership->company->only(['name_en', 'name_lo']), 'site' => $membership->site?->only(['name_en', 'name_lo']),
                 'department' => $membership->department?->only(['name_en', 'name_lo']),
@@ -118,10 +118,13 @@ class UserManagementController extends Controller
             $request->merge(['email' => Str::lower(trim($request->input('email')))]);
         }
         $rules = [
-            'access' => ['sometimes', 'array:company_id,site_id,department_id,role_id,confirm_regrant', 'required_array_keys:company_id,site_id,role_id'],
+            'access' => ['sometimes', 'array:company_id,site_id,department_id,department_access,department_ids,role_id,confirm_regrant', 'required_array_keys:company_id,site_id,role_id'],
             'access.company_id' => ['required_with:access', 'integer', 'min:1'],
             'access.site_id' => ['nullable', 'integer', 'min:1'],
             'access.department_id' => ['sometimes', 'nullable', 'integer', 'min:1'],
+            'access.department_access' => ['sometimes', Rule::in(['all', 'selected', 'site_wide']), 'prohibits:access.department_id'],
+            'access.department_ids' => ['required_if:access.department_access,selected', 'prohibited_unless:access.department_access,selected', 'array', 'list'],
+            'access.department_ids.*' => ['integer', 'min:1', 'distinct'],
             'access.role_id' => ['required_with:access', 'integer', 'min:1'],
             'access.confirm_regrant' => ['sometimes', 'boolean'],
             'name' => [$user ? 'sometimes' : 'required', 'string', 'max:255'],
@@ -136,7 +139,7 @@ class UserManagementController extends Controller
         ];
         $messages = [];
         foreach (['access', 'access.*'] as $attribute) {
-            foreach (['array', 'required_array_keys', 'required_with', 'integer', 'min', 'boolean'] as $rule) {
+            foreach (['array', 'required_array_keys', 'required_with', 'required_if', 'integer', 'min', 'boolean', 'in', 'list', 'distinct', 'prohibits', 'prohibited_unless'] as $rule) {
                 $messages[$attribute.'.'.$rule] = 'userAccessInvalid';
             }
         }
