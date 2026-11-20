@@ -18,7 +18,7 @@ class MembershipAccess
         $valid = match ($membership->membership_type) {
             'company' => $membership->site_id === null && $membership->department_id === null,
             'site' => $membership->site_id !== null && $membership->department_id === null,
-            'department' => $membership->site_id !== null && $membership->department_id !== null,
+            'department' => $membership->site_id !== null && $membership->department_id !== null && ! $membership->all_departments,
             default => false,
         };
         if (! $valid || ! Company::query()->whereKey($membership->company_id)->exists()
@@ -48,8 +48,7 @@ class MembershipAccess
         if ($scope->scope_type === 'global' || ! $scope->isActive()) {
             return false;
         }
-        if ($departmentId !== null && ($scope->scope_type !== 'site' || ! Department::query()->whereKey($departmentId)
-            ->where('company_id', $scope->company_id)->where('site_id', $scope->site_id)->where('active', true)->exists())) {
+        if ($departmentId !== null && ! $this->activeDepartment($scope, $departmentId)) {
             return false;
         }
 
@@ -58,24 +57,34 @@ class MembershipAccess
 
     public function matchesWorkspace(User $user, AuthorizationScope $scope, ?int $departmentId = null): bool
     {
-        if ($scope->scope_type !== 'site' || $departmentId !== null) {
+        if ($scope->scope_type !== 'site') {
             return $this->matches($user, $scope, $departmentId);
         }
 
-        return $scope->isActive() && $this->effectiveWorkspaceQuery($scope->company_id, $scope->site_id)->where('user_id', $user->id)->exists();
+        return $scope->isActive() && ($departmentId === null || $this->activeDepartment($scope, $departmentId))
+            && $this->effectiveWorkspaceQuery($scope->company_id, $scope->site_id, $departmentId)->where('user_id', $user->id)->exists();
+    }
+
+    private function activeDepartment(AuthorizationScope $scope, int $departmentId): bool
+    {
+        return $scope->scope_type === 'site' && Department::query()->whereKey($departmentId)
+            ->where('company_id', $scope->company_id)->where('site_id', $scope->site_id)->where('active', true)->exists();
     }
 
     /** @return Builder<OrganizationMembership> */
     public function effectiveWorkspaceQuery(int $companyId, int $siteId, ?int $departmentId = null): Builder
     {
-        if ($departmentId !== null) {
-            return $this->effectiveUnitQuery($companyId, $siteId, $departmentId);
-        }
-
-        return $this->effectiveQuery()->where('company_id', $companyId)->whereNull('department_id')
-            ->where(fn (Builder $query): Builder => $query
-                ->where(fn (Builder $site): Builder => $site->where('membership_type', 'site')->where('site_id', $siteId))
-                ->orWhere(fn (Builder $company): Builder => $company->where('membership_type', 'company')->whereNull('site_id')));
+        return $this->effectiveQuery()->where('company_id', $companyId)->where(function (Builder $query) use ($siteId, $departmentId): void {
+            $query->where(fn (Builder $wide): Builder => $wide->whereNull('department_id')
+                ->when($departmentId !== null, fn (Builder $wide): Builder => $wide->where('all_departments', true))
+                ->where(fn (Builder $wide): Builder => $wide
+                    ->where(fn (Builder $site): Builder => $site->where('membership_type', 'site')->where('site_id', $siteId))
+                    ->orWhere(fn (Builder $company): Builder => $company->where('membership_type', 'company')->whereNull('site_id'))));
+            if ($departmentId !== null) {
+                $query->orWhere(fn (Builder $department): Builder => $department->where('membership_type', 'department')
+                    ->where('site_id', $siteId)->where('department_id', $departmentId));
+            }
+        });
     }
 
     /** @return Builder<OrganizationMembership> */

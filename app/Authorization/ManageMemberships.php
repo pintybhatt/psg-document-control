@@ -12,7 +12,7 @@ class ManageMemberships
 {
     public function __construct(private AccessControl $access, private MembershipAccess $memberships, private RbacMutation $mutation) {}
 
-    /** @param array{user_id: int, unit_type: string, unit_company_id: int, unit_site_id?: ?int, unit_department_id?: ?int, confirm_regrant?: bool} $data */
+    /** @param array{user_id: int, unit_type: string, unit_company_id: int, unit_site_id?: ?int, unit_department_id?: ?int, confirm_regrant?: bool, all_departments?: bool} $data */
     public function assign(User $actor, AuthorizationScope $scope, array $data): OrganizationMembership
     {
         return $this->mutation->run(function () use ($actor, $scope, $data): OrganizationMembership {
@@ -23,6 +23,7 @@ class ManageMemberships
             $membership = new OrganizationMembership([
                 'user_id' => $data['user_id'], 'membership_type' => $data['unit_type'], 'company_id' => $data['unit_company_id'],
                 'site_id' => $data['unit_site_id'] ?? null, 'department_id' => $data['unit_department_id'] ?? null, 'active' => true,
+                'all_departments' => $data['all_departments'] ?? false,
             ]);
             $this->memberships->validateUnit($membership);
             abort_unless($scope->covers($membership->authorizationScope()), 403, 'rbacForbidden');
@@ -43,17 +44,18 @@ class ManageMemberships
         });
     }
 
-    public function update(User $actor, AuthorizationScope $scope, OrganizationMembership $membership, bool $active): OrganizationMembership
+    public function update(User $actor, AuthorizationScope $scope, OrganizationMembership $membership, bool $active, ?bool $allDepartments = null): OrganizationMembership
     {
-        return $this->mutation->run(function () use ($actor, $scope, $membership, $active): OrganizationMembership {
+        return $this->mutation->run(function () use ($actor, $scope, $membership, $active, $allDepartments): OrganizationMembership {
             $this->authorizeChange($actor, $scope, $membership);
             if ($active) {
                 $this->requireActiveUnit($membership);
                 abort_unless(User::query()->whereKey($membership->user_id)->where('active', true)->exists(), 403, 'rbacInactiveTarget');
             }
-            if ($membership->active !== $active) {
+            if ($membership->active !== $active || ($allDepartments !== null && $membership->all_departments !== $allDepartments)) {
                 $before = $membership->getAttributes();
                 $membership->active = $active;
+                $membership->all_departments = $allDepartments ?? $membership->all_departments;
                 $membership->updated_by = $actor->id;
                 $membership->save();
                 $this->audit($actor, $membership->refresh(), 'updated', $before);

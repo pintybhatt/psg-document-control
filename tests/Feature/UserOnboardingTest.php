@@ -124,6 +124,7 @@ class UserOnboardingTest extends TestCase
     #[TestWith(['company', 'VIEWER'])]
     #[TestWith(['company', 'DOCUMENT_CONTROLLER'])]
     #[TestWith(['site', 'VIEWER'])]
+    #[TestWith(['site', 'DOCUMENT_CONTROLLER'])]
     public function test_onboarding_provides_workspaces_at_the_selected_access_scope(string $assignmentType, string $roleCode): void
     {
         $administrator = $this->administrator();
@@ -132,10 +133,12 @@ class UserOnboardingTest extends TestCase
         Site::factory()->for($site->company)->create(['active' => false]);
         $foreign = Site::factory()->create();
         $department = Department::factory()->for($site)->create();
+        $siblingDepartment = Department::factory()->for($sibling)->create();
         $role = Role::query()->where('code', $roleCode)->sole();
         $data = $this->account($site, $role);
         $companyLevel = $assignmentType === 'company';
         $data['access']['site_id'] = $companyLevel ? null : $site->id;
+        $data['access']['department_access'] = 'all';
         $user = User::query()->findOrFail($this->postJson('/api/v1/user-management', $data)->assertCreated()->json('data.id'));
         $membership = $user->memberships()->sole();
         $this->assertSame($assignmentType, $membership->membership_type);
@@ -143,19 +146,91 @@ class UserOnboardingTest extends TestCase
         $this->assertSame($membership->authorizationScope()->scope_key, $user->roleAssignments()->sole()->scope->scope_key);
 
         $this->signIn($user);
+        $expected = [$site->id.':site', $site->id.':'.$department->id];
+        if ($companyLevel) {
+            $expected[] = $sibling->id.':site';
+            $expected[] = $sibling->id.':'.$siblingDepartment->id;
+        }
         foreach (['incoming-correspondence', 'outgoing-correspondence', 'controlled-documents'] as $module) {
             $contexts = $this->getJson('/api/v1/'.$module.'/contexts')->assertOk();
-            $this->assertEqualsCanonicalizing($companyLevel ? [$site->id, $sibling->id] : [$site->id], $contexts->json('data.*.site_id'));
+            $this->assertEqualsCanonicalizing($expected, $contexts->json('data.*.key'));
             $this->getJson('/api/v1/'.$module.'?'.http_build_query(['company_id' => $site->company_id, 'site_id' => $site->id]))->assertOk();
         }
         $siblingQuery = http_build_query(['company_id' => $sibling->company_id, 'site_id' => $sibling->id]);
         $this->getJson('/api/v1/dashboard?'.$siblingQuery)->assertStatus($companyLevel ? 200 : 403);
         $this->getJson('/api/v1/dashboard?'.http_build_query(['company_id' => $foreign->company_id, 'site_id' => $foreign->id]))->assertForbidden();
-        $this->getJson('/api/v1/incoming-correspondence?'.http_build_query(['company_id' => $site->company_id, 'site_id' => $site->id, 'department_id' => $department->id]))->assertForbidden();
+        $this->getJson('/api/v1/incoming-correspondence?'.http_build_query(['company_id' => $site->company_id, 'site_id' => $site->id, 'department_id' => $department->id]))
+            ->assertOk();
 
         app(ManageMemberships::class)->revoke($administrator, $membership->authorizationScope(), $membership);
         $this->getJson('/api/v1/incoming-correspondence/contexts')->assertOk()->assertExactJson(['data' => []]);
         $this->getJson('/api/v1/dashboard?'.http_build_query(['company_id' => $site->company_id, 'site_id' => $site->id]))->assertForbidden();
+    }
+
+    #[TestWith([true])]
+    #[TestWith([false])]
+    public function test_selected_access_assigns_only_the_chosen_departments(bool $companyLevel): void
+    {
+        $this->administrator();
+        $site = Site::factory()->create();
+        $otherSite = $companyLevel ? Site::factory()->for($site->company)->create() : $site;
+        $first = Department::factory()->for($site)->create();
+        $second = Department::factory()->for($otherSite)->create();
+        $unselected = Department::factory()->for($site)->create();
+        $outside = $companyLevel ? Department::factory()->create() : Department::factory()->for(Site::factory()->for($site->company)->create())->create();
+        $inactive = Department::factory()->for($site)->create(['active' => false]);
+        $data = $this->account($site, Role::query()->where('code', 'DEPARTMENT_USER')->sole());
+        $data['access']['site_id'] = $companyLevel ? null : $site->id;
+        $data['access']['department_access'] = 'selected';
+        foreach ([$outside, $inactive] as $unavailable) {
+            $data['access']['department_ids'] = [$first->id, $unavailable->id];
+            $this->postJson('/api/v1/user-management', $data)->assertUnprocessable()->assertJsonValidationErrors('access.department_ids');
+            $this->assertDatabaseCount('organization_memberships', 0);
+        }
+        $data['access']['department_ids'] = [$first->id, $second->id];
+        $user = User::query()->findOrFail($this->postJson('/api/v1/user-management', $data)->assertCreated()->json('data.id'));
+        $this->assertEqualsCanonicalizing([$first->id, $second->id], $user->memberships()->pluck('department_id')->all());
+        $this->assertSame($data['access']['site_id'], $user->roleAssignments()->sole()->scope->site_id);
+
+        $this->signIn($user);
+        foreach (['incoming-correspondence', 'outgoing-correspondence', 'controlled-documents'] as $module) {
+            $contexts = $this->getJson('/api/v1/'.$module.'/contexts')->assertOk();
+            $this->assertEqualsCanonicalizing([$first->id, $second->id], $contexts->json('data.*.department_id'));
+            $this->getJson('/api/v1/'.$module.'?'.http_build_query($unselected->only(['company_id', 'site_id']) + ['department_id' => $unselected->id]))->assertForbidden();
+            $this->getJson('/api/v1/'.$module.'?'.http_build_query($unselected->only(['company_id', 'site_id'])))->assertForbidden();
+        }
+    }
+
+    public function test_edit_changes_coverage_explicitly_without_recreating_memberships_or_assignments(): void
+    {
+        $administrator = $this->administrator();
+        $site = Site::factory()->create();
+        $department = Department::factory()->for($site)->create();
+        $data = $this->account($site, Role::query()->where('code', 'DOCUMENT_CONTROLLER')->sole());
+        $user = User::query()->findOrFail($this->postJson('/api/v1/user-management', $data)->assertCreated()->json('data.id'));
+        $membership = $user->memberships()->sole();
+        $assignments = $user->roleAssignments()->pluck('id')->all();
+        $this->assertFalse($membership->all_departments);
+
+        $access = $data['access'];
+        $this->patchJson('/api/v1/user-management/'.$user->id, ['access' => $access + [
+            'department_access' => 'selected', 'department_ids' => [$department->id],
+        ]])->assertUnprocessable()->assertJsonValidationErrors('access.department_access');
+
+        foreach (['all' => true, 'site_wide' => false] as $mode => $allDepartments) {
+            $this->signIn($administrator);
+            $this->patchJson('/api/v1/user-management/'.$user->id, ['access' => $access + ['department_access' => $mode]])->assertOk();
+            $this->getJson('/api/v1/user-management/'.$user->id.'/access')->assertOk()->assertJsonPath('memberships.0.all_departments', $allDepartments);
+            $this->assertSame($membership->id, $user->memberships()->sole()->id);
+            $this->assertSame($assignments, $user->roleAssignments()->pluck('id')->all());
+
+            $this->signIn($user);
+            $query = http_build_query($department->only(['company_id', 'site_id']) + ['department_id' => $department->id]);
+            foreach (['incoming-correspondence', 'outgoing-correspondence', 'controlled-documents'] as $module) {
+                $this->getJson('/api/v1/'.$module.'?'.$query)->assertStatus($allDepartments ? 200 : 403);
+            }
+        }
+        $this->assertSame(2, MembershipAudit::query()->where('membership_id', $membership->id)->where('action', 'updated')->count());
     }
 
     #[TestWith(['company'])]

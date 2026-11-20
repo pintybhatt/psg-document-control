@@ -26,15 +26,17 @@ const editor = ref(null);
 const error = ref('');
 const fields = ref({});
 const form = reactive({ name: '', email: '', preferred_language: 'en', password: '', password_confirmation: '', active: true });
-const accessForm = reactive({ company_id: '', site_id: '', department_id: '', role_id: '', confirm_regrant: false });
+const accessForm = reactive({ company_id: '', site_id: '', department_access: '', department_ids: [], role_id: '', confirm_regrant: false });
 const companies = ref([]);
 const sites = ref([]);
 const departments = ref([]);
 const roles = ref(null);
 const companyOnly = 'company';
 const hasSite = computed(() => !!accessForm.site_id && accessForm.site_id !== companyOnly);
-const eligibleRoles = computed(() => (roles.value ?? []).filter(role => !accessForm.department_id || (role.code !== 'DOCUMENT_CONTROLLER'
-    && !role.permission_keys.some(key => ['numbering.issue', 'numbering.view', 'numbering.manage', 'master-data.view', 'master-data.manage'].includes(key)))));
+const eligibleRoles = computed(() => roles.value ?? []);
+const departmentModes = { all: 'userAccessAllDepartments', selected: 'userAccessSelectedDepartments', site_wide: 'userAccessSiteWideDocuments' };
+const departmentModeOptions = computed(() => Object.entries(departmentModes).map(([value, key]) => ({ value, label: t(key) })));
+const needsDepartments = computed(() => accessForm.department_access === 'selected' && !accessForm.department_ids.length);
 const existingAccess = ref({ memberships: [], assignments: [] });
 const accessLoading = ref(false);
 const loadingOptions = reactive({ companies: false, sites: false, scope: false });
@@ -58,7 +60,7 @@ const workspaceWarning = computed(() => {
     if (missingWorkspaceGrant.value) {
         return selectedRole.value.standard ? 'userAccessStandardWorkspaceMissing' : 'userAccessCustomWorkspaceMissing';
     }
-    return selectedRole.value && !hasSite.value ? 'userAccessCompanyWorkspace' : '';
+    return '';
 });
 const accessLocation = row => row.scope_key === 'global' ? t('rbacGlobal') : [label(row.company), label(row.site), label(row.department)].filter(Boolean).join(' / ');
 const accessLabel = row => [label(row.role), accessLocation(row)].filter(Boolean).join(' · ');
@@ -76,9 +78,17 @@ let editorController;
 let siteController;
 let scopeController;
 
-watch(() => accessForm.department_id, () => {
-    if (!eligibleRoles.value.some(role => String(role.id) === String(accessForm.role_id))) { accessForm.role_id = ''; }
+watch(selectedRole, role => {
+    const defaults = { DOCUMENT_CONTROLLER: 'all', VIEWER: 'all', DEPARTMENT_USER: 'selected' };
+    accessForm.department_access = role ? defaults[role.code] ?? 'site_wide' : '';
+    accessForm.department_ids = [];
 });
+
+function toggleDepartment(id, selected) {
+    accessForm.department_ids = selected
+        ? [...accessForm.department_ids, id]
+        : accessForm.department_ids.filter(departmentId => departmentId !== id);
+}
 
 function handleError(exception) {
     if (exception.name === 'AbortError') { return; }
@@ -119,7 +129,7 @@ watch(() => accessForm.company_id, async companyId => {
     siteController?.abort(); scopeController?.abort();
     siteController = new AbortController();
     const signal = siteController.signal;
-    accessForm.site_id = ''; accessForm.department_id = ''; accessForm.role_id = '';
+    accessForm.site_id = ''; accessForm.role_id = '';
     sites.value = []; departments.value = []; roles.value = null; loadingOptions.sites = false; loadingOptions.scope = false;
     if (!companyId) { return; }
     loadingOptions.sites = true;
@@ -133,7 +143,7 @@ watch(() => accessForm.company_id, async companyId => {
 watch(() => accessForm.site_id, async siteId => {
     scopeController?.abort(); scopeController = new AbortController();
     const signal = scopeController.signal;
-    accessForm.department_id = ''; accessForm.role_id = '';
+    accessForm.role_id = '';
     departments.value = []; roles.value = null; loadingOptions.scope = false;
     if (!siteId) { return; }
     loadingOptions.scope = true;
@@ -142,7 +152,7 @@ watch(() => accessForm.site_id, async siteId => {
         : { scope_type: 'company', company_id: accessForm.company_id };
     try {
         const [units, candidates, permissions] = await Promise.all([
-            hasSite.value ? allOptions(props.accessEndpoints.units, { ...scope, unit_type: 'department' }, signal) : [],
+            allOptions(props.accessEndpoints.units, { ...scope, unit_type: 'department' }, signal),
             allOptions(props.accessEndpoints.roles, scope, signal),
             request(`${props.accessEndpoints.permissions}?${new URLSearchParams(scope)}`, { signal }),
         ]);
@@ -170,7 +180,7 @@ async function open(user = null) {
     editorController = new AbortController();
     const signal = editorController.signal;
     editing.value = user ?? { id: null };
-    Object.assign(accessForm, { company_id: '', site_id: '', department_id: '', role_id: '', confirm_regrant: false });
+    Object.assign(accessForm, { company_id: '', site_id: '', department_access: '', department_ids: [], role_id: '', confirm_regrant: false });
     existingAccess.value = { memberships: [], assignments: [] };
     companies.value = []; sites.value = []; departments.value = []; roles.value = null;
     accessLoading.value = false; Object.assign(loadingOptions, { companies: false, sites: false, scope: false }); pending.value = null; confirming.value = false;
@@ -190,7 +200,7 @@ async function open(user = null) {
 
 async function save() {
     if (saving.value || optionsLoading.value || accessLoading.value || !editing.value
-        || (accessEnabled.value && accessForm.company_id && (!accessForm.site_id || !accessForm.role_id))) { return; }
+        || (accessEnabled.value && accessForm.company_id && (!accessForm.site_id || !accessForm.role_id || !accessForm.department_access || needsDepartments.value))) { return; }
     saving.value = true;
     error.value = '';
     fields.value = {};
@@ -200,8 +210,9 @@ async function save() {
     if (!updating || form.password) { body.password = form.password; body.password_confirmation = form.password_confirmation; }
     if (accessEnabled.value && accessForm.company_id) {
         body.access = { company_id: Number(accessForm.company_id), site_id: hasSite.value ? Number(accessForm.site_id) : null,
-            department_id: accessForm.department_id ? Number(accessForm.department_id) : null, role_id: accessForm.role_id ? Number(accessForm.role_id) : null,
+            role_id: Number(accessForm.role_id), department_access: accessForm.department_access,
             confirm_regrant: accessForm.confirm_regrant };
+        if (accessForm.department_access === 'selected') { body.access.department_ids = accessForm.department_ids; }
     }
     try {
         await request(updating ? `${props.endpoint}/${editing.value.id}` : props.endpoint, { method: updating ? 'PATCH' : 'POST', body });
@@ -285,6 +296,7 @@ onBeforeUnmount(() => { editorController?.abort(); siteController?.abort(); scop
                                 <div class="min-w-0 wrap-anywhere">
                                     <p class="font-medium">{{ kind === 'memberships' ? accessLocation(row) : label(row.role) }}</p>
                                     <p v-if="kind === 'assignments'" class="text-xs text-slate-600">{{ accessLocation(row) }}</p>
+                                    <p v-else class="text-xs text-slate-600">{{ t(row.department ? departmentModes.selected : row.all_departments ? departmentModes.all : departmentModes.site_wide) }}</p>
                                 </div>
                                 <div class="flex items-center gap-2">
                                     <StatusBadge :status="row.effective ? 'active' : 'inactive'" :label="t(row.effective ? 'rbacActive' : 'rbacInactive')" />
@@ -298,17 +310,29 @@ onBeforeUnmount(() => { editorController?.abort(); siteController?.abort(); scop
             <fieldset v-if="accessEnabled" :disabled="saving || optionsLoading || accessLoading" class="mt-4 grid grid-cols-1 gap-3 rounded-xl border border-slate-200 bg-white p-3 sm:grid-cols-2">
                 <legend class="px-2 font-semibold">{{ t('userAccessAdd') }}</legend>
                 <p class="text-sm text-slate-600 sm:col-span-2">{{ t('userAccessHelp') }}</p>
+                <p v-if="editing.id !== null && accessForm.company_id" class="text-sm text-slate-600 sm:col-span-2">{{ t('userAccessExistingCoverageHelp') }}</p>
                 <SelectInput v-model="accessForm.company_id" :label="t('userAccessCompany')" :options="options(companies, 'userAccessChooseCompany')" :error-key="fields['access.company_id']?.[0]" />
                 <SelectInput v-model="accessForm.site_id" :label="t('userAccessScope')" :options="siteOptions" :disabled="!accessForm.company_id" :required="!!accessForm.company_id" :error-key="fields['access.site_id']?.[0]" />
-                <SelectInput v-model="accessForm.department_id" :label="t('userAccessDepartment')" :options="options(departments, 'userAccessNoDepartment')" :disabled="!hasSite" :error-key="fields['access.department_id']?.[0]" />
                 <SelectInput v-model="accessForm.role_id" :label="t('userAccessRole')" :options="roleOptions" :disabled="!eligibleRoles.length" :required="!!accessForm.company_id" :error-key="fields['access.role_id']?.[0]" />
+                <SelectInput v-if="selectedRole" v-model="accessForm.department_access" :label="t('userAccessDepartmentCoverage')" :options="departmentModeOptions" required :error-key="fields['access.department_access']?.[0]" />
+                <fieldset v-if="selectedRole && accessForm.department_access === 'selected'" class="min-w-0 rounded-lg border border-slate-200 p-3 sm:col-span-2">
+                    <legend class="px-1 text-sm font-medium">{{ t('userAccessChooseDepartments') }}</legend>
+                    <p v-if="!departments.length" class="text-sm text-slate-600">{{ t('userAccessNoDepartments') }}</p>
+                    <div v-else class="grid max-h-48 gap-2 overflow-y-auto p-1 sm:grid-cols-2">
+                        <CheckboxInput v-for="department in departments" :key="department.id"
+                            :label="hasSite ? label(department) : [label(department.site), label(department)].join(' / ')"
+                            :model-value="accessForm.department_ids.includes(department.id)"
+                            @update:model-value="toggleDepartment(department.id, $event)" />
+                    </div>
+                    <p v-if="fields['access.department_ids']" role="alert" class="mt-1 text-sm text-red-700">{{ t(fields['access.department_ids'][0]) }}</p>
+                </fieldset>
                 <p v-if="selectedRole?.description" class="line-clamp-2 text-sm text-slate-600 sm:col-span-2">{{ selectedRole.description }}</p>
                 <p v-if="workspaceWarning" role="status" class="text-sm text-amber-900 sm:col-span-2">{{ t(workspaceWarning) }}</p>
                 <p v-if="roles && !eligibleRoles.length" role="status" class="text-sm text-slate-600 sm:col-span-2">{{ t('userAccessNoRoles') }}</p>
                 <div v-if="editing.id !== null && accessForm.company_id" class="sm:col-span-2"><CheckboxInput v-model="accessForm.confirm_regrant" :label="t('userAccessConfirmRegrant')" /></div>
             </fieldset>
             <p v-if="optionsLoading || accessLoading" role="status" class="mt-3 text-sm">{{ t('uiLoading') }}</p>
-            <div class="sticky -bottom-5 -mx-6 -mb-5 mt-4 flex flex-wrap justify-end gap-2 border-t border-slate-200 bg-white px-6 py-3"><UiButton variant="secondary" :disabled="saving" @click="closeEditor">{{ t('uiCancel') }}</UiButton><UiButton type="submit" :loading="saving" :disabled="optionsLoading || accessLoading || (!!accessForm.company_id && !eligibleRoles.length)">{{ t('userSave') }}</UiButton></div>
+            <div class="sticky -bottom-5 -mx-6 -mb-5 mt-4 flex flex-wrap justify-end gap-2 border-t border-slate-200 bg-white px-6 py-3"><UiButton variant="secondary" :disabled="saving" @click="closeEditor">{{ t('uiCancel') }}</UiButton><UiButton type="submit" :loading="saving" :disabled="optionsLoading || accessLoading || (!!accessForm.company_id && (!eligibleRoles.length || needsDepartments))">{{ t('userSave') }}</UiButton></div>
         </form>
         </FormModal>
         <ConfirmDialog v-if="pending" v-model="confirming" danger :title="t(pending.kind === 'memberships' ? 'membershipRevoke' : 'rbacRevoke')" :message="`${t('userAccessRevokeConfirm')} ${accessLabel(pending)}`" :loading="saving" @confirm="revokeAccess" />

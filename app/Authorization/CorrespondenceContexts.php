@@ -34,20 +34,23 @@ class CorrespondenceContexts
                 continue;
             }
             $siteMemberships = $memberships->where('company_id', $site->company_id)->where('site_id', $site->id);
-            $hasSiteMembership = $siteMemberships->contains(fn (OrganizationMembership $membership): bool => $membership->membership_type === 'site' && $membership->department_id === null);
-            $hasSiteWorkspace = $hasSiteMembership || $companyMemberships->has($site->company_id);
+            $siteMembership = $siteMemberships->firstWhere('membership_type', 'site');
+            $companyMembership = $companyMemberships->get($site->company_id);
+            $hasSiteWorkspace = $siteMembership !== null || $companyMembership !== null;
+            $allDepartments = $siteMembership?->all_departments || $companyMembership?->all_departments;
             foreach ([null, ...$site->departments->all()] as $department) {
                 if (array_key_exists('all_departments', $filters) && empty($filters['all_departments'])
                     && $department?->id !== (isset($filters['department_id']) ? (int) $filters['department_id'] : null)) {
                     continue;
                 }
-                $hasMembership = $department === null ? $hasSiteWorkspace : $siteMemberships->contains(fn (OrganizationMembership $membership): bool => $membership->membership_type === 'department' && $membership->department_id === $department->id);
-                if (! $isSystemAdministrator && ! $hasMembership) {
+                $hasExactMembership = $department === null ? $siteMembership !== null : $siteMemberships->contains(fn (OrganizationMembership $membership): bool => $membership->membership_type === 'department' && $membership->department_id === $department->id);
+                $hasWorkspace = $department === null ? $hasSiteWorkspace : $allDepartments || $hasExactMembership;
+                if (! $isSystemAdministrator && ! $hasWorkspace) {
                     continue;
                 }
                 $permissions = array_values(array_filter($granted, fn (string $key): bool => ! PermissionCatalog::requiresDocument($key)
                     && ($isSystemAdministrator || (PermissionCatalog::administrative($key) ? $department === null
-                        : $department !== null || $hasSiteMembership || PermissionCatalog::acceptsCompanyWorkspaceMembership($key)))));
+                        : $hasExactMembership || PermissionCatalog::acceptsCompanyWorkspaceMembership($key)))));
                 if (! $isSystemAdministrator && ! $hasSiteWorkspace) {
                     $permissions = array_values(array_diff($permissions, ['numbering.issue']));
                 }

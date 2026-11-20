@@ -95,6 +95,77 @@ class OutgoingCorrespondenceTest extends TestCase
         $this->assertContains('recipients', OutgoingCorrespondenceAudit::query()->latest('id')->first()->changed_fields);
     }
 
+    public function test_site_document_controller_can_create_in_an_active_department_and_cannot_use_a_foreign_scope(): void
+    {
+        [$actor, $scope, , $type] = $this->fixture([]);
+        $actor->memberships()->sole()->update(['all_departments' => true]);
+        $department = Department::factory()->for($scope->site)->create();
+        $inactive = Department::factory()->for($scope->site)->create(['active' => false]);
+        $sibling = Site::factory()->for($scope->company)->create();
+        $otherDepartment = Department::factory()->for($sibling)->create();
+        $foreignDepartment = Department::factory()->create();
+        $role = Role::query()->where('code', Role::DOCUMENT_CONTROLLER_CODE)->sole();
+        UserRoleAssignment::factory()->for($actor)->for($role)->for($scope, 'scope')->create();
+        $body = $this->payload($scope, $type);
+
+        $this->postJson('/api/v1/outgoing-correspondence', $body + ['department_id' => $inactive->id])->assertForbidden();
+        $this->postJson('/api/v1/outgoing-correspondence', $body + ['department_id' => $otherDepartment->id])->assertUnprocessable();
+        $this->postJson('/api/v1/outgoing-correspondence', array_replace($body, ['site_id' => $sibling->id, 'department_id' => $otherDepartment->id]))->assertForbidden();
+        $this->postJson('/api/v1/outgoing-correspondence', array_replace($body, $foreignDepartment->only(['company_id', 'site_id']) + ['department_id' => $foreignDepartment->id]))->assertForbidden();
+        $this->assertDatabaseCount('outgoing_correspondences', 0);
+
+        $id = $this->postJson('/api/v1/outgoing-correspondence', $body + ['department_id' => $department->id])->assertCreated()->json('data.id');
+        $protected = OutgoingCorrespondence::query()->findOrFail($id)->profile;
+        $this->assertSame($department->id, $protected->department_id);
+        $recordUrl = $this->url($scope, '/'.$id).'&department_id='.$department->id;
+        $this->getJson($recordUrl)->assertOk();
+        $protected->update(['restricted' => true]);
+        $this->getJson($recordUrl)->assertNotFound();
+        $patch = $body;
+        unset($patch['classification']);
+        $this->patchJson($recordUrl, $patch + ['department_id' => $department->id])->assertNotFound();
+
+        $confidentialDraft = array_replace($body, ['department_id' => $department->id, 'classification' => 'confidential']);
+        $this->postJson('/api/v1/outgoing-correspondence', $confidentialDraft)->assertForbidden();
+        $administrator = User::factory()->create();
+        $administratorRole = Role::query()->where('code', Role::SYSTEM_ADMINISTRATOR_CODE)->sole();
+        UserRoleAssignment::factory()->for($administrator)->for($administratorRole)->for(AuthorizationScope::context('global'), 'scope')->create();
+        $this->signIn($administrator);
+        $confidentialId = $this->postJson('/api/v1/outgoing-correspondence', $confidentialDraft)->assertCreated()->json('data.id');
+        $this->signIn($actor);
+        $confidential = OutgoingCorrespondence::query()->findOrFail($confidentialId)->profile;
+        $confidentialUrl = $this->url($scope, '/'.$confidentialId).'&department_id='.$department->id;
+        $this->getJson($confidentialUrl)->assertNotFound();
+        ConfidentialityClearance::factory()->forProfile($confidential)->create(['user_id' => $actor->id, 'department_id' => null]);
+        $this->getJson($confidentialUrl)->assertNotFound();
+        ConfidentialityClearance::factory()->forProfile($confidential)->create(['user_id' => $actor->id]);
+        $this->getJson($confidentialUrl)->assertOk();
+    }
+
+    public function test_department_only_document_controller_and_viewer_are_limited_by_membership_and_permissions(): void
+    {
+        [, $scope, , $type] = $this->fixture([]);
+        $department = Department::factory()->for($scope->site)->create();
+        $sibling = Department::factory()->for($scope->site)->create();
+        $controller = User::factory()->create();
+        OrganizationMembership::factory()->for($controller)->inDepartment($department)->create();
+        $role = Role::query()->where('code', Role::DOCUMENT_CONTROLLER_CODE)->sole();
+        UserRoleAssignment::factory()->for($controller)->for($role)->for($scope, 'scope')->create();
+        $this->signIn($controller);
+        $this->getJson('/api/v1/outgoing-correspondence/contexts')->assertOk()->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.department_id', $department->id);
+        $this->postJson('/api/v1/outgoing-correspondence', $this->payload($scope, $type) + ['department_id' => $sibling->id])->assertForbidden();
+        $id = $this->postJson('/api/v1/outgoing-correspondence', $this->payload($scope, $type) + ['department_id' => $department->id])->assertCreated()->json('data.id');
+
+        $viewer = User::factory()->create();
+        OrganizationMembership::factory()->for($viewer)->atSite($scope->site)->create(['all_departments' => true]);
+        $viewerRole = Role::query()->where('code', 'VIEWER')->sole();
+        UserRoleAssignment::factory()->for($viewer)->for($viewerRole)->for($scope, 'scope')->create();
+        $this->signIn($viewer);
+        $this->getJson($this->url($scope, '/'.$id).'&department_id='.$department->id)->assertOk();
+        $this->postJson('/api/v1/outgoing-correspondence', $this->payload($scope, $type) + ['department_id' => $department->id])->assertForbidden();
+    }
+
     public function test_registration_issues_two_distinct_numbers_atomically_and_protects_identity_recipients_and_history(): void
     {
         [$actor, $scope, , $type] = $this->fixture();

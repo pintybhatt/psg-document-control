@@ -94,6 +94,20 @@ class ControlledDocumentsTest extends TestCase
         $this->postJson($this->url(), array_replace($this->payload(), ['custodian_id' => $outsider->id]))->assertUnprocessable()->assertJsonValidationErrors('custodian_id');
     }
 
+    public function test_site_document_controller_can_create_a_department_draft_with_a_valid_custodian(): void
+    {
+        $this->fixture();
+        $this->actor->memberships()->sole()->update(['all_departments' => true]);
+        $department = Department::factory()->for($this->scope->site)->create();
+        $role = Role::query()->where('code', Role::DOCUMENT_CONTROLLER_CODE)->sole();
+        UserRoleAssignment::factory()->for($this->actor)->for($role)->for($this->scope, 'scope')->create();
+        $query = '&department_id='.$department->id;
+
+        $this->getJson($this->url('/lookups').$query)->assertOk()->assertJsonPath('default_custodian_id', $this->actor->id);
+        $this->postJson($this->url().$query, $this->payload())->assertCreated()
+            ->assertJsonPath('data.revisions.0.custodian_id', $this->actor->id);
+    }
+
     /** @return array<string, mixed> */
     private function payload(): array
     {

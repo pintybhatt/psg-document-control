@@ -20,7 +20,9 @@ class Role extends Model
 
     public const SYSTEM_ADMINISTRATOR_CODE = 'SECURITY_ADMINISTRATOR';
 
-    public const STANDARD_CODES = [self::SYSTEM_ADMINISTRATOR_CODE, 'DOCUMENT_CONTROLLER', 'DEPARTMENT_USER', 'VIEWER'];
+    public const DOCUMENT_CONTROLLER_CODE = 'DOCUMENT_CONTROLLER';
+
+    public const STANDARD_CODES = [self::SYSTEM_ADMINISTRATOR_CODE, self::DOCUMENT_CONTROLLER_CODE, 'DEPARTMENT_USER', 'VIEWER'];
 
     public const SYSTEM_ADMINISTRATOR_DESCRIPTION = 'An active global assignment grants full system and document access. Scoped assignments use configured permissions.';
 
